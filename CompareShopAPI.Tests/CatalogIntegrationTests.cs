@@ -68,7 +68,7 @@ public sealed class CatalogIntegrationTests
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(MinPrice: 2, MaxPrice: 1), default));
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(MinPrice: -1), default));
 
-            await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection }, timeProvider: FixedClock);
+            await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection }, signing: true, timeProvider: FixedClock);
             var client = app.CreateClient();
             Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/api/v1/categories")).StatusCode);
             var response = await client.GetAsync("/api/v1/products?page=1&pageSize=5&categoryId=1&minPrice=1000000&maxPrice=2000000&shopId=1");
@@ -84,6 +84,31 @@ public sealed class CatalogIntegrationTests
             Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.GetAsync("/api/v1/products/2147483647/offers")).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/api/v1/shops/north-shop")).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.GetAsync("/api/v1/shops/missing")).StatusCode);
+
+            Assert.Equal(System.Net.HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/wishlist")).StatusCode);
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token(subject: "regular-user-a"));
+            Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await client.PostAsync("/api/v1/wishlist", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, operation = "merge" }))).StatusCode);
+            var wishlistMutation = System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, operation = "add" });
+            Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", wishlistMutation)).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, operation = "add" }))).StatusCode);
+            using var wishlist = System.Text.Json.JsonDocument.Parse(await (await client.GetAsync("/api/v1/wishlist")).Content.ReadAsStringAsync());
+            Assert.Single(wishlist.RootElement.GetProperty("items").EnumerateArray());
+
+            var createAlert = await client.PostAsync("/api/v1/price-alerts", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, targetPrice = 999_000 }));
+            Assert.Equal(System.Net.HttpStatusCode.Created, createAlert.StatusCode);
+            using var alertJson = System.Text.Json.JsonDocument.Parse(await createAlert.Content.ReadAsStringAsync());
+            var alertId = alertJson.RootElement.GetProperty("id").GetInt32();
+            Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await client.PostAsync("/api/v1/price-alerts", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, targetPrice = 0 }))).StatusCode);
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token(subject: "regular-user-b"));
+            using var isolatedAlerts = System.Text.Json.JsonDocument.Parse(await (await client.GetAsync("/api/v1/price-alerts")).Content.ReadAsStringAsync());
+            Assert.Empty(isolatedAlerts.RootElement.GetProperty("items").EnumerateArray());
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.DeleteAsync($"/api/v1/price-alerts/{alertId}")).StatusCode);
+            using var isolatedWishlist = System.Text.Json.JsonDocument.Parse(await (await client.GetAsync("/api/v1/wishlist")).Content.ReadAsStringAsync());
+            Assert.Empty(isolatedWishlist.RootElement.GetProperty("items").EnumerateArray());
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token(subject: "regular-user-a"));
+            Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/price-alerts/{alertId}")).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, operation = "remove" }))).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.PostAsync("/api/v1/price-alerts", System.Net.Http.Json.JsonContent.Create(new { productId = int.MaxValue, targetPrice = 100 }))).StatusCode);
         }
         finally
         {

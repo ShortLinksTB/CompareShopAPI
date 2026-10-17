@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace CompareShopAPI.Infrastructure.Persistence.Migrations;
 
 [DbContext(typeof(CompareShopDbContext))]
-[Migration("20261017150000_AddAffiliateTracking")]
+[Migration("20261017160000_AddAffiliateTracking")]
 public sealed class AddAffiliateTracking : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)

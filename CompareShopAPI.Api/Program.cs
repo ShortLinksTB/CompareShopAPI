@@ -22,6 +22,7 @@ builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlSer
     builder.Configuration.GetConnectionString("CompareShopDb") ?? "", sql => sql.CommandTimeout(5)));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ICatalogQueries, EfCatalogQueries>();
+builder.Services.AddScoped<IPriceHistoryStore, EfPriceHistoryStore>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddScoped<IAffiliateRedirectRepository, EfAffiliateRedirectRepository>();
 builder.Services.AddScoped<AffiliateRedirectService>();
@@ -37,6 +38,7 @@ builder.Services.AddScoped<IUserProvisioning, EfUserProvisioning>();
 builder.Services.AddScoped<IUserCommerceRepository, EfUserCommerceRepository>();
 builder.Services.AddScoped<WishlistService>();
 builder.Services.AddScoped<PriceAlertService>();
+builder.Services.AddScoped<PriceHistoryService>();
 builder.Services.AddSingleton<MigrationState>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("database", tags: ["ready"]);
 builder.Services.AddCors(options => options.AddPolicy("UiClients", policy =>

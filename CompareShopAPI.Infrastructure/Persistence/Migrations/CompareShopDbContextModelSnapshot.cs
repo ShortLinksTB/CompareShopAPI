@@ -87,6 +87,35 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.ToTable("PartnerShops");
                 });
 
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.PriceHistoryPoint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("DateUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("MinPriceVnd")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PartnerShopId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PartnerShopId");
+
+                    b.HasIndex("ProductId", "DateUtc");
+
+                    b.ToTable("PriceHistoryPoints");
+                });
+
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.Product", b =>
                 {
                     b.Property<int>("Id")
@@ -342,6 +371,24 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("WishlistItems");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.PriceHistoryPoint", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.PartnerShop", "PartnerShop")
+                        .WithMany()
+                        .HasForeignKey("PartnerShopId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CompareShopAPI.Domain.Catalog.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("PartnerShop");
+
+                    b.Navigation("Product");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.Product", b =>

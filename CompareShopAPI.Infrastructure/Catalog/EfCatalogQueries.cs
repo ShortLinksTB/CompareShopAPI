@@ -4,16 +4,13 @@ using Microsoft.EntityFrameworkCore;
 namespace CompareShopAPI.Infrastructure.Catalog;
 public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock) : ICatalogQueries
 {
-    private IQueryable<CompareShopAPI.Domain.Catalog.ProductOffer> VisibleOffers()
-    {
-        var freshnessCutoff = clock.GetUtcNow().UtcDateTime.AddDays(-CompareShopAPI.Domain.Catalog.CatalogOfferPolicy.FreshnessDays);
-        return db.ProductOffers.AsNoTracking().Where(o => o.IsActive && !o.IsOutlier && o.UpdatedAtUtc >= freshnessCutoff && o.Product.IsActive && o.PartnerShop.IsActive);
-    }
+    private IQueryable<CompareShopAPI.Domain.Catalog.ProductOffer> VisibleOffers() => VisibleCatalogOffers.Query(db, clock);
     private IQueryable<CompareShopAPI.Domain.Catalog.Product> ActiveProducts() => db.Products.AsNoTracking().Where(p => p.IsActive && p.Category.IsActive);
     public async Task<IReadOnlyList<CategoryDto>> Categories(CancellationToken ct) => await db.Categories.AsNoTracking().Where(c => c.IsActive).OrderBy(c => c.Name).ThenBy(c => c.Id).Select(c => new CategoryDto(c.Id, c.Slug, c.Name)).ToListAsync(ct);
     public async Task<PageDto<ProductListDto>> Products(ProductFilter f, CancellationToken ct)
     {
         var products = ActiveProducts();
+        if (!string.IsNullOrWhiteSpace(f.Search)) products = products.Where(p => p.Name.Contains(f.Search));
         if (f.CategoryId.HasValue) products = products.Where(p => p.CategoryId == f.CategoryId);
         if (f.ShopId.HasValue || f.MinPrice.HasValue || f.MaxPrice.HasValue)
         {
@@ -41,4 +38,8 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
         return await VisibleOffers().Where(o => o.ProductId == productId).OrderBy(o => o.PriceVnd).ThenBy(o => o.Id).Select(o => new OfferDto(o.Id, o.PriceVnd, o.Url, o.UpdatedAtUtc, o.PartnerShopId, o.PartnerShop.Slug, o.PartnerShop.Name)).ToListAsync(ct);
     }
     public async Task<ShopDto?> Shop(string slug, CancellationToken ct) => await db.PartnerShops.AsNoTracking().Where(s => s.IsActive && s.Slug == slug).Select(s => new ShopDto(s.Id, s.Slug, s.Name, s.WebsiteUrl)).FirstOrDefaultAsync(ct);
+    public async Task<IReadOnlyList<ProductSuggestionDto>> Suggestions(string query, int limit, CancellationToken ct) =>
+        await ActiveProducts().Where(p => p.Name.Contains(query))
+            .OrderByDescending(p => p.Name.StartsWith(query)).ThenBy(p => p.Name).ThenBy(p => p.Id)
+            .Take(limit).Select(p => new ProductSuggestionDto(p.Id, p.Slug, p.Name)).ToListAsync(ct);
 }

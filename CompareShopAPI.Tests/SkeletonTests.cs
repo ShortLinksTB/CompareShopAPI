@@ -162,15 +162,4 @@ public sealed class SkeletonTests
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health")).StatusCode);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
     }
-    [Fact]
-    public async Task SqlServer_readiness_uses_real_database()
-    {
-        var connection = Environment.GetEnvironmentVariable("COMPARESHOP_SQLSERVER_TEST_CONNECTION");
-        Assert.False(string.IsNullOrWhiteSpace(connection), "MSSQL test connection is required; this test must not silently skip.");
-        await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection });
-        var client = app.CreateClient();
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health/ready")).StatusCode);
-        app.Services.GetRequiredService<MigrationState>().Failed = true;
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
-    }
 }

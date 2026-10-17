@@ -13,6 +13,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<User> Users => Set<User>();
     public DbSet<WishlistItem> WishlistItems => Set<WishlistItem>();
     public DbSet<PriceAlert> PriceAlerts => Set<PriceAlert>();
+    public DbSet<PriceHistoryPoint> PriceHistoryPoints => Set<PriceHistoryPoint>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
@@ -31,7 +32,6 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<SpecificationItem>().HasOne(x => x.Group).WithMany(x => x.Items).HasForeignKey(x => x.SpecificationGroupId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<SpecificationGroup>().Property(x => x.Name).HasMaxLength(200);
         model.Entity<SpecificationItem>().Property(x => x.Name).HasMaxLength(200); model.Entity<SpecificationItem>().Property(x => x.Value).HasMaxLength(1000);
-
         model.Entity<User>().HasKey(x => x.Id);
         model.Entity<User>().HasIndex(x => x.KeycloakSubject).IsUnique();
         model.Entity<User>().Property(x => x.KeycloakSubject).HasMaxLength(200).IsRequired();
@@ -47,5 +47,10 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<PriceAlert>().HasIndex(x => new { x.ProductId, x.IsActive });
         model.Entity<PriceAlert>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<PriceAlert>().HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<PriceHistoryPoint>().HasKey(x => x.Id);
+        model.Entity<PriceHistoryPoint>().Property(x => x.DateUtc).HasColumnType("datetime2");
+        model.Entity<PriceHistoryPoint>().HasIndex(x => new { x.ProductId, x.DateUtc });
+        model.Entity<PriceHistoryPoint>().HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<PriceHistoryPoint>().HasOne(x => x.PartnerShop).WithMany().HasForeignKey(x => x.PartnerShopId).OnDelete(DeleteBehavior.SetNull);
     }
 }

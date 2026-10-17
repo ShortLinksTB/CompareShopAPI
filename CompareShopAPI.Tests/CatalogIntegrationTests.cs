@@ -8,16 +8,15 @@ using Xunit;
 
 namespace CompareShopAPI.Tests;
 
-public sealed class CatalogIntegrationTests
+[Collection(SqlServerTestCollection.Name)]
+public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
 {
     private static readonly TimeProvider FixedClock = new FixedTimeProvider(new DateTimeOffset(2026, 10, 17, 0, 0, 0, TimeSpan.Zero));
 
     [Fact]
     public async Task Migration_guard_rejects_partial_history_table_without_changing_it()
     {
-        var raw = Environment.GetEnvironmentVariable("COMPARESHOP_SQLSERVER_TEST_CONNECTION");
-        Assert.False(string.IsNullOrWhiteSpace(raw), "MSSQL test connection is required; this test must not silently skip.");
-        var connection = new SqlConnectionStringBuilder(raw) { InitialCatalog = $"CompareShopGuardTest_{Guid.NewGuid():N}" }.ConnectionString;
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopGuardTest_{Guid.NewGuid():N}" }.ConnectionString;
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
         try
         {
@@ -41,9 +40,7 @@ public sealed class CatalogIntegrationTests
     [Fact]
     public async Task Migration_seed_and_public_queries_are_idempotent_and_follow_catalog_rules()
     {
-        var raw = Environment.GetEnvironmentVariable("COMPARESHOP_SQLSERVER_TEST_CONNECTION");
-        Assert.False(string.IsNullOrWhiteSpace(raw), "MSSQL test connection is required; this test must not silently skip.");
-        var connection = new SqlConnectionStringBuilder(raw) { InitialCatalog = $"CompareShopTest_{Guid.NewGuid():N}" }.ConnectionString;
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopTest_{Guid.NewGuid():N}" }.ConnectionString;
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
         try
         {

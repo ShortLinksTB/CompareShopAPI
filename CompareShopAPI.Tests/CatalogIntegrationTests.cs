@@ -63,7 +63,12 @@ public sealed class CatalogIntegrationTests
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(MinPrice: 2, MaxPrice: 1), default));
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(MinPrice: -1), default));
 
-            await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection }, timeProvider: FixedClock);
+            await using var app = new ApiFactory(settings: new()
+            {
+                ["ConnectionStrings:CompareShopDb"] = connection,
+                ["CatalogSeed:Enabled"] = "true",
+                ["CatalogSeed:Environment"] = "dev"
+            }, signing: true, timeProvider: FixedClock);
             var client = app.CreateClient();
             Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/api/v1/categories")).StatusCode);
             var response = await client.GetAsync("/api/v1/products?page=1&pageSize=5&categoryId=1&minPrice=1000000&maxPrice=2000000&shopId=1");
@@ -79,6 +84,12 @@ public sealed class CatalogIntegrationTests
             Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.GetAsync("/api/v1/products/2147483647/offers")).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/api/v1/shops/north-shop")).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.GetAsync("/api/v1/shops/missing")).StatusCode);
+
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}"));
+            var seededCounts = (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync());
+            Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/admin/dev/catalog-seed", null)).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/admin/dev/catalog-seed", null)).StatusCode);
+            Assert.Equal(seededCounts, (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync()));
         }
         finally
         {

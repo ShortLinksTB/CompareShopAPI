@@ -53,6 +53,15 @@ app.UseAuthorization();
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapGet("/health", () => Results.Ok(new { status = "ok" }));
+if (builder.Configuration.GetValue<bool>("CatalogSeed:Enabled") &&
+    string.Equals(builder.Configuration["CatalogSeed:Environment"], "dev", StringComparison.Ordinal))
+{
+    app.MapPost("/admin/dev/catalog-seed", async (CompareShopDbContext db, CancellationToken cancellationToken) =>
+    {
+        await CatalogSeed.SeedAsync(db, cancellationToken);
+        return Results.NoContent();
+    }).RequireAuthorization("Admin");
+}
 app.MapGroup("/api/v1").MapCatalogEndpoints();
 if (app.Environment.IsDevelopment())
 {

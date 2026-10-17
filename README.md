@@ -33,7 +33,7 @@ Reference: ShortLinkAPI dev `69ebf93d6e4fa8ea0d833db38cfd1f132e10cc08`, Design S
 
 ## Phase 1 catalog API
 
-Catalog routes are anonymous and read-only. Apply the additive catalog migration only when `Database:ApplyMigrations=true`; startup leaves the flag off by default. Development/test fixture data is explicit: call `CatalogSeed.SeedAsync` against a disposable database. It is never invoked on production startup.
+Catalog routes are anonymous and read-only. Apply the additive catalog migration only when `Database:ApplyMigrations=true`; startup leaves the flag off by default. Fixture data is never created during startup. For an explicit dev population, temporarily set `CatalogSeed__Enabled=true` and `CatalogSeed__Environment=dev` on the dev deployment, then call `POST /admin/dev/catalog-seed` with a valid admin JWT. The route is not registered unless both settings match, and it still requires the `compareshop-admin-ui:admin` role. The operation is deterministic and idempotent; it returns 204 on success. Turn `CatalogSeed__Enabled` off after running it. Production must not use the dev environment marker. Tests can continue to call `CatalogSeed.SeedAsync` directly against a disposable database.
 
 - `GET /api/v1/categories` returns `{ "items": [{ "id": 1, "slug": "phones", "name": "Phones" }] }`.
 - `GET /api/v1/products?page=1&pageSize=20&categoryId=1&minPrice=100000&maxPrice=500000&shopId=2` returns `{ "items": [...], "page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1 }`. All filters are optional; price values are integer VND; page defaults to 1 and pageSize to 20 (maximum 100). Sorting is product name then id. Invalid page/price ranges return 400.

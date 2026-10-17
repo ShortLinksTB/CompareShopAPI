@@ -63,6 +63,20 @@ public sealed class SkeletonTests
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/openapi/v1.json")).StatusCode);
     }
     [Theory]
+    [InlineData(false, "dev", 404)]
+    [InlineData(true, "production", 404)]
+    [InlineData(true, "dev", 401)]
+    public async Task Catalog_seed_route_is_opt_in_for_dev_and_requires_admin(bool enabled, string target, int expectedStatus)
+    {
+        await using var app = new ApiFactory(settings: new()
+        {
+            ["CatalogSeed:Enabled"] = enabled.ToString(),
+            ["CatalogSeed:Environment"] = target
+        });
+        var response = await app.CreateClient().PostAsync("/admin/dev/catalog-seed", null);
+        Assert.Equal((HttpStatusCode)expectedStatus, response.StatusCode);
+    }
+    [Theory]
     [InlineData(null, 403)]
     [InlineData("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", 200)]
     [InlineData("{\"shortlink-admin-ui\":{\"roles\":[\"admin\"]}}", 403)]

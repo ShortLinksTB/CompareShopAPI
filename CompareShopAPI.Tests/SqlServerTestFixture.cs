@@ -17,5 +17,15 @@ public sealed class SqlServerTestFixture : IAsyncLifetime
 
     public Task InitializeAsync() => _container.StartAsync();
 
-    public async Task DisposeAsync() => await _container.DisposeAsync();
+    public async Task DisposeAsync()
+    {
+        try
+        {
+            await _container.StopAsync();
+        }
+        finally
+        {
+            await _container.DisposeAsync();
+        }
+    }
 }

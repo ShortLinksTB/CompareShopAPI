@@ -30,6 +30,29 @@ public sealed class CatalogIntegrationTests
             var counts = (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync());
             await CatalogSeed.SeedAsync(db);
             Assert.Equal(counts, (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync()));
+
+            var trackedOffer = await db.ProductOffers.OrderBy(x => x.Id).FirstAsync();
+            var affiliateLink = new AffiliateLink
+            {
+                ProductOfferId = trackedOffer.Id,
+                DestinationUrl = trackedOffer.Url!,
+                IsEnabled = true,
+                IsStale = false
+            };
+            db.AffiliateLinks.Add(affiliateLink);
+            await db.SaveChangesAsync();
+            var affiliateRepository = new EfAffiliateRedirectRepository(db, Microsoft.Extensions.Logging.Abstractions.NullLogger<EfAffiliateRedirectRepository>.Instance);
+            Assert.NotNull(await affiliateRepository.FindRedirectableLink(trackedOffer.Id, default));
+            Assert.True(await affiliateRepository.RecordClick(affiliateLink.Id, FixedClock.GetUtcNow().UtcDateTime, "hashed-client-ip", default));
+            await db.Entry(affiliateLink).ReloadAsync();
+            Assert.Equal(1, affiliateLink.ClickCount);
+            Assert.Equal("hashed-client-ip", await db.AffiliateClicks.Select(x => x.ClientIpDigest).SingleAsync());
+
+            await db.Database.ExecuteSqlRawAsync("CREATE TRIGGER [FailAffiliateClickInsert] ON [AffiliateClicks] INSTEAD OF INSERT AS BEGIN RAISERROR('test click failure', 16, 1); END");
+            Assert.False(await affiliateRepository.RecordClick(affiliateLink.Id, FixedClock.GetUtcNow().UtcDateTime, "second-hash", default));
+            await db.Entry(affiliateLink).ReloadAsync();
+            Assert.Equal(1, affiliateLink.ClickCount);
+            Assert.Single(await db.AffiliateClicks.ToListAsync());
             Assert.All(await db.ProductOffers.Include(x => x.PartnerShop).Where(x => x.Product.Slug == "sample-product-01").ToListAsync(),
                 offer => Assert.Contains(offer.PartnerShop.Slug, new[] { "north-shop", "central-store" }));
 

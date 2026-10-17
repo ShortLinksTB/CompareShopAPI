@@ -2,9 +2,12 @@ using CompareShopAPI.Api.Auth;
 using CompareShopAPI.Api.Catalog;
 using CompareShopAPI.Api.Health;
 using CompareShopAPI.Api.Observability;
+using CompareShopAPI.Api.UserFeatures;
 using CompareShopAPI.Infrastructure.Persistence;
 using CompareShopAPI.Infrastructure.Catalog;
 using CompareShopAPI.Application.Catalog;
+using CompareShopAPI.Application.Users;
+using CompareShopAPI.Infrastructure.Users;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -19,6 +22,8 @@ builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlSer
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ICatalogQueries, EfCatalogQueries>();
 builder.Services.AddScoped<CatalogService>();
+builder.Services.AddScoped<IUserFeatureRepository, EfUserFeatureRepository>();
+builder.Services.AddScoped<UserFeatureService>();
 builder.Services.AddSingleton<MigrationState>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("database", tags: ["ready"]);
 builder.Services.AddCors(options => options.AddPolicy("UiClients", policy =>
@@ -44,6 +49,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
 });
 builder.Services.AddAuthorization(options => options.AddPolicy("Admin", policy =>
     policy.RequireAuthenticatedUser().AddRequirements(new AdminClientRoleRequirement())));
+builder.Services.AddAuthorization(options => options.AddPolicy("AuthenticatedUser", policy =>
+    policy.RequireAuthenticatedUser().RequireAssertion(context => !string.IsNullOrWhiteSpace(context.User.FindFirst("sub")?.Value))));
 builder.Services.AddSingleton<IAuthorizationHandler, AdminClientRoleHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddCompareShopTelemetry(builder.Configuration);
@@ -55,7 +62,9 @@ app.UseAuthorization();
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapGroup("/api/v1").MapCatalogEndpoints();
+var api = app.MapGroup("/api/v1");
+api.MapCatalogEndpoints();
+api.MapUserFeatureEndpoints();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

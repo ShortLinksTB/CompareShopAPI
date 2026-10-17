@@ -17,13 +17,14 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
-public sealed class ApiFactory(string environment = "Production", Dictionary<string,string?>? settings = null, bool signing = false, TimeProvider? timeProvider = null) : WebApplicationFactory<Program>
+public sealed class ApiFactory(string environment = "Production", Dictionary<string,string?>? settings = null, bool signing = false, TimeProvider? timeProvider = null, Action<IServiceCollection>? serviceOverrides = null) : WebApplicationFactory<Program>
 {
     public static readonly SymmetricSecurityKey Key = new(Encoding.UTF8.GetBytes("test-only-signing-key-at-least-32-bytes-long"));
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(environment);
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(settings ?? new()));
+        if (serviceOverrides is not null) builder.ConfigureTestServices(serviceOverrides);
         if (timeProvider is not null) builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<TimeProvider>();
@@ -38,9 +39,10 @@ public sealed class ApiFactory(string environment = "Production", Dictionary<str
             options.TokenValidationParameters.IssuerSigningKey = Key;
         }));
     }
-    public static string Token(string? roles = null, string issuer = "https://test-issuer", string audience = "compareshop-api", bool expired = false)
+    public static string Token(string? roles = null, string issuer = "https://test-issuer", string audience = "compareshop-api", bool expired = false, string? subject = "test-user")
     {
-        var claims = new List<Claim> { new("sub", "test-user") };
+        var claims = new List<Claim>();
+        if (subject is not null) claims.Add(new("sub", subject));
         if (roles != null) claims.Add(new("resource_access", roles));
         return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(issuer, audience, claims,
             expires: expired ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddMinutes(5),

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using CompareShopAPI.Domain.Catalog;
+using CompareShopAPI.Domain.Users;
 namespace CompareShopAPI.Infrastructure.Persistence;
 public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> options) : DbContext(options)
 {
@@ -9,6 +10,9 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<ProductOffer> ProductOffers => Set<ProductOffer>();
     public DbSet<SpecificationGroup> SpecificationGroups => Set<SpecificationGroup>();
     public DbSet<SpecificationItem> SpecificationItems => Set<SpecificationItem>();
+    public DbSet<User> Users => Set<User>();
+    public DbSet<WishlistItem> WishlistItems => Set<WishlistItem>();
+    public DbSet<PriceAlert> PriceAlerts => Set<PriceAlert>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
@@ -27,5 +31,17 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<SpecificationItem>().HasOne(x => x.Group).WithMany(x => x.Items).HasForeignKey(x => x.SpecificationGroupId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<SpecificationGroup>().Property(x => x.Name).HasMaxLength(200);
         model.Entity<SpecificationItem>().Property(x => x.Name).HasMaxLength(200); model.Entity<SpecificationItem>().Property(x => x.Value).HasMaxLength(1000);
+        model.Entity<User>().HasKey(x => x.Id);
+        model.Entity<User>().Property(x => x.ExternalSubject).HasMaxLength(255).IsRequired();
+        model.Entity<User>().HasIndex(x => x.ExternalSubject).IsUnique();
+        model.Entity<WishlistItem>().HasKey(x => x.Id);
+        model.Entity<WishlistItem>().HasIndex(x => new { x.UserId, x.ProductId }).IsUnique();
+        model.Entity<WishlistItem>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<WishlistItem>().HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<PriceAlert>().HasKey(x => x.Id);
+        model.Entity<PriceAlert>().HasIndex(x => new { x.UserId, x.IsActive });
+        model.Entity<PriceAlert>().HasIndex(x => x.ProductId);
+        model.Entity<PriceAlert>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<PriceAlert>().HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
     }
 }

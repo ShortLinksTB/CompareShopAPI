@@ -7,6 +7,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Testcontainers.MsSql" Version="4.16.0" />
     <ProjectReference Include="../CompareShopAPI.Domain/CompareShopAPI.Domain.csproj" />
     <ProjectReference Include="../CompareShopAPI.Application/CompareShopAPI.Application.csproj" />
     <ProjectReference Include="../CompareShopAPI.Infrastructure/CompareShopAPI.Infrastructure.csproj" />

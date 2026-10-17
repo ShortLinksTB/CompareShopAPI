@@ -7,8 +7,7 @@ Phase 0 .NET 10 skeleton. Domain has no framework dependencies; Application refe
 ```sh
 dotnet restore CompareShopAPI.slnx
 dotnet run --project CompareShopAPI.Api
-# Requires a dedicated reachable MSSQL test database (CI provides SQL Server 2022).
-export COMPARESHOP_SQLSERVER_TEST_CONNECTION='<test database connection>'
+# SQL integration tests require Docker; Testcontainers starts and removes an isolated SQL Server container.
 dotnet test CompareShopAPI.slnx -c Release --settings coverage.runsettings --collect:"XPlat Code Coverage" --results-directory TestResultsScoped
 ```
 

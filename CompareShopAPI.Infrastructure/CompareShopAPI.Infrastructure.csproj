@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CompareShopAPI.Domain/CompareShopAPI.Domain.csproj" />
+    <ProjectReference Include="../CompareShopAPI.Application/CompareShopAPI.Application.csproj" />
+    <!-- Patch SqlClient transitive PKCS dependency; GHSA-846f-f764-76mx. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
+  </ItemGroup>
+</Project>

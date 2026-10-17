@@ -1,0 +1,113 @@
+name: CI and dev image
+
+on:
+  pull_request:
+    branches: [dev]
+  push:
+    branches: [dev]
+
+env:
+  IMAGE_NAME: ghcr.io/shortlinkstb/compareshop-api
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: CompareShop_Test_Password1!
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd " /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'CompareShop_Test_Password1!' -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      COMPARESHOP_SQLSERVER_TEST_CONNECTION: Server=localhost,1433;Database=master;User Id=sa;Password=CompareShop_Test_Password1!;TrustServerCertificate=True;Encrypt=False
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.x
+
+      - name: Restore
+        run: dotnet restore CompareShopAPI.slnx
+
+      - name: Test with coverage
+        run: dotnet test CompareShopAPI.slnx --configuration Release --no-restore --settings coverage.runsettings --collect:"XPlat Code Coverage" --results-directory TestResultsScoped
+
+      - name: Enforce changed-scope coverage
+        run: |
+          git fetch --no-tags origin dev
+          if [ "${{ github.event_name }}" = "push" ]; then
+            BASE_SHA="${{ github.event.before }}"
+            git cat-file -e "$BASE_SHA^{commit}"
+          else
+            BASE_SHA=origin/dev
+          fi
+          python -m pip install --disable-pip-version-check --quiet diff-cover
+          diff-cover "$(find TestResultsScoped -name coverage.cobertura.xml -print -quit)" --compare-branch="$BASE_SHA" --fail-under=80
+
+      - name: Upload Cobertura report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compareshop-api-cobertura-${{ github.sha }}
+          path: TestResultsScoped/**/coverage.cobertura.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish immutable commit image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Notify GitOps image-tag updater
+        uses: actions/github-script@v7
+        with:
+          # GITHUB_TOKEN is intentionally used only for GHCR publishing. A
+          # narrowly scoped token is required to dispatch the Helm repository.
+          github-token: ${{ secrets.GITOPS_TOKEN }}
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: 'ShortLinksTB',
+              repo: 'Helm',
+              event_type: 'compareshop-api-image-published',
+              client_payload: {
+                image: process.env.IMAGE_NAME,
+                tag: context.sha,
+                environment: 'dev'
+              }
+            });

@@ -1,4 +1,5 @@
 using CompareShopAPI.Application.Catalog;
+using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Infrastructure.Catalog;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
@@ -23,10 +24,14 @@ public sealed class CatalogIntegrationTests
             await using var db = new CompareShopDbContext(options);
             await db.Database.MigrateAsync();
             await db.Database.MigrateAsync();
+            db.PartnerShops.Add(new PartnerShop { Slug = "existing-unrelated-shop", Name = "Existing Shop", WebsiteUrl = "https://existing.example.test", IsActive = true });
+            await db.SaveChangesAsync();
             await CatalogSeed.SeedAsync(db);
             var counts = (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync());
             await CatalogSeed.SeedAsync(db);
             Assert.Equal(counts, (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync()));
+            Assert.All(await db.ProductOffers.Include(x => x.PartnerShop).Where(x => x.Product.Slug == "sample-product-01").ToListAsync(),
+                offer => Assert.Contains(offer.PartnerShop.Slug, new[] { "north-shop", "central-store" }));
 
             var queries = new EfCatalogQueries(db, FixedClock);
             Assert.Equal(3, (await queries.Categories(default)).Count);

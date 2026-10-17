@@ -12,7 +12,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 
-var builder = WebApplication.CreateBuilder(args);
+var seedCatalogRequested = CatalogSeedCommand.IsRequested(args);
+var builder = WebApplication.CreateBuilder(seedCatalogRequested ? Array.Empty<string>() : args);
 builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlServer(
     builder.Configuration.GetConnectionString("CompareShopDb") ?? "", sql => sql.CommandTimeout(5)));
 builder.Services.AddSingleton(TimeProvider.System);
@@ -47,6 +48,7 @@ builder.Services.AddSingleton<IAuthorizationHandler, AdminClientRoleHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddCompareShopTelemetry(builder.Configuration);
 var app = builder.Build();
+if (await CatalogSeedCommand.TryRunAsync(args, app.Environment, app.Configuration, app.Services, app.Logger)) return;
 app.UseCors("UiClients");
 app.UseAuthentication();
 app.UseAuthorization();

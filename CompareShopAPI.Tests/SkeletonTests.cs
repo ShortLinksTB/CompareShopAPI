@@ -39,9 +39,10 @@ public sealed class ApiFactory(string environment = "Production", Dictionary<str
             options.TokenValidationParameters.IssuerSigningKey = Key;
         }));
     }
-    public static string Token(string? roles = null, string issuer = "https://test-issuer", string audience = "compareshop-api", bool expired = false)
+    public static string Token(string? roles = null, string issuer = "https://test-issuer", string audience = "compareshop-api", bool expired = false, string subject = "test-user", bool includeSubject = true)
     {
-        var claims = new List<Claim> { new("sub", "test-user") };
+        var claims = new List<Claim>();
+        if (includeSubject) claims.Add(new("sub", subject));
         if (roles != null) claims.Add(new("resource_access", roles));
         return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(issuer, audience, claims,
             expires: expired ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddMinutes(5),

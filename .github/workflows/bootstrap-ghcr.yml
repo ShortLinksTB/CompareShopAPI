@@ -1,0 +1,55 @@
+name: Bootstrap GHCR readiness
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/bootstrap-ghcr.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-probe:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Authenticate with this repository's GITHUB_TOKEN
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Publish and retrieve a bootstrap-only OCI image
+        env:
+          PROBE_IMAGE: ghcr.io/shortlinkstb/compareshop-api:bootstrap-sl872-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          probe_dir=$(mktemp -d)
+          trap 'rm -rf "$probe_dir"' EXIT
+          printf '%s\n' 'SL-872 registry capability probe. Not an application image.' > "$probe_dir/bootstrap.txt"
+          cat > "$probe_dir/Dockerfile" <<'DOCKERFILE'
+          FROM scratch
+          LABEL org.opencontainers.image.source="https://github.com/ShortLinksTB/CompareShopAPI"
+          LABEL org.opencontainers.image.description="SL-872 bootstrap registry capability probe; not deployable application code"
+          COPY bootstrap.txt /bootstrap.txt
+          DOCKERFILE
+          docker build --tag "$PROBE_IMAGE" "$probe_dir"
+          docker push "$PROBE_IMAGE"
+          docker image rm "$PROBE_IMAGE"
+          docker pull "$PROBE_IMAGE"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$PROBE_IMAGE")
+          {
+            printf 'Repository: `%s`\n\n' "$GITHUB_REPOSITORY"
+            printf 'Credential: repository GITHUB_TOKEN with contents:read/packages:write\n\n'
+            printf 'Push and pull succeeded: `%s`\n\n' "$digest"
+            printf 'Bootstrap-only tag: `%s`; no application build or rollout.\n' "$PROBE_IMAGE"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clear runner registry credentials
+        if: always()
+        run: docker logout ghcr.io

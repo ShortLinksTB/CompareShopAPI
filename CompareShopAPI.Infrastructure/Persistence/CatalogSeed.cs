@@ -26,7 +26,9 @@ public static class CatalogSeed
             db.PartnerShops.Add(new PartnerShop { Slug = "inactive-shop", Name = "Inactive Shop", IsActive = false });
         await db.SaveChangesAsync(cancellationToken);
         var categoryIds = await db.Categories.AsNoTracking().ToDictionaryAsync(x => x.Slug, x => x.Id, cancellationToken);
-        var shops = await db.PartnerShops.OrderBy(x => x.Id).Take(3).ToListAsync(cancellationToken);
+        var shops = await db.PartnerShops
+            .Where(x => x.Slug == "north-shop" || x.Slug == "central-store" || x.Slug == "south-market")
+            .ToDictionaryAsync(x => x.Slug, cancellationToken);
         for (var i = 1; i <= 30; i++)
         {
             var slug = $"sample-product-{i:00}";
@@ -41,7 +43,10 @@ public static class CatalogSeed
             if (i % 10 != 0 && !await db.ProductOffers.AnyAsync(x => x.ProductId == product.Id, cancellationToken))
             {
                 for (var shopIndex = 0; shopIndex < 2; shopIndex++)
-                    db.ProductOffers.Add(new ProductOffer { ProductId = product.Id, PartnerShopId = shops[shopIndex].Id, PriceVnd = 1_000_000 + i * 10_000 + shopIndex * 50_000, Url = $"https://example.test/{slug}/{shopIndex}", UpdatedAtUtc = new DateTime(2026, 10, 10, 0, 0, 0, DateTimeKind.Utc), IsActive = true });
+                {
+                    var shopSlug = shopIndex == 0 ? "north-shop" : "central-store";
+                    db.ProductOffers.Add(new ProductOffer { ProductId = product.Id, PartnerShopId = shops[shopSlug].Id, PriceVnd = 1_000_000 + i * 10_000 + shopIndex * 50_000, Url = $"https://example.test/{slug}/{shopIndex}", UpdatedAtUtc = new DateTime(2026, 10, 10, 0, 0, 0, DateTimeKind.Utc), IsActive = true });
+                }
             }
             if (i == 1 && !await db.SpecificationGroups.AnyAsync(x => x.ProductId == product.Id, cancellationToken))
             {
@@ -58,17 +63,17 @@ public static class CatalogSeed
             await db.SaveChangesAsync(cancellationToken);
         }
         if (!await db.ProductOffers.AnyAsync(x => x.ProductId == inactive.Id, cancellationToken))
-            db.ProductOffers.Add(new ProductOffer { ProductId = inactive.Id, PartnerShopId = shops[0].Id, PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = true });
+            db.ProductOffers.Add(new ProductOffer { ProductId = inactive.Id, PartnerShopId = shops["north-shop"].Id, PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = true });
         if (!await db.ProductOffers.AnyAsync(x => x.IsOutlier, cancellationToken))
-            db.ProductOffers.Add(new ProductOffer { ProductId = (await db.Products.SingleAsync(x => x.Slug == "sample-product-01", cancellationToken)).Id, PartnerShopId = shops[0].Id, PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = true, IsOutlier = true });
+            db.ProductOffers.Add(new ProductOffer { ProductId = (await db.Products.SingleAsync(x => x.Slug == "sample-product-01", cancellationToken)).Id, PartnerShopId = shops["north-shop"].Id, PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = true, IsOutlier = true });
         if (!await db.ProductOffers.AnyAsync(x => !x.IsActive, cancellationToken))
-            db.ProductOffers.Add(new ProductOffer { ProductId = (await db.Products.SingleAsync(x => x.Slug == "sample-product-02", cancellationToken)).Id, PartnerShopId = shops[0].Id, PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = false });
+            db.ProductOffers.Add(new ProductOffer { ProductId = (await db.Products.SingleAsync(x => x.Slug == "sample-product-02", cancellationToken)).Id, PartnerShopId = shops["north-shop"].Id, PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = false });
         if (!await db.ProductOffers.AnyAsync(x => !x.PartnerShop.IsActive, cancellationToken))
             db.ProductOffers.Add(new ProductOffer { ProductId = (await db.Products.SingleAsync(x => x.Slug == "sample-product-03", cancellationToken)).Id, PartnerShopId = await db.PartnerShops.Where(x => x.Slug == "inactive-shop").Select(x => x.Id).SingleAsync(cancellationToken), PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = true });
         var firstProductId = await db.Products.Where(x => x.Slug == "sample-product-01").Select(x => x.Id).SingleAsync(cancellationToken);
         var staleUpdatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
         if (!await db.ProductOffers.AnyAsync(x => x.ProductId == firstProductId && x.UpdatedAtUtc == staleUpdatedAt, cancellationToken))
-            db.ProductOffers.Add(new ProductOffer { ProductId = firstProductId, PartnerShopId = shops[0].Id, PriceVnd = 1, UpdatedAtUtc = staleUpdatedAt, IsActive = true });
+            db.ProductOffers.Add(new ProductOffer { ProductId = firstProductId, PartnerShopId = shops["north-shop"].Id, PriceVnd = 1, UpdatedAtUtc = staleUpdatedAt, IsActive = true });
         await db.SaveChangesAsync(cancellationToken);
     }
 }

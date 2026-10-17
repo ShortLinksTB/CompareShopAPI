@@ -10,9 +10,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.Data.SqlClient;
 using Scalar.AspNetCore;
 
-var builder = WebApplication.CreateBuilder(args);
+var seedCatalogRequested = args.Length == 1 && args[0] == "seed-catalog";
+var builder = WebApplication.CreateBuilder(seedCatalogRequested ? Array.Empty<string>() : args);
 builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlServer(
     builder.Configuration.GetConnectionString("CompareShopDb") ?? "", sql => sql.CommandTimeout(5)));
 builder.Services.AddSingleton(TimeProvider.System);
@@ -47,6 +49,25 @@ builder.Services.AddSingleton<IAuthorizationHandler, AdminClientRoleHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddCompareShopTelemetry(builder.Configuration);
 var app = builder.Build();
+if (seedCatalogRequested)
+{
+    if (!app.Configuration.GetValue<bool>("Database:AllowCatalogSeed"))
+        throw new InvalidOperationException("Catalog seeding is disabled. Set Database:AllowCatalogSeed=true explicitly for the one-off dev seed command.");
+
+    var connectionString = app.Configuration.GetConnectionString("CompareShopDb");
+    if (string.IsNullOrWhiteSpace(connectionString) ||
+        !string.Equals(new SqlConnectionStringBuilder(connectionString).InitialCatalog, "CompareShop", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("Catalog seeding requires a connection string targeting the CompareShop database.");
+
+    await using var scope = app.Services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<CompareShopDbContext>();
+    if (!await db.Database.CanConnectAsync())
+        throw new InvalidOperationException("Cannot connect to the CompareShop database; catalog seed was not applied.");
+
+    await CatalogSeed.SeedAsync(db);
+    app.Logger.LogInformation("Catalog seed completed for the explicitly selected CompareShop database.");
+    return;
+}
 app.UseCors("UiClients");
 app.UseAuthentication();
 app.UseAuthorization();

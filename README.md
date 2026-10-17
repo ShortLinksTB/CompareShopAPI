@@ -12,7 +12,7 @@ export COMPARESHOP_SQLSERVER_TEST_CONNECTION='<test database connection>'
 dotnet test CompareShopAPI.slnx -c Release --settings coverage.runsettings --collect:"XPlat Code Coverage" --results-directory TestResultsScoped
 ```
 
-`GET /health` is anonymous liveness. `GET /health/ready` checks SQL connectivity and returns 503 if configuration is missing, the database is unreachable, or startup migration failed. Health responses do not expose connection details. `Database__ApplyMigrations` defaults to false; this phase contains no migrations. Enabling it never makes a failed migration terminate the host.
+`GET /health` is anonymous liveness. `GET /health/ready` checks SQL connectivity and returns 503 if configuration is missing, the database is unreachable, or startup migration failed. Health responses do not expose connection details. `Database__ApplyMigrations` defaults to false. Enabling it never makes a failed migration terminate the host.
 
 `GET /admin/health` requires a valid JWT and `resource_access["compareshop-admin-ui"].roles` containing `admin`. Missing issuer/audience configuration fails closed. Malformed roles and roles on other clients are denied. OpenAPI `/openapi/v1.json` and Scalar `/docs` are available only in Development.
 
@@ -33,7 +33,7 @@ Reference: ShortLinkAPI dev `69ebf93d6e4fa8ea0d833db38cfd1f132e10cc08`, Design S
 
 ## Phase 1 catalog API
 
-Catalog routes are anonymous and read-only. Apply the additive catalog migration only when `Database:ApplyMigrations=true`; startup leaves the flag off by default. Development/test fixture data is explicit: call `CatalogSeed.SeedAsync` against a disposable database. It is never invoked on production startup.
+Catalog routes are anonymous and read-only. Apply the additive catalog migration only when `Database:ApplyMigrations=true`; startup leaves the flag off by default. The deterministic development fixture is applied only by an explicit one-off command. Build/deploy the image, then run `dotnet CompareShopAPI.Api.dll seed-catalog` in a one-off process with the normal `ConnectionStrings__CompareShopDb` and `Database__AllowCatalogSeed=true` configuration. The command refuses to run unless the opt-in is enabled and the connection targets a database named `CompareShop`; it checks connectivity and does not run migrations or start the HTTP server. Leave `Database__AllowCatalogSeed=false` for normal API workloads and all non-dev environments. Re-running the command is idempotent.
 
 - `GET /api/v1/categories` returns `{ "items": [{ "id": 1, "slug": "phones", "name": "Phones" }] }`.
 - `GET /api/v1/products?page=1&pageSize=20&categoryId=1&minPrice=100000&maxPrice=500000&shopId=2` returns `{ "items": [...], "page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1 }`. All filters are optional; price values are integer VND; page defaults to 1 and pageSize to 20 (maximum 100). Sorting is product name then id. Invalid page/price ranges return 400.

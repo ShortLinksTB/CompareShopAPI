@@ -41,4 +41,4 @@ Catalog routes are anonymous and read-only. Apply the additive catalog migration
 - `GET /api/v1/products/{id}/offers` returns `{ "items": [...] }`; known products with no visible offers return an empty list.
 - `GET /api/v1/shops/{slug}` returns the active shop or 404.
 
-Only active, non-outlier offers for active products and active shops contribute to offer results and summaries. Products with no visible offers remain in the product list with null min/max and zero count.
+Only active offers refreshed within the previous 30 days, not marked as outliers, and attached to active products and active shops contribute to offer results, price filters, and summaries. Products with no visible offers remain in the product list with null min/max and zero count.

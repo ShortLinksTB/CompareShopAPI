@@ -2,9 +2,13 @@ using CompareShopAPI.Application.Catalog;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 namespace CompareShopAPI.Infrastructure.Catalog;
-public sealed class EfCatalogQueries(CompareShopDbContext db) : ICatalogQueries
+public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock) : ICatalogQueries
 {
-    private IQueryable<CompareShopAPI.Domain.Catalog.ProductOffer> VisibleOffers() => db.ProductOffers.AsNoTracking().Where(o => o.IsActive && !o.IsOutlier && o.Product.IsActive && o.PartnerShop.IsActive);
+    private IQueryable<CompareShopAPI.Domain.Catalog.ProductOffer> VisibleOffers()
+    {
+        var freshnessCutoff = clock.GetUtcNow().UtcDateTime.AddDays(-CompareShopAPI.Domain.Catalog.CatalogOfferPolicy.FreshnessDays);
+        return db.ProductOffers.AsNoTracking().Where(o => o.IsActive && !o.IsOutlier && o.UpdatedAtUtc >= freshnessCutoff && o.Product.IsActive && o.PartnerShop.IsActive);
+    }
     private IQueryable<CompareShopAPI.Domain.Catalog.Product> ActiveProducts() => db.Products.AsNoTracking().Where(p => p.IsActive && p.Category.IsActive);
     public async Task<IReadOnlyList<CategoryDto>> Categories(CancellationToken ct) => await db.Categories.AsNoTracking().Where(c => c.IsActive).OrderBy(c => c.Name).ThenBy(c => c.Id).Select(c => new CategoryDto(c.Id, c.Slug, c.Name)).ToListAsync(ct);
     public async Task<PageDto<ProductListDto>> Products(ProductFilter f, CancellationToken ct)

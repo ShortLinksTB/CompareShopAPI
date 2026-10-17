@@ -6,3 +6,8 @@ public sealed class Product { public int Id { get; set; } public required string
 public sealed class ProductOffer { public int Id { get; set; } public int ProductId { get; set; } public Product Product { get; set; } = null!; public int PartnerShopId { get; set; } public PartnerShop PartnerShop { get; set; } = null!; public int PriceVnd { get; set; } public string? Url { get; set; } public DateTime UpdatedAtUtc { get; set; } public bool IsActive { get; set; } = true; public bool IsOutlier { get; set; } }
 public sealed class SpecificationGroup { public int Id { get; set; } public int ProductId { get; set; } public Product Product { get; set; } = null!; public required string Name { get; set; } public int SortOrder { get; set; } public List<SpecificationItem> Items { get; set; } = []; }
 public sealed class SpecificationItem { public int Id { get; set; } public int SpecificationGroupId { get; set; } public SpecificationGroup Group { get; set; } = null!; public required string Name { get; set; } public required string Value { get; set; } public int SortOrder { get; set; } }
+
+public static class CatalogOfferPolicy
+{
+    public const int FreshnessDays = 30;
+}

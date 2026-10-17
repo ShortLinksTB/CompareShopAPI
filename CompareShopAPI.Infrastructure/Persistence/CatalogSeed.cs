@@ -41,7 +41,7 @@ public static class CatalogSeed
             if (i % 10 != 0 && !await db.ProductOffers.AnyAsync(x => x.ProductId == product.Id, cancellationToken))
             {
                 for (var shopIndex = 0; shopIndex < 2; shopIndex++)
-                    db.ProductOffers.Add(new ProductOffer { ProductId = product.Id, PartnerShopId = shops[shopIndex].Id, PriceVnd = 1_000_000 + i * 10_000 + shopIndex * 50_000, Url = $"https://example.test/{slug}/{shopIndex}", UpdatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(i), IsActive = true });
+                    db.ProductOffers.Add(new ProductOffer { ProductId = product.Id, PartnerShopId = shops[shopIndex].Id, PriceVnd = 1_000_000 + i * 10_000 + shopIndex * 50_000, Url = $"https://example.test/{slug}/{shopIndex}", UpdatedAtUtc = new DateTime(2026, 10, 10, 0, 0, 0, DateTimeKind.Utc), IsActive = true });
             }
             if (i == 1 && !await db.SpecificationGroups.AnyAsync(x => x.ProductId == product.Id, cancellationToken))
             {
@@ -65,6 +65,10 @@ public static class CatalogSeed
             db.ProductOffers.Add(new ProductOffer { ProductId = (await db.Products.SingleAsync(x => x.Slug == "sample-product-02", cancellationToken)).Id, PartnerShopId = shops[0].Id, PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = false });
         if (!await db.ProductOffers.AnyAsync(x => !x.PartnerShop.IsActive, cancellationToken))
             db.ProductOffers.Add(new ProductOffer { ProductId = (await db.Products.SingleAsync(x => x.Slug == "sample-product-03", cancellationToken)).Id, PartnerShopId = await db.PartnerShops.Where(x => x.Slug == "inactive-shop").Select(x => x.Id).SingleAsync(cancellationToken), PriceVnd = 1, UpdatedAtUtc = DateTime.UnixEpoch, IsActive = true });
+        var firstProductId = await db.Products.Where(x => x.Slug == "sample-product-01").Select(x => x.Id).SingleAsync(cancellationToken);
+        var staleUpdatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+        if (!await db.ProductOffers.AnyAsync(x => x.ProductId == firstProductId && x.UpdatedAtUtc == staleUpdatedAt, cancellationToken))
+            db.ProductOffers.Add(new ProductOffer { ProductId = firstProductId, PartnerShopId = shops[0].Id, PriceVnd = 1, UpdatedAtUtc = staleUpdatedAt, IsActive = true });
         await db.SaveChangesAsync(cancellationToken);
     }
 }

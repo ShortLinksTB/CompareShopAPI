@@ -15,6 +15,7 @@ using Scalar.AspNetCore;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlServer(
     builder.Configuration.GetConnectionString("CompareShopDb") ?? "", sql => sql.CommandTimeout(5)));
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ICatalogQueries, EfCatalogQueries>();
 builder.Services.AddScoped<CatalogService>();
 builder.Services.AddSingleton<MigrationState>();

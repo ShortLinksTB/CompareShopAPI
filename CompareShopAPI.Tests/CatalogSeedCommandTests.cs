@@ -65,8 +65,9 @@ public sealed class CatalogSeedCommandTests
     [Fact]
     public async Task Seed_command_populates_repeatably_in_development()
     {
+        var databaseName = $"catalog-seed-{Guid.NewGuid():N}";
         var services = new ServiceCollection()
-            .AddDbContext<CompareShopDbContext>(options => options.UseInMemoryDatabase($"catalog-seed-{Guid.NewGuid():N}"))
+            .AddDbContext<CompareShopDbContext>(options => options.UseInMemoryDatabase(databaseName))
             .BuildServiceProvider();
         var configuration = Configuration(true, Connection("CompareShop"));
 

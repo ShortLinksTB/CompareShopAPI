@@ -1,0 +1,8 @@
+<Solution>
+<Project Path="CompareShopAPI.Domain/CompareShopAPI.Domain.csproj" />
+<Project Path="CompareShopAPI.Application/CompareShopAPI.Application.csproj" />
+<Project Path="CompareShopAPI.Infrastructure/CompareShopAPI.Infrastructure.csproj" />
+<Project Path="CompareShopAPI.Workers/CompareShopAPI.Workers.csproj" />
+<Project Path="CompareShopAPI.Api/CompareShopAPI.Api.csproj" />
+<Project Path="CompareShopAPI.Tests/CompareShopAPI.Tests.csproj" />
+</Solution>

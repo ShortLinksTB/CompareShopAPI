@@ -30,3 +30,15 @@ Devops owns Helm chart, Argo application, secrets, TLS and public ingress `https
 CI tests against MSSQL and enforces 80% changed-line coverage. PRs compare to `origin/dev`; dev pushes compare to the push's before-SHA. Successful dev builds publish immutable `ghcr.io/shortlinkstb/compareshop-api:<sha>` and dispatch `compareshop-api-image-published` to Helm using `GITOPS_TOKEN`. The bootstrap probe workflow is not the application image or rollout.
 
 Reference: ShortLinkAPI dev `69ebf93d6e4fa8ea0d833db38cfd1f132e10cc08`, Design SL-871. Compared with the reference, readiness checks SQL, migration failure preserves liveness, role authorization has no provisioning side effect, and CORS defaults empty.
+
+## Phase 1 catalog API
+
+Catalog routes are anonymous and read-only. Apply the additive catalog migration only when `Database:ApplyMigrations=true`; startup leaves the flag off by default. Development/test fixture data is explicit: call `CatalogSeed.SeedAsync` against a disposable database. It is never invoked on production startup.
+
+- `GET /api/v1/categories` returns `{ "items": [{ "id": 1, "slug": "phones", "name": "Phones" }] }`.
+- `GET /api/v1/products?page=1&pageSize=20&categoryId=1&minPrice=100000&maxPrice=500000&shopId=2` returns `{ "items": [...], "page": 1, "pageSize": 20, "totalItems": 1, "totalPages": 1 }`. All filters are optional; price values are integer VND; page defaults to 1 and pageSize to 20 (maximum 100). Sorting is product name then id. Invalid page/price ranges return 400.
+- `GET /api/v1/products/{slug}` returns the product, category `{id, slug, name}`, specification groups, and `{minPrice,maxPrice,offerCount}` summary.
+- `GET /api/v1/products/{id}/offers` returns `{ "items": [...] }`; known products with no visible offers return an empty list.
+- `GET /api/v1/shops/{slug}` returns the active shop or 404.
+
+Only active, non-outlier offers for active products and active shops contribute to offer results and summaries. Products with no visible offers remain in the product list with null min/max and zero count.

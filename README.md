@@ -27,6 +27,8 @@ CORS defaults to an empty allowlist. Dev must inject exactly:
 
 Devops owns Helm chart, Argo application, secrets, TLS and public ingress `https://api-compareshop-dev.giamha.online` in `compareshop-dev`. Use `/health` for liveness and `/health/ready` for readiness. Public DNS/HTTPS, no Cloudflare Access, CORS, admin authorization and Argo Synced/Healthy require runtime verification after review and deployment.
 
+Affiliate redirect rate limiting resolves forwarded client addresses only when the immediate socket peer is explicitly trusted. Production startup requires `RateLimiting__AffiliateRedirect__TrustedProxies__0`, `__1`, etc. to contain the exact trusted ingress proxy IPs, ordered as a set (the resolver walks `X-Forwarded-For` right-to-left). Untrusted peers' forwarded headers are ignored. Configure these values from the actual ingress-to-pod network path; do not use broad or guessed ranges. Local development may leave the list empty and will use the socket peer address.
+
 CI tests against MSSQL and enforces 80% changed-line coverage. PRs compare to `origin/dev`; dev pushes compare to the push's before-SHA. Successful dev builds publish immutable `ghcr.io/shortlinkstb/compareshop-api:<sha>` and dispatch `compareshop-api-image-published` to Helm using `GITOPS_TOKEN`. The bootstrap probe workflow is not the application image or rollout.
 
 Reference: ShortLinkAPI dev `69ebf93d6e4fa8ea0d833db38cfd1f132e10cc08`, Design SL-871. Compared with the reference, readiness checks SQL, migration failure preserves liveness, role authorization has no provisioning side effect, and CORS defaults empty.

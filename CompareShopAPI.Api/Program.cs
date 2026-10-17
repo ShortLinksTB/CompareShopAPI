@@ -1,7 +1,10 @@
 using CompareShopAPI.Api.Auth;
+using CompareShopAPI.Api.Catalog;
 using CompareShopAPI.Api.Health;
 using CompareShopAPI.Api.Observability;
 using CompareShopAPI.Infrastructure.Persistence;
+using CompareShopAPI.Infrastructure.Catalog;
+using CompareShopAPI.Application.Catalog;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -12,6 +15,9 @@ using Scalar.AspNetCore;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlServer(
     builder.Configuration.GetConnectionString("CompareShopDb") ?? "", sql => sql.CommandTimeout(5)));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<ICatalogQueries, EfCatalogQueries>();
+builder.Services.AddScoped<CatalogService>();
 builder.Services.AddSingleton<MigrationState>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("database", tags: ["ready"]);
 builder.Services.AddCors(options => options.AddPolicy("UiClients", policy =>
@@ -47,6 +53,7 @@ app.UseAuthorization();
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGroup("/api/v1").MapCatalogEndpoints();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

@@ -41,6 +41,54 @@ public sealed class AffiliateRedirectTests
         Assert.Equal(30, repository.RecordedClicks);
     }
 
+    [Fact]
+    public async Task Public_redirect_enforces_unconfigured_redis_fallback_per_ip_over_http11()
+    {
+        var repository = new FakeAffiliateRedirectRepository();
+        var ipResolver = new MutableClientIpResolver("192.0.2.40");
+        var settings = new Dictionary<string, string?>
+        {
+            ["Redis:ConnectionString"] = "",
+            ["RateLimiting:AffiliateRedirect:PermitLimit"] = "30",
+            ["RateLimiting:AffiliateRedirect:WindowSeconds"] = "60",
+            ["RateLimiting:AffiliateRedirect:GraceSeconds"] = "5"
+        };
+        await using var app = new ApiFactory(settings: settings, configureServices: services =>
+        {
+            services.RemoveAll<IAffiliateRedirectRepository>();
+            services.AddSingleton<IAffiliateRedirectRepository>(repository);
+            services.RemoveAll<IClientIpResolver>();
+            services.AddSingleton<IClientIpResolver>(ipResolver);
+        });
+        using var client = app.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+
+        for (var i = 0; i < 30; i++)
+        {
+            using var response = await SendHttp11Async(client);
+            Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+            Assert.Equal("https://affiliate-test.example/offer/17", response.Headers.Location?.AbsoluteUri);
+        }
+
+        using (var limited = await SendHttp11Async(client))
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+            Assert.True(int.Parse(limited.Headers.GetValues("Retry-After").Single()) > 0);
+        }
+
+        ipResolver.ClientIp = "198.51.100.40";
+        using (var otherIp = await SendHttp11Async(client))
+            Assert.Equal(HttpStatusCode.Redirect, otherIp.StatusCode);
+
+        ipResolver.ClientIp = "192.0.2.40";
+        using (var originalIp = await SendHttp11Async(client))
+        {
+            Assert.Equal(HttpStatusCode.TooManyRequests, originalIp.StatusCode);
+            Assert.True(int.Parse(originalIp.Headers.GetValues("Retry-After").Single()) > 0);
+        }
+
+        Assert.Equal(31, repository.RecordedClicks);
+    }
+
     [Theory]
     [InlineData(true, false, "https://partner.example/path", false)]
     [InlineData(false, false, "https://partner.example/path", true)]
@@ -218,6 +266,12 @@ public sealed class AffiliateRedirectTests
         public string? Resolve(HttpContext context) => "192.0.2.4";
     }
 
+    private sealed class MutableClientIpResolver(string clientIp) : IClientIpResolver
+    {
+        public string ClientIp { get; set; } = clientIp;
+        public string? Resolve(HttpContext context) => ClientIp;
+    }
+
     private sealed class FakeAffiliateRedirectRateLimiter : IAffiliateRedirectRateLimiter
     {
         private int requests;
@@ -243,5 +297,15 @@ public sealed class AffiliateRedirectTests
         else services.AddSingleton<IAffiliateRedirectRateLimiter>(new FakeAffiliateRedirectRateLimiter());
         services.RemoveAll<IClientIpResolver>();
         services.AddSingleton<IClientIpResolver>(new FakeClientIpResolver());
+    }
+
+    private static async Task<HttpResponseMessage> SendHttp11Async(HttpClient client)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/go/17")
+        {
+            Version = HttpVersion.Version11,
+            VersionPolicy = HttpVersionPolicy.RequestVersionExact
+        };
+        return await client.SendAsync(request);
     }
 }

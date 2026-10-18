@@ -15,6 +15,8 @@ dotnet test CompareShopAPI.slnx -c Release --settings coverage.runsettings --col
 
 `GET /admin/health` requires a valid JWT and `resource_access["compareshop-admin-ui"].roles` containing `admin`. Missing issuer/audience configuration fails closed. Malformed roles and roles on other clients are denied. OpenAPI `/openapi/v1.json` and Scalar `/docs` are available only in Development.
 
+For first-admin setup, configure `Admin__BootstrapSuperAdminSubjects__0` to the exact Keycloak JWT `sub` of the operator who will initialize this deployment. That operator must also have the `compareshop-admin-ui` client `admin` role. After applying migrations, they call `POST /admin/bootstrap/first-admin` with their normal bearer token; the endpoint grants the seeded Super Admin role once and records an audit entry. A repeat call by that same subject is idempotent; once another subject owns Super Admin, provisioning is closed. Leave the list empty after setup (the default) to deny further bootstrap attempts. No role or subject is accepted in the request body.
+
 ## Deployment configuration
 
 Inject `ConnectionStrings__CompareShopDb` with database `CompareShop` on the shared MSSQL service in `shortlink-infra-dev`. Inject `Keycloak__Authority` and `Keycloak__Audience` for the existing realm; create client `compareshop-admin-ui` there, without creating a realm. No credentials are stored here. Redis/RabbitMQ skeleton configuration has isolated `compareshop:` / `compareshop.` prefixes; phase 0 has no consumers. OTEL defaults to service `compareshop-api` and the shared Tempo endpoint; standard `OTEL_SERVICE_NAME` / `OTEL_EXPORTER_OTLP_ENDPOINT` override them.

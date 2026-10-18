@@ -37,6 +37,7 @@ public sealed record FeatureFlagInput(bool Enabled, string? Description);
 public interface IAdminData
 {
     Task<bool> HasPermission(string subject, string permission, CancellationToken ct);
+    Task<bool> BootstrapFirstAdmin(string subject, CancellationToken ct);
     Task<Page<AdminCategory>> Categories(int page, int pageSize, CancellationToken ct);
     Task<AdminCategory?> Category(int id, CancellationToken ct);
     Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct);
@@ -72,8 +73,9 @@ public interface IAdminData
 
 public sealed class AdminForbiddenException() : Exception("The caller does not have permission for this operation.");
 public sealed class AdminUnauthorizedException() : Exception("A validated subject is required.");
+public sealed class AdminBootstrapCompletedException() : Exception("The first admin has already been provisioned.");
 
-public sealed class AdminService(IAdminData data)
+public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstrapSubjects = null)
 {
     private static readonly HashSet<string> SettingKeys = ["price_alert_default_threshold", "offers_display_count"];
 
@@ -82,6 +84,13 @@ public sealed class AdminService(IAdminData data)
         if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
         if (!await data.HasPermission(subject, permission, ct)) throw new AdminForbiddenException();
         return subject;
+    }
+
+    public async Task BootstrapFirstAdmin(string? subject, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
+        if (bootstrapSubjects?.Contains(subject) != true) throw new AdminForbiddenException();
+        if (!await data.BootstrapFirstAdmin(subject, ct)) throw new AdminBootstrapCompletedException();
     }
 
     private async Task<T> Write<T>(string? subject, string permission, string action, string resource, string? id, Func<CancellationToken, Task<(T? Result, object? Before, object? After)>> work, CancellationToken ct)

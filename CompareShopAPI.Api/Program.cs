@@ -43,7 +43,10 @@ builder.Services.AddScoped<WishlistService>();
 builder.Services.AddScoped<PriceAlertService>();
 builder.Services.AddScoped<PriceHistoryService>();
 builder.Services.AddScoped<IAdminData, EfAdminData>();
-builder.Services.AddScoped<AdminService>();
+builder.Services.AddScoped<AdminService>(services => new AdminService(
+    services.GetRequiredService<IAdminData>(),
+    services.GetRequiredService<IConfiguration>().GetSection("Admin:BootstrapSuperAdminSubjects").GetChildren()
+        .Select(section => section.Value).Where(subject => !string.IsNullOrWhiteSpace(subject)).Cast<string>().ToHashSet(StringComparer.Ordinal)));
 builder.Services.AddSingleton<MigrationState>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("database", tags: ["ready"]);
 builder.Services.AddCors(options => options.AddPolicy("UiClients", policy =>

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Data;
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Infrastructure.Persistence;
@@ -9,6 +10,7 @@ using DomainFeatureFlag = CompareShopAPI.Domain.Admin.AdminFeatureFlag;
 using DomainSetting = CompareShopAPI.Domain.Admin.AdminSetting;
 using DomainUserRole = CompareShopAPI.Domain.Admin.AdminUserRole;
 using DomainAuditLog = CompareShopAPI.Domain.Admin.AdminAuditLog;
+using DomainUser = CompareShopAPI.Domain.UserCommerce.User;
 
 namespace CompareShopAPI.Infrastructure.Admin;
 
@@ -19,6 +21,44 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         .Where(ur => ur.KeycloakSubject == subject)
         .Join(db.AdminRolePermissions, ur => ur.RoleId, rp => rp.RoleId, (_, rp) => rp.PermissionId)
         .Join(db.AdminPermissions, id => id, p => p.Id, (_, p) => p.Key).AnyAsync(key => key == permission, ct);
+
+    public async Task<bool> BootstrapFirstAdmin(string subject, CancellationToken ct)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var role = await db.AdminRoles.SingleOrDefaultAsync(x => x.Name == "Super Admin", ct)
+            ?? throw new InvalidOperationException("The Super Admin role is not seeded.");
+
+        var user = await db.Users.SingleOrDefaultAsync(x => x.KeycloakSubject == subject, ct);
+        if (user is not null && await db.AdminUserRoles.AnyAsync(x => x.UserId == user.Id && x.RoleId == role.Id, ct))
+        {
+            await tx.CommitAsync(ct);
+            return true;
+        }
+
+        if (await db.AdminUserRoles.AnyAsync(x => x.RoleId == role.Id, ct))
+        {
+            await tx.CommitAsync(ct);
+            return false;
+        }
+
+        user ??= new DomainUser(subject, clock.GetUtcNow().UtcDateTime);
+        if (db.Entry(user).State == EntityState.Detached) db.Users.Add(user);
+        await db.SaveChangesAsync(ct);
+        db.AdminUserRoles.Add(new DomainUserRole { UserId = user.Id, RoleId = role.Id });
+        db.AdminAuditLogs.Add(new DomainAuditLog
+        {
+            ActorSubject = subject,
+            Action = "bootstrap_first_admin",
+            ResourceType = "user",
+            ResourceId = user.Id.ToString(),
+            CreatedAtUtc = clock.GetUtcNow().UtcDateTime,
+            BeforeJson = "[]",
+            AfterJson = "[\"Super Admin\"]"
+        });
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return true;
+    }
 
     public Task<Page<AdminCategory>> Categories(int page, int size, CancellationToken ct) => PageOf(db.Categories.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive)), page, size, ct);
     public Task<AdminCategory?> Category(int id, CancellationToken ct) => db.Categories.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive)).SingleOrDefaultAsync(ct);

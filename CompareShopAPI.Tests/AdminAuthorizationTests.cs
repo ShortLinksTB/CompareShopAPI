@@ -3,6 +3,7 @@ using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Infrastructure.Admin;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Data.SqlClient;
 using System.Net;
 using System.Net.Http.Headers;
@@ -27,6 +28,51 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
     {
         var user = new User(subject, DateTime.UtcNow); db.Users.Add(user); await db.SaveChangesAsync();
         db.AdminUserRoles.Add(new() { UserId = user.Id, RoleId = roleId }); await db.SaveChangesAsync(); return user.Id;
+    }
+
+    [Fact]
+    public async Task ConfiguredFirstAdminCanBootstrapThroughProductionRouteOnce()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"CompareShopAdminBootstrap_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var subject = $"bootstrap-{Guid.NewGuid():N}";
+        var other = $"bootstrap-other-{Guid.NewGuid():N}";
+        try
+        {
+            await using (var db = new CompareShopDbContext(options)) await db.Database.MigrateAsync();
+            var settings = new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:CompareShopDb"] = connection,
+                ["Admin:BootstrapSuperAdminSubjects:0"] = subject,
+                ["Admin:BootstrapSuperAdminSubjects:1"] = other
+            };
+            await using var app = new ApiFactory(settings: settings, signing: true);
+            var config = app.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>();
+            Assert.Equal(subject, config["Admin:BootstrapSuperAdminSubjects:0"]);
+            using var client = app.CreateClient();
+            const string clientAdminRole = "{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}";
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(clientAdminRole, subject: $"not-allowed-{subject}"));
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync("/admin/bootstrap/first-admin", null)).StatusCode);
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(clientAdminRole, subject: subject));
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/admin/bootstrap/first-admin", null)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/products")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/admin/bootstrap/first-admin", null)).StatusCode);
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(clientAdminRole, subject: other));
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync("/admin/bootstrap/first-admin", null)).StatusCode);
+
+            await using var verify = new CompareShopDbContext(options);
+            var admin = await verify.Users.SingleAsync(x => x.KeycloakSubject == subject);
+            Assert.Equal(new[] { 1 }, await verify.AdminUserRoles.AsNoTracking().Where(x => x.UserId == admin.Id).Select(x => x.RoleId).ToArrayAsync());
+            Assert.Equal(1, await verify.AdminUserRoles.AsNoTracking().CountAsync(x => x.RoleId == 1));
+            Assert.Contains(await verify.AdminAuditLogs.AsNoTracking().Where(x => x.ActorSubject == subject).Select(x => x.Action).ToArrayAsync(), x => x == "bootstrap_first_admin");
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options); await cleanup.Database.EnsureDeletedAsync();
+        }
     }
 
     [Fact]

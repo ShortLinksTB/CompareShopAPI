@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Domain.Admin;
+using CompareShopAPI.Domain.Articles;
 namespace CompareShopAPI.Infrastructure.Persistence;
 public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> options) : DbContext(options)
 {
@@ -25,6 +26,8 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<AdminFeatureFlag> AdminFeatureFlags => Set<AdminFeatureFlag>();
     public DbSet<AdminSetting> AdminSettings => Set<AdminSetting>();
     public DbSet<ProductMatching> ProductMatchings => Set<ProductMatching>();
+    public DbSet<Article> Articles => Set<Article>();
+    public DbSet<ArticleRelatedProduct> ArticleRelatedProducts => Set<ArticleRelatedProduct>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
@@ -88,5 +91,29 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<AdminSetting>().HasKey(x => x.Id); model.Entity<AdminSetting>().HasIndex(x => x.Key).IsUnique(); model.Entity<AdminSetting>().Property(x => x.Key).HasMaxLength(120).IsRequired(); model.Entity<AdminSetting>().Property(x => x.Value).HasMaxLength(500).IsRequired();
         model.Entity<ProductMatching>().HasKey(x => x.Id); model.Entity<ProductMatching>().Property(x => x.Name).HasMaxLength(300).IsRequired(); model.Entity<ProductMatching>().Property(x => x.Brand).HasMaxLength(200); model.Entity<ProductMatching>().HasIndex(x => new { x.IsApproved, x.CreatedAtUtc });
         model.Entity<ProductMatching>().HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.SetNull);
+
+        model.Entity<Article>().HasKey(x => x.Id);
+        model.Entity<Article>().Property(x => x.Slug).HasMaxLength(200).IsRequired();
+        model.Entity<Article>().HasIndex(x => x.Slug).IsUnique();
+        model.Entity<Article>().HasIndex(x => new { x.Status, x.ScheduledAtUtc });
+        model.Entity<Article>().Property(x => x.Title).HasMaxLength(300).IsRequired();
+        model.Entity<Article>().Property(x => x.Excerpt).HasMaxLength(1000).IsRequired();
+        model.Entity<Article>().Property(x => x.CoverImageUrl).HasMaxLength(2048);
+        model.Entity<Article>().Property(x => x.AuthorSubject).HasMaxLength(200).IsRequired();
+        model.Entity<Article>().Property(x => x.AuthorName).HasMaxLength(200).IsRequired();
+        model.Entity<Article>().Property(x => x.AuthorAvatarUrl).HasMaxLength(2048);
+        model.Entity<Article>().Property(x => x.Content).IsRequired();
+        model.Entity<Article>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+        model.Entity<Article>().OwnsOne(x => x.Seo, seo =>
+        {
+            seo.Property(x => x.Title).HasColumnName("SeoTitle").HasMaxLength(200);
+            seo.Property(x => x.Description).HasColumnName("SeoDescription").HasMaxLength(500);
+            seo.Property(x => x.CanonicalUrl).HasColumnName("SeoCanonicalUrl").HasMaxLength(2048);
+            seo.Property(x => x.OgImage).HasColumnName("SeoOgImage").HasMaxLength(2048);
+            seo.Property(x => x.Index).HasColumnName("SeoIndex").IsRequired();
+        });
+        model.Entity<Article>().HasMany(x => x.RelatedProducts).WithOne().HasForeignKey(x => x.ArticleId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<ArticleRelatedProduct>().HasKey(x => new { x.ArticleId, x.ProductId });
+        model.Entity<ArticleRelatedProduct>().HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
     }
 }

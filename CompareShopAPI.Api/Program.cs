@@ -18,6 +18,9 @@ using CompareShopAPI.Api.RateLimiting;
 using CompareShopAPI.Api.Admin;
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Infrastructure.Admin;
+using CompareShopAPI.Api.Articles;
+using CompareShopAPI.Application.Articles;
+using CompareShopAPI.Infrastructure.Articles;
 
 var seedCatalogRequested = CatalogSeedCommand.IsRequested(args);
 var builder = WebApplication.CreateBuilder(seedCatalogRequested ? Array.Empty<string>() : args);
@@ -43,6 +46,11 @@ builder.Services.AddScoped<WishlistService>();
 builder.Services.AddScoped<PriceAlertService>();
 builder.Services.AddScoped<PriceHistoryService>();
 builder.Services.AddScoped<IAdminData, EfAdminData>();
+builder.Services.AddScoped<IArticleRepository, EfArticleRepository>();
+builder.Services.AddScoped<IArticlePermissionGate, AdminArticlePermissionGate>();
+builder.Services.AddScoped<IArticleProductLookup, UserCommerceArticleProductLookup>();
+builder.Services.AddScoped<ArticleService>();
+builder.Services.AddHostedService<CompareShopAPI.Workers.Articles.ArticlePublishingWorker>();
 builder.Services.AddScoped<AdminService>(services => new AdminService(
     services.GetRequiredService<IAdminData>(),
     services.GetRequiredService<IConfiguration>().GetSection("Admin:BootstrapSuperAdminSubjects").GetChildren()
@@ -89,6 +97,8 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check 
 app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminEndpoints();
 app.MapGroup("/api/v1").MapCatalogEndpoints();
 app.MapGroup("/api/v1").MapUserCommerceEndpoints();
+app.MapGroup("/api/v1").MapArticleEndpoints();
+app.MapGroup("/api/v1/admin").RequireAuthorization("Admin").MapAdminArticleEndpoints();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

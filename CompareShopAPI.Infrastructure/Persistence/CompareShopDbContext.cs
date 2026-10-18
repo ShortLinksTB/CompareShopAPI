@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Domain.UserCommerce;
+using CompareShopAPI.Domain.Admin;
 namespace CompareShopAPI.Infrastructure.Persistence;
 public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> options) : DbContext(options)
 {
@@ -16,6 +17,14 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<WishlistItem> WishlistItems => Set<WishlistItem>();
     public DbSet<PriceAlert> PriceAlerts => Set<PriceAlert>();
     public DbSet<PriceHistoryPoint> PriceHistoryPoints => Set<PriceHistoryPoint>();
+    public DbSet<AdminRole> AdminRoles => Set<AdminRole>();
+    public DbSet<AdminPermission> AdminPermissions => Set<AdminPermission>();
+    public DbSet<AdminRolePermission> AdminRolePermissions => Set<AdminRolePermission>();
+    public DbSet<AdminUserRole> AdminUserRoles => Set<AdminUserRole>();
+    public DbSet<AdminAuditLog> AdminAuditLogs => Set<AdminAuditLog>();
+    public DbSet<AdminFeatureFlag> AdminFeatureFlags => Set<AdminFeatureFlag>();
+    public DbSet<AdminSetting> AdminSettings => Set<AdminSetting>();
+    public DbSet<ProductMatching> ProductMatchings => Set<ProductMatching>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
@@ -64,5 +73,20 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<PriceHistoryPoint>().HasIndex(x => new { x.ProductId, x.DateUtc });
         model.Entity<PriceHistoryPoint>().HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<PriceHistoryPoint>().HasOne(x => x.PartnerShop).WithMany().HasForeignKey(x => x.PartnerShopId).OnDelete(DeleteBehavior.SetNull);
+        model.Entity<Product>().Property(x => x.SeoTitle).HasMaxLength(200);
+        model.Entity<Product>().Property(x => x.SeoDescription).HasMaxLength(500);
+        model.Entity<AdminRole>().HasKey(x => x.Id); model.Entity<AdminRole>().HasIndex(x => x.Name).IsUnique(); model.Entity<AdminRole>().Property(x => x.Name).HasMaxLength(80).IsRequired();
+        model.Entity<AdminPermission>().HasKey(x => x.Id); model.Entity<AdminPermission>().HasIndex(x => x.Key).IsUnique(); model.Entity<AdminPermission>().Property(x => x.Key).HasMaxLength(100).IsRequired();
+        model.Entity<AdminRolePermission>().HasKey(x => new { x.RoleId, x.PermissionId });
+        model.Entity<AdminRolePermission>().HasOne<AdminRole>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<AdminRolePermission>().HasOne<AdminPermission>().WithMany().HasForeignKey(x => x.PermissionId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<AdminUserRole>().HasKey(x => new { x.UserId, x.RoleId });
+        model.Entity<AdminUserRole>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<AdminUserRole>().HasOne<AdminRole>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<AdminAuditLog>().HasKey(x => x.Id); model.Entity<AdminAuditLog>().Property(x => x.ActorSubject).HasMaxLength(200).IsRequired(); model.Entity<AdminAuditLog>().Property(x => x.Action).HasMaxLength(80).IsRequired(); model.Entity<AdminAuditLog>().Property(x => x.ResourceType).HasMaxLength(100).IsRequired(); model.Entity<AdminAuditLog>().Property(x => x.ResourceId).HasMaxLength(200); model.Entity<AdminAuditLog>().HasIndex(x => x.CreatedAtUtc);
+        model.Entity<AdminFeatureFlag>().HasKey(x => x.Id); model.Entity<AdminFeatureFlag>().HasIndex(x => x.Key).IsUnique(); model.Entity<AdminFeatureFlag>().Property(x => x.Key).HasMaxLength(120).IsRequired(); model.Entity<AdminFeatureFlag>().Property(x => x.Description).HasMaxLength(500);
+        model.Entity<AdminSetting>().HasKey(x => x.Id); model.Entity<AdminSetting>().HasIndex(x => x.Key).IsUnique(); model.Entity<AdminSetting>().Property(x => x.Key).HasMaxLength(120).IsRequired(); model.Entity<AdminSetting>().Property(x => x.Value).HasMaxLength(500).IsRequired();
+        model.Entity<ProductMatching>().HasKey(x => x.Id); model.Entity<ProductMatching>().Property(x => x.Name).HasMaxLength(300).IsRequired(); model.Entity<ProductMatching>().Property(x => x.Brand).HasMaxLength(200); model.Entity<ProductMatching>().HasIndex(x => new { x.IsApproved, x.CreatedAtUtc });
+        model.Entity<ProductMatching>().HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.SetNull);
     }
 }

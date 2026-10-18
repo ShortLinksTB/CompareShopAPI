@@ -134,6 +134,9 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("SeoTitle").HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<string>("SeoDescription").HasMaxLength(500).HasColumnType("nvarchar(500)");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -373,6 +376,15 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.ToTable("WishlistItems");
                 });
 
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminRole", b => { b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int"); SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id")); b.Property<string>("Name").IsRequired().HasMaxLength(80).HasColumnType("nvarchar(80)"); b.HasKey("Id"); b.HasIndex("Name").IsUnique(); b.ToTable("AdminRoles"); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminPermission", b => { b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int"); SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id")); b.Property<string>("Key").IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)"); b.HasKey("Id"); b.HasIndex("Key").IsUnique(); b.ToTable("AdminPermissions"); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminRolePermission", b => { b.Property<int>("RoleId").HasColumnType("int"); b.Property<int>("PermissionId").HasColumnType("int"); b.HasKey("RoleId", "PermissionId"); b.HasIndex("PermissionId"); b.ToTable("AdminRolePermissions"); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminUserRole", b => { b.Property<int>("UserId").HasColumnType("int"); b.Property<int>("RoleId").HasColumnType("int"); b.HasKey("UserId", "RoleId"); b.HasIndex("RoleId"); b.ToTable("AdminUserRoles"); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminAuditLog", b => { b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("bigint"); SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id")); b.Property<string>("ActorSubject").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)"); b.Property<string>("Action").IsRequired().HasMaxLength(80).HasColumnType("nvarchar(80)"); b.Property<string>("ResourceType").IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)"); b.Property<string>("ResourceId").HasMaxLength(200).HasColumnType("nvarchar(200)"); b.Property<DateTime>("CreatedAtUtc").HasColumnType("datetime2"); b.Property<string>("BeforeJson").HasColumnType("nvarchar(max)"); b.Property<string>("AfterJson").HasColumnType("nvarchar(max)"); b.HasKey("Id"); b.HasIndex("CreatedAtUtc"); b.ToTable("AdminAuditLogs"); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminFeatureFlag", b => { b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int"); SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id")); b.Property<string>("Key").IsRequired().HasMaxLength(120).HasColumnType("nvarchar(120)"); b.Property<bool>("Enabled").HasColumnType("bit"); b.Property<string>("Description").HasMaxLength(500).HasColumnType("nvarchar(500)"); b.HasKey("Id"); b.HasIndex("Key").IsUnique(); b.ToTable("AdminFeatureFlags"); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminSetting", b => { b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int"); SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id")); b.Property<string>("Key").IsRequired().HasMaxLength(120).HasColumnType("nvarchar(120)"); b.Property<string>("Value").IsRequired().HasMaxLength(500).HasColumnType("nvarchar(500)"); b.HasKey("Id"); b.HasIndex("Key").IsUnique(); b.ToTable("AdminSettings"); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.ProductMatching", b => { b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int"); SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id")); b.Property<string>("Name").IsRequired().HasMaxLength(300).HasColumnType("nvarchar(300)"); b.Property<string>("Brand").HasMaxLength(200).HasColumnType("nvarchar(200)"); b.Property<int?>("ProductId").HasColumnType("int"); b.Property<DateTime>("CreatedAtUtc").HasColumnType("datetime2"); b.Property<bool>("IsApproved").HasColumnType("bit"); b.HasKey("Id"); b.HasIndex("ProductId"); b.HasIndex("IsApproved", "CreatedAtUtc"); b.ToTable("ProductMatchings"); });
+
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.PriceHistoryPoint", b =>
                 {
                     b.HasOne("CompareShopAPI.Domain.Catalog.PartnerShop", "PartnerShop")
@@ -390,6 +402,10 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Product");
                 });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminRolePermission", b => { b.HasOne("CompareShopAPI.Domain.Admin.AdminPermission", null).WithMany().HasForeignKey("PermissionId").OnDelete(DeleteBehavior.Cascade).IsRequired(); b.HasOne("CompareShopAPI.Domain.Admin.AdminRole", null).WithMany().HasForeignKey("RoleId").OnDelete(DeleteBehavior.Cascade).IsRequired(); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminUserRole", b => { b.HasOne("CompareShopAPI.Domain.Admin.AdminRole", null).WithMany().HasForeignKey("RoleId").OnDelete(DeleteBehavior.Cascade).IsRequired(); b.HasOne("CompareShopAPI.Domain.UserCommerce.User", null).WithMany().HasForeignKey("UserId").OnDelete(DeleteBehavior.Cascade).IsRequired(); });
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.ProductMatching", b => { b.HasOne("CompareShopAPI.Domain.Catalog.Product", null).WithMany().HasForeignKey("ProductId").OnDelete(DeleteBehavior.SetNull); });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.Product", b =>
                 {

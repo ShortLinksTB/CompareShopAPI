@@ -5,7 +5,6 @@ using CompareShopAPI.Domain.Ingestion;
 using Xunit;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
-using Xunit;
 
 namespace CompareShopAPI.Tests;
 

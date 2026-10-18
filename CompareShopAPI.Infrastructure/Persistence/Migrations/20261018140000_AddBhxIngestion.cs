@@ -42,7 +42,7 @@ public sealed class AddBhxIngestion : Migration
         CREATE INDEX [IX_SourceItemMappings_ProductOfferId] ON [SourceItemMappings]([ProductOfferId]);
         ALTER TABLE [ProductMatchings] ADD [DataSourceId] int NULL, [ExternalSku] nvarchar(160) NULL;
         ALTER TABLE [ProductMatchings] ADD CONSTRAINT [FK_ProductMatchings_DataSources_DataSourceId] FOREIGN KEY ([DataSourceId]) REFERENCES [DataSources]([Id]) ON DELETE NO ACTION;
-        CREATE UNIQUE INDEX [IX_ProductMatchings_DataSourceId_ExternalSku] ON [ProductMatchings]([DataSourceId],[ExternalSku]) WHERE [DataSourceId] IS NOT NULL AND [ExternalSku] IS NOT NULL;
+        EXEC(N'CREATE UNIQUE INDEX [IX_ProductMatchings_DataSourceId_ExternalSku] ON [ProductMatchings]([DataSourceId],[ExternalSku]) WHERE [DataSourceId] IS NOT NULL AND [ExternalSku] IS NOT NULL');
         DECLARE @shopId int = (SELECT TOP 1 [Id] FROM [PartnerShops] WHERE [Slug] IN (N'bach-hoa-xanh', N'bachhoaxanh', N'bhx') ORDER BY CASE WHEN [IsActive] = 1 THEN 0 ELSE 1 END, [Id]);
         INSERT INTO [DataSources] ([Key],[DisplayName],[CategoryPath],[PartnerShopId],[State],[IntervalHours],[CreatedAtUtc],[LastCompletedAtUtc])
         VALUES (N'bhx',N'Bách Hóa Xanh',N'/bia',@shopId,N'Active',72,SYSUTCDATETIME(),NULL);

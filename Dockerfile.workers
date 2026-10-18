@@ -8,7 +8,7 @@ RUN dotnet restore "CompareShopAPI.Workers/CompareShopAPI.Workers.csproj"
 COPY . .
 RUN dotnet publish "CompareShopAPI.Workers/CompareShopAPI.Workers.csproj" -c Release -o /app/publish --no-restore /p:UseAppHost=false
 
-FROM mcr.microsoft.com/dotnet/runtime:10.0-noble AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS runtime
 WORKDIR /app
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright DOTNET_EnableDiagnostics=0
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget libnss3 libatk1.0-0 libatk-bridge2.0-0 libx11-6 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxrandr2 libgbm1 libgtk-3-0 libasound2t64 libdrm2 libxkbcommon0 libatspi2.0-0 \

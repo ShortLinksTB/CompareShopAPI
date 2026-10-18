@@ -16,6 +16,7 @@ public sealed class AddBhxIngestion : Migration
           CONSTRAINT [FK_DataSources_PartnerShops_PartnerShopId] FOREIGN KEY ([PartnerShopId]) REFERENCES [PartnerShops]([Id]) ON DELETE SET NULL
         );
         CREATE UNIQUE INDEX [IX_DataSources_Key] ON [DataSources]([Key]);
+        CREATE INDEX [IX_DataSources_PartnerShopId] ON [DataSources]([PartnerShopId]);
         CREATE TABLE [SyncJobs] (
           [Id] int IDENTITY(1,1) NOT NULL CONSTRAINT [PK_SyncJobs] PRIMARY KEY,
           [DataSourceId] int NOT NULL, [State] nvarchar(20) NOT NULL, [QueuedAtUtc] datetime2 NOT NULL,
@@ -37,6 +38,8 @@ public sealed class AddBhxIngestion : Migration
           CONSTRAINT [FK_SourceItemMappings_ProductOffers_ProductOfferId] FOREIGN KEY ([ProductOfferId]) REFERENCES [ProductOffers]([Id]) ON DELETE SET NULL
         );
         CREATE UNIQUE INDEX [IX_SourceItemMappings_DataSourceId_ExternalSku] ON [SourceItemMappings]([DataSourceId],[ExternalSku]);
+        CREATE INDEX [IX_SourceItemMappings_ProductId] ON [SourceItemMappings]([ProductId]);
+        CREATE INDEX [IX_SourceItemMappings_ProductOfferId] ON [SourceItemMappings]([ProductOfferId]);
         ALTER TABLE [ProductMatchings] ADD [DataSourceId] int NULL, [ExternalSku] nvarchar(160) NULL;
         ALTER TABLE [ProductMatchings] ADD CONSTRAINT [FK_ProductMatchings_DataSources_DataSourceId] FOREIGN KEY ([DataSourceId]) REFERENCES [DataSources]([Id]) ON DELETE NO ACTION;
         CREATE UNIQUE INDEX [IX_ProductMatchings_DataSourceId_ExternalSku] ON [ProductMatchings]([DataSourceId],[ExternalSku]) WHERE [DataSourceId] IS NOT NULL AND [ExternalSku] IS NOT NULL;

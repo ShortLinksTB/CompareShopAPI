@@ -252,6 +252,7 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<int>("IntervalHours").HasColumnType("int");
                     b.HasKey("Id");
                     b.HasIndex("Key").IsUnique();
+                    b.HasIndex("PartnerShopId");
                     b.ToTable("DataSources");
                 });
 
@@ -293,6 +294,8 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<int?>("ProductOfferId").HasColumnType("int");
                     b.HasKey("Id");
                     b.HasIndex("DataSourceId", "ExternalSku").IsUnique();
+                    b.HasIndex("ProductId");
+                    b.HasIndex("ProductOfferId");
                     b.ToTable("SourceItemMappings");
                 });
 

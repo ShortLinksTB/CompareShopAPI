@@ -5,9 +5,9 @@ public static class BhxRequestGuard
     public const string AllowedHost = "bachhoaxanh.com";
 
     public static bool IsAllowed(Uri? uri) =>
-        uri is { IsAbsoluteUri: true } &&
+        uri is { IsAbsoluteUri: true, Port: 443, UserInfo.Length: 0 } &&
         string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(uri.Host, AllowedHost, StringComparison.OrdinalIgnoreCase);
+        string.Equals(uri.IdnHost, AllowedHost, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsAllowedPlaywrightRequest(string requestUrl) =>
         Uri.TryCreate(requestUrl, UriKind.Absolute, out var uri) && IsAllowed(uri);

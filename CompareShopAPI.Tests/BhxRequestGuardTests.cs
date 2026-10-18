@@ -14,8 +14,8 @@ public sealed class BhxRequestGuardTests
     [InlineData("https://www.bachhoaxanh.com/bia", false)]
     [InlineData("http://bachhoaxanh.com/bia", false)]
     [InlineData("https://other.example/bia", false)]
-    [InlineData("https://bachhoaxanh.com:444/bia", true)]
-    [InlineData("https://user@bachhoaxanh.com/bia", true)]
+    [InlineData("https://bachhoaxanh.com:444/bia", false)]
+    [InlineData("https://user@bachhoaxanh.com/bia", false)]
     [InlineData("not a url", false)]
     public void Playwright_guard_allows_only_exact_https_host(string url, bool expected)
     {
@@ -34,6 +34,7 @@ public sealed class BhxRequestGuardTests
 
         await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("http://bachhoaxanh.com/robots.txt"));
         await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("https://www.bachhoaxanh.com/robots.txt"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("https://bachhoaxanh.com:444/robots.txt"));
         Assert.Single(transport.Requests);
     }
 
@@ -55,6 +56,7 @@ public sealed class BhxRequestGuardTests
     [InlineData("https://www.bachhoaxanh.com/robots.txt", false)]
     [InlineData("http://bachhoaxanh.com/robots.txt", false)]
     [InlineData("https://other.example/robots.txt", false)]
+    [InlineData("https://bachhoaxanh.com:444/robots.txt", false)]
     public async Task Guarded_http_send_checks_each_redirect_target(string redirectTarget, bool allowed)
     {
         var requestCount = 0;

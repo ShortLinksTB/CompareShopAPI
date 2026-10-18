@@ -33,4 +33,30 @@ public sealed class IngestionDomainTests
     {
         Assert.Throws<ArgumentException>(() => new DataSource("bhx", "Bách Hóa Xanh", "/fresh-food", null, DateTime.UtcNow));
     }
+
+    [Fact]
+    public void RetryAndMappingTransitionsEnforceTheirInvariants()
+    {
+        var now = new DateTime(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc);
+        var source = new DataSource("bhx", "BHX", "/bia", null, now);
+        Assert.Throws<ArgumentOutOfRangeException>(() => source.AttachPartnerShop(0));
+        source.AttachPartnerShop(4);
+        source.ScheduleFailureRetry(now);
+        Assert.False(source.IsDue(now.AddHours(5)));
+        Assert.True(source.IsDue(now.AddHours(6)));
+        source.MarkError();
+        Assert.False(source.IsDue(now.AddDays(4)));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new SyncJob(0, now));
+        var mapping = new SourceItemMapping(1, "sku", new string('n', 305), new string('b', 205));
+        Assert.Equal(300, mapping.Name.Length);
+        Assert.Equal(200, mapping.Brand!.Length);
+        Assert.False(mapping.IsApproved);
+        mapping.UpdateSnapshot("updated", null);
+        Assert.Null(mapping.Brand);
+        Assert.Throws<ArgumentOutOfRangeException>(() => mapping.SetOffer(0));
+        mapping.Approve(2);
+        Assert.True(mapping.IsApproved);
+        Assert.Throws<InvalidOperationException>(() => mapping.Approve(3));
+    }
 }

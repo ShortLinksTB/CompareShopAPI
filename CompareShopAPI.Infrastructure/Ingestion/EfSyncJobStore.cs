@@ -81,7 +81,7 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
             }
             imported++;
         }
-        if (fullSnapshot && pending == 0 && seen.Count > 0)
+        if (fullSnapshot && seen.Count > 0)
         {
             var mappedOffers = db.SourceItemMappings.Where(m => m.DataSourceId == sourceId && m.ProductOfferId != null && !seen.Contains(m.ExternalSku)).Select(m => m.ProductOfferId!.Value);
             await db.ProductOffers.Where(o => mappedOffers.Contains(o.Id)).ExecuteUpdateAsync(update => update.SetProperty(o => o.IsActive, false), ct);

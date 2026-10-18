@@ -37,6 +37,11 @@ public sealed record ProductInput(string Slug, string Name, string? Brand, strin
 public sealed record OfferInput(int PriceVnd, string? Url, bool IsActive, bool IsOutlier);
 public sealed record SeoInput(string? Title, string? Description);
 public sealed record FeatureFlagInput(bool Enabled, string? Description);
+public sealed record AdminRoleAssignmentSnapshot(
+    string Subject,
+    IReadOnlyList<int> CurrentRoleIds,
+    IReadOnlySet<string> CurrentPermissionKeys,
+    IReadOnlySet<string> RequestedPermissionKeys);
 
 public interface IAdminData
 {
@@ -68,7 +73,8 @@ public interface IAdminData
     Task<AdminProduct?> SaveSeoProduct(int id, SeoInput input, CancellationToken ct);
     Task<Page<AdminUser>> Users(int page, int pageSize, CancellationToken ct);
     Task<AdminUser?> User(int id, CancellationToken ct);
-    Task<IReadOnlyList<string>?> ReplaceUserRoles(string actor, int userId, IReadOnlyList<int> roleIds, Func<DomainRoleAssignment, IReadOnlySet<string>, bool> canReplace, CancellationToken ct);
+    Task<AdminRoleAssignmentSnapshot?> RoleAssignmentSnapshot(int userId, IReadOnlyList<int> roleIds, CancellationToken ct);
+    Task<IReadOnlyList<string>?> ReplaceUserRoles(string actor, int userId, IReadOnlyList<int> roleIds, IReadOnlyList<int> expectedCurrentRoleIds, CancellationToken ct);
     Task<IReadOnlyList<AdminFeatureFlag>> FeatureFlags(CancellationToken ct);
     Task<AdminFeatureFlag> SaveFeatureFlag(string key, FeatureFlagInput input, CancellationToken ct);
     Task<IReadOnlyList<AdminSetting>> Settings(CancellationToken ct);
@@ -146,10 +152,11 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     {
         var actor = await Authorize(s, AdminPermissions.UsersManage, ct);
         if (roleIds is null || roleIds.Any(x => x <= 0) || roleIds.Distinct().Count() != roleIds.Count) throw new ArgumentException("Role IDs must be positive and unique.");
-        var before = await data.User(id, ct);
-        if (before is null) throw new KeyNotFoundException();
-        var roles = await data.ReplaceUserRoles(actor, id, roleIds,
-            (assignment, requestedPermissions) => assignment.CanBeReplacedBy(actor, requestedPermissions), ct);
+        var snapshot = await data.RoleAssignmentSnapshot(id, roleIds, ct);
+        if (snapshot is null) throw new KeyNotFoundException();
+        var assignment = new DomainRoleAssignment(snapshot.Subject, snapshot.CurrentPermissionKeys);
+        if (!assignment.CanBeReplacedBy(actor, snapshot.RequestedPermissionKeys)) throw new AdminForbiddenException();
+        var roles = await data.ReplaceUserRoles(actor, id, roleIds, snapshot.CurrentRoleIds, ct);
         if (roles is null) throw new AdminForbiddenException();
         return roles;
     }

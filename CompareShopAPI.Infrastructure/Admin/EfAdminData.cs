@@ -11,7 +11,6 @@ using DomainSetting = CompareShopAPI.Domain.Admin.AdminSetting;
 using DomainUserRole = CompareShopAPI.Domain.Admin.AdminUserRole;
 using DomainAuditLog = CompareShopAPI.Domain.Admin.AdminAuditLog;
 using DomainUser = CompareShopAPI.Domain.UserCommerce.User;
-using DomainRoleAssignment = CompareShopAPI.Domain.Admin.AdminRoleAssignment;
 
 namespace CompareShopAPI.Infrastructure.Admin;
 
@@ -164,17 +163,25 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var roles = await db.AdminUserRoles.AsNoTracking().Where(x => x.UserId == id).Join(db.AdminRoles, ur => ur.RoleId, role => role.Id, (_, role) => role.Name).Order().ToArrayAsync(ct);
         return new AdminUser(user.Id, user.CreatedAtUtc, roles);
     }
-    public async Task<IReadOnlyList<string>?> ReplaceUserRoles(string actor, int userId, IReadOnlyList<int> roleIds, Func<DomainRoleAssignment, IReadOnlySet<string>, bool> canReplace, CancellationToken ct)
+    public async Task<AdminRoleAssignmentSnapshot?> RoleAssignmentSnapshot(int userId, IReadOnlyList<int> roleIds, CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId, ct);
+        if (user is null) return null;
+        var currentRoleIds = await db.AdminUserRoles.AsNoTracking().Where(x => x.UserId == userId).OrderBy(x => x.RoleId).Select(x => x.RoleId).ToListAsync(ct);
+        if (roleIds.Count > 0 && await db.AdminRoles.CountAsync(x => roleIds.Contains(x.Id), ct) != roleIds.Distinct().Count()) throw new ArgumentException("A role does not exist.");
+        var currentPermissions = await PermissionKeys(currentRoleIds, ct);
+        var requestedPermissions = await PermissionKeys(roleIds, ct);
+        return new(user.KeycloakSubject, currentRoleIds, currentPermissions, requestedPermissions);
+    }
+
+    public async Task<IReadOnlyList<string>?> ReplaceUserRoles(string actor, int userId, IReadOnlyList<int> roleIds, IReadOnlyList<int> expectedCurrentRoleIds, CancellationToken ct)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var user = await db.Users.SingleOrDefaultAsync(x => x.Id == userId, ct); if (user is null) return null;
-        var currentRoles = await db.AdminUserRoles.Where(x => x.UserId == userId).Select(x => x.RoleId).ToListAsync(ct);
+        var currentRoles = await db.AdminUserRoles.Where(x => x.UserId == userId).OrderBy(x => x.RoleId).Select(x => x.RoleId).ToListAsync(ct);
+        if (!currentRoles.SequenceEqual(expectedCurrentRoleIds)) return null;
         var beforeNames = await db.AdminRoles.AsNoTracking().Where(x => currentRoles.Contains(x.Id)).OrderBy(x => x.Name).Select(x => x.Name).ToListAsync(ct);
         if (roleIds.Count > 0 && await db.AdminRoles.CountAsync(x => roleIds.Contains(x.Id), ct) != roleIds.Distinct().Count()) throw new ArgumentException("A role does not exist.");
-        var currentPermissions = await PermissionKeys(currentRoles, ct);
-        var requestedPermissions = await PermissionKeys(roleIds, ct);
-        var assignment = new DomainRoleAssignment(user.KeycloakSubject, currentPermissions);
-        if (!canReplace(assignment, requestedPermissions)) return null;
         await db.AdminUserRoles.Where(x => x.UserId == userId).ExecuteDeleteAsync(ct);
         db.AdminUserRoles.AddRange(roleIds.Select(roleId => new DomainUserRole { UserId = userId, RoleId = roleId }));
         await db.SaveChangesAsync(ct);

@@ -2,7 +2,9 @@ using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Infrastructure.Ingestion;
 using CompareShopAPI.Infrastructure.Persistence;
 using CompareShopAPI.Workers.Ingestion;
+using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);

@@ -5,7 +5,7 @@ public static class BhxRequestGuard
     public const string AllowedHost = "bachhoaxanh.com";
 
     public static bool IsAllowed(Uri? uri) =>
-        uri is { IsAbsoluteUri: true, IsDefaultPort: true, UserInfo.Length: 0 } &&
+        uri is { IsAbsoluteUri: true } &&
         string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
         string.Equals(uri.Host, AllowedHost, StringComparison.OrdinalIgnoreCase);
 

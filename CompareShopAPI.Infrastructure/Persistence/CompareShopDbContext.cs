@@ -3,6 +3,7 @@ using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Articles;
+using CompareShopAPI.Domain.Ingestion;
 namespace CompareShopAPI.Infrastructure.Persistence;
 public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> options) : DbContext(options)
 {
@@ -28,6 +29,9 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<ProductMatching> ProductMatchings => Set<ProductMatching>();
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<ArticleRelatedProduct> ArticleRelatedProducts => Set<ArticleRelatedProduct>();
+    public DbSet<DataSource> DataSources => Set<DataSource>();
+    public DbSet<SyncJob> SyncJobs => Set<SyncJob>();
+    public DbSet<SourceItemMapping> SourceItemMappings => Set<SourceItemMapping>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
@@ -91,6 +95,9 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<AdminSetting>().HasKey(x => x.Id); model.Entity<AdminSetting>().HasIndex(x => x.Key).IsUnique(); model.Entity<AdminSetting>().Property(x => x.Key).HasMaxLength(120).IsRequired(); model.Entity<AdminSetting>().Property(x => x.Value).HasMaxLength(500).IsRequired();
         model.Entity<ProductMatching>().HasKey(x => x.Id); model.Entity<ProductMatching>().Property(x => x.Name).HasMaxLength(300).IsRequired(); model.Entity<ProductMatching>().Property(x => x.Brand).HasMaxLength(200); model.Entity<ProductMatching>().HasIndex(x => new { x.IsApproved, x.CreatedAtUtc });
         model.Entity<ProductMatching>().HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.SetNull);
+        model.Entity<ProductMatching>().Property(x => x.ExternalSku).HasMaxLength(160);
+        model.Entity<ProductMatching>().HasOne<DataSource>().WithMany().HasForeignKey(x => x.DataSourceId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<ProductMatching>().HasIndex(x => new { x.DataSourceId, x.ExternalSku }).IsUnique().HasFilter("[DataSourceId] IS NOT NULL AND [ExternalSku] IS NOT NULL");
 
         model.Entity<Article>().HasKey(x => x.Id);
         model.Entity<Article>().Property(x => x.Slug).HasMaxLength(200).IsRequired();
@@ -113,6 +120,32 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
             seo.Property(x => x.Index).HasColumnName("SeoIndex").IsRequired();
         });
         model.Entity<Article>().HasMany(x => x.RelatedProducts).WithOne().HasForeignKey(x => x.ArticleId).OnDelete(DeleteBehavior.Cascade);
+
+        model.Entity<DataSource>().HasKey(x => x.Id);
+        model.Entity<DataSource>().HasIndex(x => x.Key).IsUnique();
+        model.Entity<DataSource>().Property(x => x.Key).HasMaxLength(80).IsRequired();
+        model.Entity<DataSource>().Property(x => x.DisplayName).HasMaxLength(160).IsRequired();
+        model.Entity<DataSource>().Property(x => x.CategoryPath).HasMaxLength(80).IsRequired();
+        model.Entity<DataSource>().Property(x => x.State).HasConversion<string>().HasMaxLength(20).IsRequired();
+        model.Entity<DataSource>().Property(x => x.NextAttemptAtUtc);
+        model.Entity<DataSource>().HasOne<PartnerShop>().WithMany().HasForeignKey(x => x.PartnerShopId).OnDelete(DeleteBehavior.SetNull);
+        model.Entity<SyncJob>().HasKey(x => x.Id);
+        model.Entity<SyncJob>().Property(x => x.State).HasConversion<string>().HasMaxLength(20).IsRequired();
+        model.Entity<SyncJob>().Property(x => x.LeaseId).HasMaxLength(64).IsRequired();
+        model.Entity<SyncJob>().Property(x => x.ErrorCode).HasMaxLength(50);
+        model.Entity<SyncJob>().Property(x => x.ErrorSummary).HasMaxLength(240);
+        model.Entity<SyncJob>().HasIndex(x => new { x.DataSourceId, x.State });
+        model.Entity<SyncJob>().HasIndex(x => x.RetryOfJobId).IsUnique().HasFilter("[RetryOfJobId] IS NOT NULL");
+        model.Entity<SyncJob>().HasOne<DataSource>().WithMany().HasForeignKey(x => x.DataSourceId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<SyncJob>().HasOne<SyncJob>().WithMany().HasForeignKey(x => x.RetryOfJobId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<SourceItemMapping>().HasKey(x => x.Id);
+        model.Entity<SourceItemMapping>().HasIndex(x => new { x.DataSourceId, x.ExternalSku }).IsUnique();
+        model.Entity<SourceItemMapping>().Property(x => x.ExternalSku).HasMaxLength(160).IsRequired();
+        model.Entity<SourceItemMapping>().Property(x => x.Name).HasMaxLength(300).IsRequired();
+        model.Entity<SourceItemMapping>().Property(x => x.Brand).HasMaxLength(200);
+        model.Entity<SourceItemMapping>().HasOne<DataSource>().WithMany().HasForeignKey(x => x.DataSourceId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<SourceItemMapping>().HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<SourceItemMapping>().HasOne<ProductOffer>().WithMany().HasForeignKey(x => x.ProductOfferId).OnDelete(DeleteBehavior.SetNull);
         model.Entity<ArticleRelatedProduct>().HasKey(x => new { x.ArticleId, x.ProductId });
         model.Entity<ArticleRelatedProduct>().HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
     }

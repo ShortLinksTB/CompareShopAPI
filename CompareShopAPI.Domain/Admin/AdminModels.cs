@@ -120,12 +120,20 @@ public sealed class ProductMatching
         CreatedAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);
     }
 
+    public static ProductMatching ForSourceItem(string name, string? brand, DateTime createdAtUtc, int dataSourceId, string externalSku)
+    {
+        var item = new ProductMatching(name, brand, createdAtUtc) { DataSourceId = dataSourceId, ExternalSku = externalSku };
+        return item;
+    }
+
     public int Id { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public string? Brand { get; private set; }
     public int? ProductId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public bool IsApproved { get; private set; }
+    public int? DataSourceId { get; private set; }
+    public string? ExternalSku { get; private set; }
 
     public bool TryApprove(int productId)
     {

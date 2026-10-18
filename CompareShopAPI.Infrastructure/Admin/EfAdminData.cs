@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Data;
 using CompareShopAPI.Application.Admin;
+using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,7 @@ using DomainUser = CompareShopAPI.Domain.UserCommerce.User;
 
 namespace CompareShopAPI.Infrastructure.Admin;
 
-public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : IAdminData
+public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : IAdminData, IAdminPermissionReader
 {
     public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) => db.AdminUserRoles.AsNoTracking()
         .Join(db.Users.AsNoTracking(), ur => ur.UserId, user => user.Id, (ur, user) => new { ur.RoleId, user.KeycloakSubject })
@@ -118,10 +119,18 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     public async Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct) => await db.ProductMatchings.AsNoTracking().Where(x => x.ProductId == null && !x.IsApproved).OrderBy(x => x.CreatedAtUtc).Select(MatchingDto).ToListAsync(ct);
     public async Task<CompareShopAPI.Domain.Admin.ProductMatching?> MatchingForApproval(int id, int productId, CancellationToken ct)
     {
-        if (!await db.Products.AnyAsync(x => x.Id == productId, ct)) throw new ArgumentException("Product does not exist.");
+        if (!await db.Products.AnyAsync(x => x.Id == productId && x.IsActive, ct)) throw new ArgumentException("Active product does not exist.");
         return await db.ProductMatchings.SingleOrDefaultAsync(x => x.Id == id, ct);
     }
-    public async Task SaveMatching(CompareShopAPI.Domain.Admin.ProductMatching matching, CancellationToken ct) => await db.SaveChangesAsync(ct);
+    public async Task SaveMatching(CompareShopAPI.Domain.Admin.ProductMatching matching, CancellationToken ct)
+    {
+        if (matching.DataSourceId is int sourceId && matching.ExternalSku is string sku && matching.ProductId is int productId)
+        {
+            var mapping = await db.SourceItemMappings.SingleAsync(x => x.DataSourceId == sourceId && x.ExternalSku == sku, ct);
+            mapping.Approve(productId);
+        }
+        await db.SaveChangesAsync(ct);
+    }
 
     public async Task<Page<AdminAuditEntry>> AuditLogs(int page, int size, CancellationToken ct)
     {
@@ -248,7 +257,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     private static System.Text.Json.JsonElement? Parse(string? value) { if (string.IsNullOrWhiteSpace(value)) return null; using var doc = JsonDocument.Parse(value); return doc.RootElement.Clone(); }
     private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive);
     private static readonly System.Linq.Expressions.Expression<Func<Product, AdminProduct>> ProductDto = x => new AdminProduct(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive);
-    private static readonly System.Linq.Expressions.Expression<Func<CompareShopAPI.Domain.Admin.ProductMatching, AdminMatching>> MatchingDto = x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved);
+    private static readonly System.Linq.Expressions.Expression<Func<CompareShopAPI.Domain.Admin.ProductMatching, AdminMatching>> MatchingDto = x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId);
     private static int BoundSize(int size) => Math.Clamp(size, 1, 100);
     private static int Offset(int page, int size) => (int)Math.Min(int.MaxValue, ((long)Math.Max(1, page) - 1) * BoundSize(size));
     private static async Task<Page<T>> PageOf<T>(IQueryable<T> query, int page, int size, CancellationToken ct)

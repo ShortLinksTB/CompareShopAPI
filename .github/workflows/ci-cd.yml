@@ -79,6 +79,16 @@ jobs:
           push: true
           tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
 
+      - name: Build and publish separate Worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.workers
+          push: true
+          tags: |
+            ghcr.io/shortlinkstb/compareshop-api-workers:${{ github.sha }}
+            ghcr.io/shortlinkstb/compareshop-api-workers:dev
+
       - name: Notify GitOps image-tag updater
         uses: actions/github-script@v7
         with:

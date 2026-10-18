@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: compareshop-api-workers
+  namespace: compareshop-dev
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: compareshop-api-workers
+  namespace: compareshop-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: compareshop-api-workers
+  template:
+    metadata:
+      labels:
+        app: compareshop-api-workers
+    spec:
+      serviceAccountName: compareshop-api-workers
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: workers
+          image: ghcr.io/shortlinkstb/compareshop-api-workers:dev
+          imagePullPolicy: Always
+          env:
+            - name: ConnectionStrings__CompareShopDb
+              valueFrom:
+                secretKeyRef:
+                  name: compareshop-api
+                  key: ConnectionStrings__CompareShopDb
+            - name: PLAYWRIGHT_BROWSERS_PATH
+              value: /ms-playwright
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+              ephemeral-storage: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+              ephemeral-storage: 1Gi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: home
+              mountPath: /home/app
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: home
+          emptyDir:
+            sizeLimit: 64Mi
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: compareshop-api-workers-egress
+  namespace: compareshop-dev
+spec:
+  endpointSelector:
+    matchLabels:
+      app: compareshop-api-workers
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+    - toFQDNs:
+        - matchName: www.bachhoaxanh.com
+        - matchName: bachhoaxanh.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: shortlink-infra-dev
+            app: mssql
+      toPorts:
+        - ports:
+            - port: "1433"
+              protocol: TCP

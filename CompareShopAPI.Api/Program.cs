@@ -17,10 +17,12 @@ using Scalar.AspNetCore;
 using CompareShopAPI.Api.RateLimiting;
 using CompareShopAPI.Api.Admin;
 using CompareShopAPI.Application.Admin;
+using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Infrastructure.Admin;
 using CompareShopAPI.Api.Articles;
 using CompareShopAPI.Application.Articles;
 using CompareShopAPI.Infrastructure.Articles;
+using CompareShopAPI.Infrastructure.Ingestion;
 
 var seedCatalogRequested = CatalogSeedCommand.IsRequested(args);
 var builder = WebApplication.CreateBuilder(seedCatalogRequested ? Array.Empty<string>() : args);
@@ -50,7 +52,12 @@ builder.Services.AddScoped<IArticleRepository, EfArticleRepository>();
 builder.Services.AddScoped<IArticlePermissionGate, AdminArticlePermissionGate>();
 builder.Services.AddScoped<IArticleProductLookup, UserCommerceArticleProductLookup>();
 builder.Services.AddScoped<ArticleService>();
-builder.Services.AddHostedService<CompareShopAPI.Workers.Articles.ArticlePublishingWorker>();
+builder.Services.AddHostedService<ArticlePublishingWorker>();
+builder.Services.AddScoped<ISyncJobStore, EfSyncJobStore>();
+builder.Services.AddScoped<IPriceHistoryRecorder, EfPriceHistoryRecorder>();
+builder.Services.AddScoped<IAdminPermissionReader>(services => services.GetRequiredService<IAdminData>() as IAdminPermissionReader
+    ?? throw new InvalidOperationException("Admin permission reader is unavailable."));
+builder.Services.AddScoped<IngestionAdminService>();
 builder.Services.AddScoped<AdminService>(services => new AdminService(
     services.GetRequiredService<IAdminData>(),
     services.GetRequiredService<IConfiguration>().GetSection("Admin:BootstrapSuperAdminSubjects").GetChildren()

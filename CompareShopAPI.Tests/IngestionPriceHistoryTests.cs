@@ -40,7 +40,7 @@ public sealed class IngestionPriceHistoryTests(SqlServerTestFixture sqlServer)
             offer.PriceVnd = 11000;
             await db.SaveChangesAsync();
             await recorder.RecordForChangedMinimums(CancellationToken.None);
-            Assert.Equal([12000, 11000], await db.PriceHistoryPoints.OrderBy(x => x.Id).Select(x => x.MinPriceVnd).ToArrayAsync());
+            Assert.Equal(new[] { 12000, 11000 }, await db.PriceHistoryPoints.OrderBy(x => x.Id).Select(x => x.MinPriceVnd).ToArrayAsync());
         }
         finally
         {

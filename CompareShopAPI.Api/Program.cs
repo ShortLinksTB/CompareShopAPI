@@ -15,6 +15,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using CompareShopAPI.Api.RateLimiting;
+using CompareShopAPI.Api.Admin;
+using CompareShopAPI.Application.Admin;
+using CompareShopAPI.Infrastructure.Admin;
 
 var seedCatalogRequested = CatalogSeedCommand.IsRequested(args);
 var builder = WebApplication.CreateBuilder(seedCatalogRequested ? Array.Empty<string>() : args);
@@ -39,6 +42,8 @@ builder.Services.AddScoped<IUserCommerceRepository, EfUserCommerceRepository>();
 builder.Services.AddScoped<WishlistService>();
 builder.Services.AddScoped<PriceAlertService>();
 builder.Services.AddScoped<PriceHistoryService>();
+builder.Services.AddScoped<IAdminData, EfAdminData>();
+builder.Services.AddScoped<AdminService>();
 builder.Services.AddSingleton<MigrationState>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("database", tags: ["ready"]);
 builder.Services.AddCors(options => options.AddPolicy("UiClients", policy =>
@@ -78,7 +83,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
-app.MapGroup("/admin").RequireAuthorization("Admin").MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminEndpoints();
 app.MapGroup("/api/v1").MapCatalogEndpoints();
 app.MapGroup("/api/v1").MapUserCommerceEndpoints();
 if (app.Environment.IsDevelopment())

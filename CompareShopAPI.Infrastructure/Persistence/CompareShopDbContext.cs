@@ -135,6 +135,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<SyncJob>().Property(x => x.ErrorCode).HasMaxLength(50);
         model.Entity<SyncJob>().Property(x => x.ErrorSummary).HasMaxLength(240);
         model.Entity<SyncJob>().HasIndex(x => new { x.DataSourceId, x.State });
+        model.Entity<SyncJob>().HasIndex(x => x.DataSourceId).IsUnique().HasFilter("[State] = N'Running'").HasDatabaseName("UX_SyncJobs_ActiveLease");
         model.Entity<SyncJob>().HasIndex(x => x.RetryOfJobId).IsUnique().HasFilter("[RetryOfJobId] IS NOT NULL");
         model.Entity<SyncJob>().HasOne<DataSource>().WithMany().HasForeignKey(x => x.DataSourceId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<SyncJob>().HasOne<SyncJob>().WithMany().HasForeignKey(x => x.RetryOfJobId).OnDelete(DeleteBehavior.Restrict);

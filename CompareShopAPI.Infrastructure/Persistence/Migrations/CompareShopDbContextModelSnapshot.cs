@@ -273,6 +273,10 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<string>("LeaseId").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
                     b.HasKey("Id");
                     b.HasIndex("DataSourceId", "State");
+                    b.HasIndex("DataSourceId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SyncJobs_ActiveLease")
+                        .HasFilter("[State] = N'Running'");
                     b.HasIndex("RetryOfJobId").IsUnique().HasFilter("[RetryOfJobId] IS NOT NULL");
                     b.ToTable("SyncJobs");
                 });

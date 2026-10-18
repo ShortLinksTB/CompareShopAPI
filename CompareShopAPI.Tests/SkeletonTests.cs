@@ -59,6 +59,7 @@ public sealed class SkeletonTests
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health")).StatusCode);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/admin/health")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/admin/articles")).StatusCode);
         client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}"));
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/admin/health")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/docs")).StatusCode);

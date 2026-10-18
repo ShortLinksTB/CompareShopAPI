@@ -5,6 +5,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../CompareShopAPI.Application/CompareShopAPI.Application.csproj" />
   </ItemGroup>
 </Project>

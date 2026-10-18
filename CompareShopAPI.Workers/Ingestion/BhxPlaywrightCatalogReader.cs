@@ -8,14 +8,20 @@ namespace CompareShopAPI.Workers.Ingestion;
 
 public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
 {
-    private static readonly Uri CategoryUri = new("https://www.bachhoaxanh.com/bia");
-    private static readonly HashSet<string> AllowedHosts = new(StringComparer.OrdinalIgnoreCase) { "www.bachhoaxanh.com", "bachhoaxanh.com" };
+    private static readonly Uri CategoryUri = new("https://bachhoaxanh.com/bia");
+
+    private readonly Func<HttpClient> robotsClientFactory;
+
+    public BhxPlaywrightCatalogReader() : this(() => BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(8))) { }
+
+    internal BhxPlaywrightCatalogReader(Func<HttpClient> robotsClientFactory) => this.robotsClientFactory = robotsClientFactory;
+
     public async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct)
     {
-        using var robotsClient = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+        using var robotsClient = robotsClientFactory();
         using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(CategoryUri, "/robots.txt"));
         robotsRequest.Headers.UserAgent.ParseAdd("CompareShopPriceMonitor/1.0 (+https://giamha.online)");
-        using var robotsResponse = await robotsClient.SendAsync(robotsRequest, ct);
+        using var robotsResponse = await BhxRequestGuard.SendWithRedirectsAsync(robotsClient, robotsRequest, ct);
         if (robotsResponse.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized)
             throw new InvalidDataException("BHX robots policy denied access.");
         if (robotsResponse.IsSuccessStatusCode)
@@ -30,13 +36,14 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
                 throw new InvalidDataException("BHX robots policy denies the validated category.");
         }
         using var playwright = await Playwright.CreateAsync();
-        await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true, Args = ["--disable-dev-shm-usage"] });
+        await using var egressProxy = await BhxForwardProxy.StartAsync(ct);
+        await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(egressProxy.Server));
         var page = await browser.NewPageAsync(new BrowserNewPageOptions { AcceptDownloads = false });
         page.SetDefaultNavigationTimeout(20_000); page.SetDefaultTimeout(8_000);
         using var requestGate = new SemaphoreSlim(1, 1);
         await page.RouteAsync("**/*", async route =>
         {
-            if (!Uri.TryCreate(route.Request.Url, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps || !AllowedHosts.Contains(uri.Host)) await route.AbortAsync();
+            if (!Uri.TryCreate(route.Request.Url, UriKind.Absolute, out var uri) || !BhxRequestGuard.IsAllowed(uri)) await route.AbortAsync();
             else
             {
                 await requestGate.WaitAsync(ct);
@@ -65,7 +72,7 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
             if (string.IsNullOrWhiteSpace(sku) || string.IsNullOrWhiteSpace(name) || !int.TryParse(Regex.Replace(priceText ?? "", "[^0-9]", ""), NumberStyles.None, CultureInfo.InvariantCulture, out var price) || price <= 0 || string.IsNullOrWhiteSpace(href))
                 throw new InvalidDataException("A BHX product card did not match the validated schema.");
             var url = new Uri(CategoryUri, href);
-            if (!AllowedHosts.Contains(url.Host) || url.Scheme != "https") throw new InvalidDataException("BHX product link points to an unapproved host.");
+            if (!BhxRequestGuard.IsAllowed(url)) throw new InvalidDataException("BHX product link points to an unapproved host.");
             result.Add(new ScrapedOffer(sku, name, null, price, url.ToString()));
             await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
         }

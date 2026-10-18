@@ -2,6 +2,7 @@ using System.Text.Json;
 using DomainAdminFeatureFlag = CompareShopAPI.Domain.Admin.AdminFeatureFlag;
 using DomainAdminSetting = CompareShopAPI.Domain.Admin.AdminSetting;
 using DomainProductMatching = CompareShopAPI.Domain.Admin.ProductMatching;
+using DomainRoleAssignment = CompareShopAPI.Domain.Admin.AdminRoleAssignment;
 
 namespace CompareShopAPI.Application.Admin;
 
@@ -67,7 +68,7 @@ public interface IAdminData
     Task<AdminProduct?> SaveSeoProduct(int id, SeoInput input, CancellationToken ct);
     Task<Page<AdminUser>> Users(int page, int pageSize, CancellationToken ct);
     Task<AdminUser?> User(int id, CancellationToken ct);
-    Task<IReadOnlyList<string>?> ReplaceUserRoles(string actor, int userId, IReadOnlyList<int> roleIds, CancellationToken ct);
+    Task<IReadOnlyList<string>?> ReplaceUserRoles(string actor, int userId, IReadOnlyList<int> roleIds, Func<DomainRoleAssignment, IReadOnlySet<string>, bool> canReplace, CancellationToken ct);
     Task<IReadOnlyList<AdminFeatureFlag>> FeatureFlags(CancellationToken ct);
     Task<AdminFeatureFlag> SaveFeatureFlag(string key, FeatureFlagInput input, CancellationToken ct);
     Task<IReadOnlyList<AdminSetting>> Settings(CancellationToken ct);
@@ -147,7 +148,8 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         if (roleIds is null || roleIds.Any(x => x <= 0) || roleIds.Distinct().Count() != roleIds.Count) throw new ArgumentException("Role IDs must be positive and unique.");
         var before = await data.User(id, ct);
         if (before is null) throw new KeyNotFoundException();
-        var roles = await data.ReplaceUserRoles(actor, id, roleIds, ct);
+        var roles = await data.ReplaceUserRoles(actor, id, roleIds,
+            (assignment, requestedPermissions) => assignment.CanBeReplacedBy(actor, requestedPermissions), ct);
         if (roles is null) throw new AdminForbiddenException();
         return roles;
     }

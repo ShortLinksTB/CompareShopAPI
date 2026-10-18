@@ -4,6 +4,27 @@ public sealed class AdminRole { public int Id { get; set; } public required stri
 public sealed class AdminPermission { public int Id { get; set; } public required string Key { get; set; } }
 public sealed class AdminRolePermission { public int RoleId { get; set; } public int PermissionId { get; set; } }
 public sealed class AdminUserRole { public int UserId { get; set; } public int RoleId { get; set; } }
+
+public sealed class AdminRoleAssignment
+{
+    private readonly HashSet<string> currentPermissionKeys;
+
+    public AdminRoleAssignment(string subject, IEnumerable<string> currentPermissionKeys)
+    {
+        if (string.IsNullOrWhiteSpace(subject)) throw new ArgumentException("A user subject is required.", nameof(subject));
+        Subject = subject;
+        this.currentPermissionKeys = currentPermissionKeys.ToHashSet(StringComparer.Ordinal);
+    }
+
+    public string Subject { get; }
+
+    public bool CanBeReplacedBy(string actorSubject, IEnumerable<string> requestedPermissionKeys)
+    {
+        if (!StringComparer.Ordinal.Equals(actorSubject, Subject)) return true;
+        return requestedPermissionKeys.All(currentPermissionKeys.Contains);
+    }
+}
+
 public sealed class AdminAuditLog
 {
     public long Id { get; set; }

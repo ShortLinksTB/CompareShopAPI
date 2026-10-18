@@ -53,6 +53,11 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         Assert.True(matching.IsApproved);
         Assert.False(matching.TryApprove(43));
         Assert.Throws<ArgumentOutOfRangeException>(() => new CompareShopAPI.Domain.Admin.ProductMatching("Pending", null, DateTime.UtcNow).TryApprove(0));
+
+        var roleAssignment = new CompareShopAPI.Domain.Admin.AdminRoleAssignment("self", ["products.read", "users.manage"]);
+        Assert.True(roleAssignment.CanBeReplacedBy("self", ["products.read"]));
+        Assert.False(roleAssignment.CanBeReplacedBy("self", ["products.read", "roles.manage"]));
+        Assert.True(roleAssignment.CanBeReplacedBy("another-admin", ["products.read", "roles.manage"]));
     }
 
     [Fact]

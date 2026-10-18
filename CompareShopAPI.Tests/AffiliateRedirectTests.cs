@@ -23,7 +23,7 @@ public sealed class AffiliateRedirectTests
     public async Task Public_redirect_uses_stored_destination_records_click_and_is_rate_limited()
     {
         var repository = new FakeAffiliateRedirectRepository();
-        await using var app = new ApiFactory(configureServices: services => ConfigureAffiliateServices(services, repository));
+        await using var app = new ApiFactory(configureServices: services => ConfigureAffiliateServices(services, repository, useRealRateLimiter: true));
         using var client = app.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
         for (var i = 0; i < 30; i++)
@@ -132,11 +132,24 @@ public sealed class AffiliateRedirectTests
     }
 
     [Fact]
-    public async Task Missing_redis_configuration_fails_open_without_logging_client_ip()
+    public async Task Missing_redis_configuration_uses_per_ip_fallback_and_returns_retry_after()
     {
-        var limiter = new RedisAffiliateRedirectRateLimiter(null, "compareshop:", Options.Create(new AffiliateRedirectRateLimitOptions()), NullLogger<RedisAffiliateRedirectRateLimiter>.Instance);
-        var decision = await limiter.TryAcquireAsync("192.0.2.4", default);
-        Assert.Equal(AffiliateRedirectRateLimitStatus.FailOpen, decision.Status);
+        var limiter = new RedisAffiliateRedirectRateLimiter(null, "compareshop:", Options.Create(new AffiliateRedirectRateLimitOptions
+        {
+            PermitLimit = 30,
+            WindowSeconds = 60,
+            GraceSeconds = 5
+        }), NullLogger<RedisAffiliateRedirectRateLimiter>.Instance);
+        using (limiter)
+        {
+            for (var i = 0; i < 30; i++)
+                Assert.Equal(AffiliateRedirectRateLimitStatus.Allowed, (await limiter.TryAcquireAsync("192.0.2.4", default)).Status);
+
+            var limited = await limiter.TryAcquireAsync("192.0.2.4", default);
+            Assert.Equal(AffiliateRedirectRateLimitStatus.Rejected, limited.Status);
+            Assert.InRange(limited.RetryAfterSeconds, 1, 60);
+            Assert.Equal(AffiliateRedirectRateLimitStatus.Allowed, (await limiter.TryAcquireAsync("192.0.2.5", default)).Status);
+        }
     }
 
     [Fact]
@@ -214,12 +227,20 @@ public sealed class AffiliateRedirectTests
                 : AffiliateRedirectRateLimitDecision.Reject(60));
     }
 
-    private static void ConfigureAffiliateServices(IServiceCollection services, FakeAffiliateRedirectRepository repository)
+    private static void ConfigureAffiliateServices(IServiceCollection services, FakeAffiliateRedirectRepository repository, bool useRealRateLimiter = false)
     {
         services.RemoveAll<IAffiliateRedirectRepository>();
         services.AddSingleton<IAffiliateRedirectRepository>(repository);
         services.RemoveAll<IAffiliateRedirectRateLimiter>();
-        services.AddSingleton<IAffiliateRedirectRateLimiter>(new FakeAffiliateRedirectRateLimiter());
+        if (useRealRateLimiter)
+        {
+            services.AddSingleton<IAffiliateRedirectRateLimiter>(new RedisAffiliateRedirectRateLimiter(
+                null,
+                "compareshop:",
+                Options.Create(new AffiliateRedirectRateLimitOptions { PermitLimit = 30, WindowSeconds = 60, GraceSeconds = 5 }),
+                NullLogger<RedisAffiliateRedirectRateLimiter>.Instance));
+        }
+        else services.AddSingleton<IAffiliateRedirectRateLimiter>(new FakeAffiliateRedirectRateLimiter());
         services.RemoveAll<IClientIpResolver>();
         services.AddSingleton<IClientIpResolver>(new FakeClientIpResolver());
     }

@@ -21,9 +21,11 @@ public sealed class IngestionDomainTests
     {
         var now = DateTime.UtcNow;
         var job = new SyncJob(1, now);
-        Assert.True(job.Start(now, "lease"));
+        Assert.True(job.Start(now, "lease", now.AddMinutes(SyncJob.LeaseDurationMinutes)));
+        Assert.Equal(now.AddMinutes(SyncJob.LeaseDurationMinutes), job.LeaseExpiresAtUtc);
         job.Finish(SyncJobState.Failed, now.AddMinutes(1), 0, 0, 0, "source_failure", "Bad\r\npage content");
         Assert.Equal(SyncJobState.Failed, job.State);
+        Assert.Null(job.LeaseExpiresAtUtc);
         Assert.Equal("Badpage content", job.ErrorSummary);
         Assert.Throws<InvalidOperationException>(() => job.Finish(SyncJobState.Success, now.AddMinutes(2), 1, 1, 0));
     }

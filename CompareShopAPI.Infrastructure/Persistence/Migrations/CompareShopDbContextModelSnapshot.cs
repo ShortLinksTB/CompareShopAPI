@@ -272,6 +272,7 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<string>("ErrorSummary").HasMaxLength(240).HasColumnType("nvarchar(240)");
                     b.Property<int?>("RetryOfJobId").HasColumnType("int");
                     b.Property<string>("LeaseId").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
+                    b.Property<DateTime?>("LeaseExpiresAtUtc").HasColumnType("datetime2");
                     b.HasKey("Id");
                     b.HasIndex("DataSourceId", "State");
                     b.HasIndex("DataSourceId")

@@ -32,6 +32,7 @@ public sealed class DataSource
 
 public sealed class SyncJob
 {
+    public const int LeaseDurationMinutes = 30;
     private SyncJob() { }
     public SyncJob(int dataSourceId, DateTime queuedAtUtc, int? retryOfJobId = null)
     {
@@ -51,11 +52,23 @@ public sealed class SyncJob
     public string? ErrorSummary { get; private set; }
     public int? RetryOfJobId { get; private set; }
     public string LeaseId { get; private set; } = "";
-    public bool Start(DateTime nowUtc, string leaseId) { if (State != SyncJobState.Queued) return false; State = SyncJobState.Running; StartedAtUtc = DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc); LeaseId = leaseId; return true; }
+    public DateTime? LeaseExpiresAtUtc { get; private set; }
+    public bool Start(DateTime nowUtc, string leaseId, DateTime leaseExpiresAtUtc)
+    {
+        if (State != SyncJobState.Queued) return false;
+        if (string.IsNullOrWhiteSpace(leaseId) || leaseId.Length > 64) throw new ArgumentException("Invalid lease ID.", nameof(leaseId));
+        if (leaseExpiresAtUtc <= nowUtc) throw new ArgumentOutOfRangeException(nameof(leaseExpiresAtUtc));
+        State = SyncJobState.Running;
+        StartedAtUtc = DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc);
+        LeaseId = leaseId;
+        LeaseExpiresAtUtc = DateTime.SpecifyKind(leaseExpiresAtUtc, DateTimeKind.Utc);
+        return true;
+    }
     public void Finish(SyncJobState state, DateTime nowUtc, int seen, int imported, int pending, string? errorCode = null, string? errorSummary = null)
     {
         if (State != SyncJobState.Running || state is SyncJobState.Queued or SyncJobState.Running) throw new InvalidOperationException("Only running jobs can finish in a terminal state.");
         State = state; FinishedAtUtc = DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc); SeenCount = Math.Max(0, seen); ImportedCount = Math.Max(0, imported); PendingCount = Math.Max(0, pending);
+        LeaseExpiresAtUtc = null;
         ErrorCode = errorCode is null ? null : errorCode[..Math.Min(errorCode.Length, 50)]; ErrorSummary = errorSummary is null ? null : new string(errorSummary.Where(c => !char.IsControl(c)).Take(240).ToArray());
     }
 }

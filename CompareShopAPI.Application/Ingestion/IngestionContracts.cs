@@ -33,10 +33,13 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReade
             }
             try
             {
-                var rows = await source.ReadValidatedBiaAsync(ct);
+                // Keep active work shorter than the persisted lease so an expired claim is always safe to reclaim.
+                using var execution = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                execution.CancelAfter(TimeSpan.FromMinutes(SyncJob.LeaseDurationMinutes - 10));
+                var rows = await source.ReadValidatedBiaAsync(execution.Token);
                 if (rows.Count == 0) throw new InvalidDataException("Source returned no validated products.");
-                var result = await jobs.Import(dataSource.Id, rows, true, ct);
-                await history.RecordForChangedMinimums(ct);
+                var result = await jobs.Import(dataSource.Id, rows, true, execution.Token);
+                await history.RecordForChangedMinimums(execution.Token);
                 await jobs.Complete(dataSource.Id, job, result.Pending > 0 ? SyncJobState.Partial : SyncJobState.Success, clock.GetUtcNow().UtcDateTime, rows.Count, result.Imported, result.Pending, null, null, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }

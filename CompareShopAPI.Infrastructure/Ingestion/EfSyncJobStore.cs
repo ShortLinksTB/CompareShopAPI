@@ -10,25 +10,37 @@ namespace CompareShopAPI.Infrastructure.Ingestion;
 
 public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
 {
+    private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(SyncJob.LeaseDurationMinutes);
+
     public async Task<IReadOnlyList<DataSource>> DueSources(DateTime nowUtc, CancellationToken ct) => await db.DataSources
-        .Where(s => s.State == DataSourceState.Active && (db.SyncJobs.Any(j => j.DataSourceId == s.Id && j.State == SyncJobState.Queued) || ((s.LastCompletedAtUtc == null || s.LastCompletedAtUtc.Value.AddHours(s.IntervalHours) <= nowUtc) && (s.NextAttemptAtUtc == null || s.NextAttemptAtUtc <= nowUtc)))
-            && !db.SyncJobs.Any(j => j.DataSourceId == s.Id && j.State == SyncJobState.Running))
+        .Where(s => s.State == DataSourceState.Active && (db.SyncJobs.Any(j => j.DataSourceId == s.Id && j.State == SyncJobState.Queued)
+                || db.SyncJobs.Any(j => j.DataSourceId == s.Id && j.State == SyncJobState.Running && (j.LeaseExpiresAtUtc == null || j.LeaseExpiresAtUtc <= nowUtc))
+                || ((s.LastCompletedAtUtc == null || s.LastCompletedAtUtc.Value.AddHours(s.IntervalHours) <= nowUtc) && (s.NextAttemptAtUtc == null || s.NextAttemptAtUtc <= nowUtc)))
+            && !db.SyncJobs.Any(j => j.DataSourceId == s.Id && j.State == SyncJobState.Running && j.LeaseExpiresAtUtc > nowUtc))
         .ToListAsync(ct);
 
     public async Task<SyncJob?> TryClaim(int sourceId, DateTime nowUtc, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
         var source = await db.DataSources.SingleOrDefaultAsync(s => s.Id == sourceId && s.State == DataSourceState.Active, ct);
-        if (source is null || await db.SyncJobs.AnyAsync(j => j.DataSourceId == sourceId && j.State == SyncJobState.Running, ct)) { await tx.RollbackAsync(ct); return null; }
+        if (source is null) { await tx.RollbackAsync(ct); return null; }
+        var expiredJobs = await db.SyncJobs.Where(j => j.DataSourceId == sourceId && j.State == SyncJobState.Running
+            && (j.LeaseExpiresAtUtc == null || j.LeaseExpiresAtUtc <= nowUtc)).ToListAsync(ct);
+        foreach (var expiredJob in expiredJobs)
+            expiredJob.Finish(SyncJobState.Failed, nowUtc, expiredJob.SeenCount, expiredJob.ImportedCount, expiredJob.PendingCount,
+                "lease_expired", "Worker lease expired before the job completed.");
+        if (expiredJobs.Count > 0) await db.SaveChangesAsync(ct);
+        if (await db.SyncJobs.AnyAsync(j => j.DataSourceId == sourceId && j.State == SyncJobState.Running && j.LeaseExpiresAtUtc > nowUtc, ct))
+        { await tx.RollbackAsync(ct); return null; }
         var job = await db.SyncJobs.Where(x => x.DataSourceId == sourceId && x.State == SyncJobState.Queued).OrderBy(x => x.QueuedAtUtc).FirstOrDefaultAsync(ct);
         if (job is null)
         {
             if ((source.LastCompletedAtUtc is not null && nowUtc < source.LastCompletedAtUtc.Value.AddHours(source.IntervalHours))
                 || (source.NextAttemptAtUtc is not null && nowUtc < source.NextAttemptAtUtc.Value))
-            { await tx.RollbackAsync(ct); return null; }
+            { await tx.CommitAsync(ct); return null; }
             job = new SyncJob(sourceId, nowUtc); db.SyncJobs.Add(job);
         }
-        job.Start(nowUtc, Guid.NewGuid().ToString("N"));
+        job.Start(nowUtc, Guid.NewGuid().ToString("N"), nowUtc.Add(LeaseDuration));
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return job;
     }
 

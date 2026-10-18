@@ -22,7 +22,7 @@ public sealed class AddBhxIngestion : Migration
           [DataSourceId] int NOT NULL, [State] nvarchar(20) NOT NULL, [QueuedAtUtc] datetime2 NOT NULL,
           [StartedAtUtc] datetime2 NULL, [FinishedAtUtc] datetime2 NULL, [SeenCount] int NOT NULL,
           [ImportedCount] int NOT NULL, [PendingCount] int NOT NULL, [ErrorCode] nvarchar(50) NULL,
-          [ErrorSummary] nvarchar(240) NULL, [RetryOfJobId] int NULL, [LeaseId] nvarchar(64) NOT NULL,
+          [ErrorSummary] nvarchar(240) NULL, [RetryOfJobId] int NULL, [LeaseId] nvarchar(64) NOT NULL, [LeaseExpiresAtUtc] datetime2 NULL,
           CONSTRAINT [FK_SyncJobs_DataSources_DataSourceId] FOREIGN KEY ([DataSourceId]) REFERENCES [DataSources]([Id]) ON DELETE NO ACTION,
           CONSTRAINT [FK_SyncJobs_SyncJobs_RetryOfJobId] FOREIGN KEY ([RetryOfJobId]) REFERENCES [SyncJobs]([Id]) ON DELETE NO ACTION
         );

@@ -206,6 +206,13 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("DataSourceId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ExternalSku")
+                        .HasMaxLength(160)
+                        .HasColumnType("nvarchar(160)");
+
                     b.Property<bool>("IsApproved")
                         .HasColumnType("bit");
 
@@ -221,9 +228,68 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ProductId");
 
+                    b.HasIndex("DataSourceId", "ExternalSku")
+                        .IsUnique()
+                        .HasFilter("[DataSourceId] IS NOT NULL AND [ExternalSku] IS NOT NULL");
+
                     b.HasIndex("IsApproved", "CreatedAtUtc");
 
                     b.ToTable("ProductMatchings");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.DataSource", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+                    b.Property<string>("CategoryPath").IsRequired().HasMaxLength(80).HasColumnType("nvarchar(80)");
+                    b.Property<DateTime>("CreatedAtUtc").HasColumnType("datetime2");
+                    b.Property<int?>("PartnerShopId").HasColumnType("int");
+                    b.Property<DateTime?>("LastCompletedAtUtc").HasColumnType("datetime2");
+                    b.Property<DateTime?>("NextAttemptAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("DisplayName").IsRequired().HasMaxLength(160).HasColumnType("nvarchar(160)");
+                    b.Property<string>("Key").IsRequired().HasMaxLength(80).HasColumnType("nvarchar(80)");
+                    b.Property<string>("State").IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
+                    b.Property<int>("IntervalHours").HasColumnType("int");
+                    b.HasKey("Id");
+                    b.HasIndex("Key").IsUnique();
+                    b.ToTable("DataSources");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.SyncJob", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+                    b.Property<int>("DataSourceId").HasColumnType("int");
+                    b.Property<string>("State").IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
+                    b.Property<DateTime>("QueuedAtUtc").HasColumnType("datetime2");
+                    b.Property<DateTime?>("StartedAtUtc").HasColumnType("datetime2");
+                    b.Property<DateTime?>("FinishedAtUtc").HasColumnType("datetime2");
+                    b.Property<int>("SeenCount").HasColumnType("int");
+                    b.Property<int>("ImportedCount").HasColumnType("int");
+                    b.Property<int>("PendingCount").HasColumnType("int");
+                    b.Property<string>("ErrorCode").HasMaxLength(50).HasColumnType("nvarchar(50)");
+                    b.Property<string>("ErrorSummary").HasMaxLength(240).HasColumnType("nvarchar(240)");
+                    b.Property<int?>("RetryOfJobId").HasColumnType("int");
+                    b.Property<string>("LeaseId").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
+                    b.HasKey("Id");
+                    b.HasIndex("DataSourceId", "State");
+                    b.HasIndex("RetryOfJobId").IsUnique().HasFilter("[RetryOfJobId] IS NOT NULL");
+                    b.ToTable("SyncJobs");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.SourceItemMapping", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+                    b.Property<int>("DataSourceId").HasColumnType("int");
+                    b.Property<string>("ExternalSku").IsRequired().HasMaxLength(160).HasColumnType("nvarchar(160)");
+                    b.Property<string>("Name").IsRequired().HasMaxLength(300).HasColumnType("nvarchar(300)");
+                    b.Property<string>("Brand").HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<int?>("ProductId").HasColumnType("int");
+                    b.Property<int?>("ProductOfferId").HasColumnType("int");
+                    b.HasKey("Id");
+                    b.HasIndex("DataSourceId", "ExternalSku").IsUnique();
+                    b.ToTable("SourceItemMappings");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Articles.Article", b =>
@@ -749,6 +815,29 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("CompareShopAPI.Domain.Ingestion.DataSource", null)
+                        .WithMany()
+                        .HasForeignKey("DataSourceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.SyncJob", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Ingestion.DataSource", null).WithMany().HasForeignKey("DataSourceId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("CompareShopAPI.Domain.Ingestion.SyncJob", null).WithMany().HasForeignKey("RetryOfJobId").OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.SourceItemMapping", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Ingestion.DataSource", null).WithMany().HasForeignKey("DataSourceId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.HasOne("CompareShopAPI.Domain.Catalog.Product", null).WithMany().HasForeignKey("ProductId").OnDelete(DeleteBehavior.Restrict);
+                    b.HasOne("CompareShopAPI.Domain.Catalog.ProductOffer", null).WithMany().HasForeignKey("ProductOfferId").OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.DataSource", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.PartnerShop", null).WithMany().HasForeignKey("PartnerShopId").OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Articles.Article", b =>

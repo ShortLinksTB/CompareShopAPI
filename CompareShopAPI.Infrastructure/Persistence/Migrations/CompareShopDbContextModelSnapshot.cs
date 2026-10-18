@@ -199,6 +199,35 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.ToTable("ProductOffers");
                 });
 
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.AffiliateLink", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+                    b.Property<int>("ClickCount").HasColumnType("int");
+                    b.Property<int>("ConversionCount").HasColumnType("int");
+                    b.Property<string>("DestinationUrl").IsRequired().HasMaxLength(2048).HasColumnType("nvarchar(2048)");
+                    b.Property<bool>("IsEnabled").HasColumnType("bit");
+                    b.Property<bool>("IsStale").HasColumnType("bit");
+                    b.Property<DateTime?>("LastCheckedAtUtc").HasColumnType("datetime2");
+                    b.Property<int>("ProductOfferId").HasColumnType("int");
+                    b.Property<decimal>("Revenue").HasColumnType("decimal(18,2)");
+                    b.HasKey("Id");
+                    b.HasIndex("ProductOfferId").IsUnique();
+                    b.ToTable("AffiliateLinks");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.AffiliateClick", b =>
+                {
+                    b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("bigint");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+                    b.Property<int>("AffiliateLinkId").HasColumnType("int");
+                    b.Property<DateTime>("ClickedAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("ClientIpDigest").HasMaxLength(64).HasColumnType("nvarchar(64)");
+                    b.HasKey("Id");
+                    b.HasIndex("AffiliateLinkId", "ClickedAtUtc");
+                    b.ToTable("AffiliateClicks");
+                });
+
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.SpecificationGroup", b =>
                 {
                     b.Property<int>("Id")
@@ -390,6 +419,26 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Navigation("PartnerShop");
 
                     b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.AffiliateLink", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.ProductOffer", "ProductOffer")
+                        .WithOne()
+                        .HasForeignKey("CompareShopAPI.Domain.Catalog.AffiliateLink", "ProductOfferId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                    b.Navigation("ProductOffer");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.AffiliateClick", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.AffiliateLink", "AffiliateLink")
+                        .WithMany()
+                        .HasForeignKey("AffiliateLinkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                    b.Navigation("AffiliateLink");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.SpecificationGroup", b =>

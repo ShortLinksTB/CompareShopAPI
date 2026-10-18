@@ -10,6 +10,8 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<ProductOffer> ProductOffers => Set<ProductOffer>();
     public DbSet<SpecificationGroup> SpecificationGroups => Set<SpecificationGroup>();
     public DbSet<SpecificationItem> SpecificationItems => Set<SpecificationItem>();
+    public DbSet<AffiliateLink> AffiliateLinks => Set<AffiliateLink>();
+    public DbSet<AffiliateClick> AffiliateClicks => Set<AffiliateClick>();
     public DbSet<User> Users => Set<User>();
     public DbSet<WishlistItem> WishlistItems => Set<WishlistItem>();
     public DbSet<PriceAlert> PriceAlerts => Set<PriceAlert>();
@@ -32,6 +34,16 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<SpecificationItem>().HasOne(x => x.Group).WithMany(x => x.Items).HasForeignKey(x => x.SpecificationGroupId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<SpecificationGroup>().Property(x => x.Name).HasMaxLength(200);
         model.Entity<SpecificationItem>().Property(x => x.Name).HasMaxLength(200); model.Entity<SpecificationItem>().Property(x => x.Value).HasMaxLength(1000);
+        model.Entity<AffiliateLink>().HasKey(x => x.Id);
+        model.Entity<AffiliateLink>().HasIndex(x => x.ProductOfferId).IsUnique();
+        model.Entity<AffiliateLink>().Property(x => x.DestinationUrl).HasMaxLength(2048);
+        model.Entity<AffiliateLink>().Property(x => x.Revenue).HasColumnType("decimal(18,2)");
+        model.Entity<AffiliateLink>().HasOne(x => x.ProductOffer).WithOne().HasForeignKey<AffiliateLink>(x => x.ProductOfferId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<AffiliateClick>().HasKey(x => x.Id);
+        model.Entity<AffiliateClick>().HasIndex(x => new { x.AffiliateLinkId, x.ClickedAtUtc });
+        model.Entity<AffiliateClick>().Property(x => x.ClientIpDigest).HasMaxLength(64);
+        model.Entity<AffiliateClick>().HasOne(x => x.AffiliateLink).WithMany().HasForeignKey(x => x.AffiliateLinkId).OnDelete(DeleteBehavior.Cascade);
+
         model.Entity<User>().HasKey(x => x.Id);
         model.Entity<User>().HasIndex(x => x.KeycloakSubject).IsUnique();
         model.Entity<User>().Property(x => x.KeycloakSubject).HasMaxLength(200).IsRequired();

@@ -7,8 +7,7 @@ Phase 0 .NET 10 skeleton. Domain has no framework dependencies; Application refe
 ```sh
 dotnet restore CompareShopAPI.slnx
 dotnet run --project CompareShopAPI.Api
-# Requires a dedicated reachable MSSQL test database (CI provides SQL Server 2022).
-export COMPARESHOP_SQLSERVER_TEST_CONNECTION='<test database connection>'
+# SQL integration tests require Docker; Testcontainers starts and removes an isolated SQL Server container.
 dotnet test CompareShopAPI.slnx -c Release --settings coverage.runsettings --collect:"XPlat Code Coverage" --results-directory TestResultsScoped
 ```
 
@@ -26,6 +25,8 @@ CORS defaults to an empty allowlist. Dev must inject exactly:
 - `Cors__AllowedOrigins__1=https://admin-compareshop-dev.giamha.online`
 
 Devops owns Helm chart, Argo application, secrets, TLS and public ingress `https://api-compareshop-dev.giamha.online` in `compareshop-dev`. Use `/health` for liveness and `/health/ready` for readiness. Public DNS/HTTPS, no Cloudflare Access, CORS, admin authorization and Argo Synced/Healthy require runtime verification after review and deployment.
+
+Affiliate redirect rate limiting resolves forwarded client addresses only when the immediate socket peer is explicitly trusted. Production startup requires `RateLimiting__AffiliateRedirect__TrustedProxies__0`, `__1`, etc. to contain the exact trusted ingress proxy IPs, ordered as a set (the resolver walks `X-Forwarded-For` right-to-left). Untrusted peers' forwarded headers are ignored. Configure these values from the actual ingress-to-pod network path; do not use broad or guessed ranges. Local development may leave the list empty and will use the socket peer address.
 
 CI tests against MSSQL and enforces 80% changed-line coverage. PRs compare to `origin/dev`; dev pushes compare to the push's before-SHA. Successful dev builds publish immutable `ghcr.io/shortlinkstb/compareshop-api:<sha>` and dispatch `compareshop-api-image-published` to Helm using `GITOPS_TOKEN`. The bootstrap probe workflow is not the application image or rollout.
 

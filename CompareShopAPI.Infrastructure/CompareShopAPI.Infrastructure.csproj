@@ -15,5 +15,6 @@
     <!-- Patch SqlClient transitive PKCS dependency; GHSA-846f-f764-76mx. -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
+    <PackageReference Include="StackExchange.Redis" Version="2.8.31" />
   </ItemGroup>
 </Project>

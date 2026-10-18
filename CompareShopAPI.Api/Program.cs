@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
+using CompareShopAPI.Api.RateLimiting;
 
 var seedCatalogRequested = CatalogSeedCommand.IsRequested(args);
 var builder = WebApplication.CreateBuilder(seedCatalogRequested ? Array.Empty<string>() : args);
@@ -23,6 +24,16 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ICatalogQueries, EfCatalogQueries>();
 builder.Services.AddScoped<IPriceHistoryStore, EfPriceHistoryStore>();
 builder.Services.AddScoped<CatalogService>();
+builder.Services.AddScoped<IAffiliateRedirectRepository, EfAffiliateRedirectRepository>();
+builder.Services.AddScoped<AffiliateRedirectService>();
+builder.Services.AddSingleton<IClientIpHasher, HmacClientIpHasher>();
+builder.Services.Configure<AffiliateRedirectRateLimitOptions>(builder.Configuration.GetSection(AffiliateRedirectRateLimitOptions.SectionName));
+builder.Services.AddSingleton<IClientIpResolver, ClientIpResolver>();
+builder.Services.AddSingleton<IAffiliateRedirectRateLimiter>(services => new RedisAffiliateRedirectRateLimiter(
+    builder.Configuration["Redis:ConnectionString"],
+    builder.Configuration["Redis:KeyPrefix"],
+    services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AffiliateRedirectRateLimitOptions>>(),
+    services.GetRequiredService<ILogger<RedisAffiliateRedirectRateLimiter>>()));
 builder.Services.AddScoped<IUserProvisioning, EfUserProvisioning>();
 builder.Services.AddScoped<IUserCommerceRepository, EfUserCommerceRepository>();
 builder.Services.AddScoped<WishlistService>();

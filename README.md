@@ -1,6 +1,6 @@
 # CompareShopAPI
 
-Phase 0 .NET 10 skeleton. Domain has no framework dependencies; Application references Domain; Infrastructure references both; Workers references Application; Api composes Application, Infrastructure and Workers. No business workers, entities, migrations or admin-user provisioning run in this phase.
+CompareShopAPI is a .NET 10 Clean Architecture service. Domain has no framework dependencies; Application references Domain; Infrastructure implements application ports; the API composes Application and Infrastructure. The separate Worker executable references Application and Infrastructure and owns browser automation dependencies.
 
 ## Run and test
 
@@ -49,4 +49,10 @@ Catalog routes are anonymous and read-only. Apply the additive catalog migration
 
 Only active offers refreshed within the previous 30 days, not marked as outliers, and attached to active products and active shops contribute to offer results, price filters, and summaries. Products with no visible offers remain in the product list with null min/max and zero count.
 
-Price history is append-only. `PriceHistoryService.RecordMinimum` is the Application seam for future offer-writing flows: it records the current visible minimum only when that price differs from the latest point. This phase adds no offer mutation route, worker, backfill, or live fixture history; history stays empty until a writer calls the seam. The additive migration verifies the existing `dbo.Products.Id` and `dbo.PartnerShops.Id` int identity primary keys before creating `dbo.PriceHistoryPoints`, and fails clearly on absent/incompatible prerequisites or partial incompatible history objects.
+Price history is append-only. `PriceHistoryService.RecordMinimum` records the current visible minimum only when that price differs from the latest point. The additive migration verifies the existing `dbo.Products.Id` and `dbo.PartnerShops.Id` int identity primary keys before creating `dbo.PriceHistoryPoints`, and fails clearly on absent/incompatible prerequisites or partial incompatible history objects.
+
+## BHX ingestion
+
+The `compareshop-api-workers` executable is deployed separately from the API. Its image alone includes Microsoft.Playwright and its matching Chromium installation. The worker processes the single BHX `/bia` source at a 72-hour cadence, records durable sync jobs, imports only manually mapped SKUs, and uses the existing public offer visibility and price-history rules. `GET /admin/sync-jobs` requires `sync_jobs.read`; retrying a failed or partial job through `POST /admin/sync-jobs/{id}/retry` requires `sync_jobs.execute`.
+
+The worker Deployment template and constrained Cilium egress policy are in `deploy/compareshop-api-workers.yaml`. Apply the ingestion migration with the existing `Database__ApplyMigrations=true` rollout mechanism. The worker uses the `ConnectionStrings__CompareShopDb` secret and does not need a Kubernetes API token. SQL-backed tests use the disposable Testcontainers.MsSql fixture.

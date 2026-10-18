@@ -1,0 +1,16 @@
+using CompareShopAPI.Application.Ingestion;
+using CompareShopAPI.Infrastructure.Ingestion;
+using CompareShopAPI.Infrastructure.Persistence;
+using CompareShopAPI.Workers.Ingestion;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
+
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlServer(builder.Configuration.GetConnectionString("CompareShopDb") ?? "", sql => sql.CommandTimeout(5)));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<ISyncJobStore, EfSyncJobStore>();
+builder.Services.AddScoped<IPriceHistoryRecorder, EfPriceHistoryRecorder>();
+builder.Services.AddSingleton<ISourceCatalogReader, BhxPlaywrightCatalogReader>();
+builder.Services.AddScoped<IngestionCoordinator>();
+builder.Services.AddHostedService<BhxIngestionWorker>();
+await builder.Build().RunAsync();

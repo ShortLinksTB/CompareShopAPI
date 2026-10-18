@@ -1,4 +1,5 @@
 using CompareShopAPI.Application.Admin;
+using CompareShopAPI.Application.Ingestion;
 
 namespace CompareShopAPI.Api.Admin;
 
@@ -35,6 +36,17 @@ public static class AdminEndpoints
         admin.MapPost("/offers/{id:int}/approve", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.ApproveOffer(Subject(c), id, ct)));
         admin.MapGet("/matching", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.MatchingList(Subject(c), ct)));
         admin.MapPost("/matching/{id:int}/approve", (HttpContext c, int id, MatchingApproval input, AdminService s, CancellationToken ct) => Run(() => s.ApproveMatching(Subject(c), id, input.ProductId, ct)));
+        admin.MapGet("/sync-jobs", async (HttpContext c, IngestionAdminService s, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await s.List(Subject(c), ct)); }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+        });
+        admin.MapPost("/sync-jobs/{id:int}/retry", async (HttpContext c, int id, IngestionAdminService s, CancellationToken ct) =>
+        {
+            try { return Results.Accepted(value: await s.Retry(Subject(c), id, ct)); }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+        });
         admin.MapGet("/audit-logs", (HttpContext c, int? page, int? pageSize, AdminService s, CancellationToken ct) => Run(() => s.AuditLogs(Subject(c), page ?? 1, pageSize ?? 50, ct)));
         admin.MapGet("/dashboard/summary", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.Dashboard(Subject(c), ct)));
         admin.MapGet("/price-alerts", (HttpContext c, int? page, int? pageSize, int? productId, int? userId, AdminService s, CancellationToken ct) => Run(() => s.PriceAlerts(Subject(c), page ?? 1, pageSize ?? 50, productId, userId, ct)));

@@ -11,7 +11,6 @@
     </PackageReference>
     <ProjectReference Include="../CompareShopAPI.Application/CompareShopAPI.Application.csproj" />
     <ProjectReference Include="../CompareShopAPI.Infrastructure/CompareShopAPI.Infrastructure.csproj" />
-    <ProjectReference Include="../CompareShopAPI.Workers/CompareShopAPI.Workers.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
     <PackageReference Include="Microsoft.OpenApi" Version="2.12.2" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />

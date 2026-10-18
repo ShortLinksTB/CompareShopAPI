@@ -22,7 +22,7 @@ public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActi
 public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive);
 public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive);
 public sealed record AdminOffer(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc);
-public sealed record AdminMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved);
+public sealed record AdminMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku = null, int? DataSourceId = null);
 public sealed record AdminAuditEntry(long Id, string Actor, string Action, string ResourceType, string? ResourceId, DateTime CreatedAtUtc, JsonElement? Before, JsonElement? After);
 public sealed record AdminDashboard(int Products, int Offers, int Articles, bool ArticlesAvailable);
 public sealed record AdminPriceAlert(int Id, int UserId, int ProductId, string ProductSlug, string ProductName, int TargetPrice, bool IsActive, DateTime CreatedAtUtc);
@@ -138,7 +138,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         var matching = await data.MatchingForApproval(id, productId, t);
         if (matching is null || !matching.TryApprove(productId)) return (null, null, null);
         await data.SaveMatching(matching, t);
-        return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved), before, new { productId });
+        return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved, matching.ExternalSku, matching.DataSourceId), before, new { productId });
     }, ct);
     public async Task<Page<AdminAuditEntry>> AuditLogs(string? s, int p, int z, CancellationToken ct) { await Authorize(s, AdminPermissions.AuditRead, ct); ValidatePage(p, z); return await data.AuditLogs(p, z, ct); }
     public async Task<AdminDashboard> Dashboard(string? s, CancellationToken ct) { await Authorize(s, AdminPermissions.DashboardRead, ct); return await data.Dashboard(ct); }

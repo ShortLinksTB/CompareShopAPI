@@ -1,4 +1,7 @@
 using System.Text.Json;
+using DomainAdminFeatureFlag = CompareShopAPI.Domain.Admin.AdminFeatureFlag;
+using DomainAdminSetting = CompareShopAPI.Domain.Admin.AdminSetting;
+using DomainProductMatching = CompareShopAPI.Domain.Admin.ProductMatching;
 
 namespace CompareShopAPI.Application.Admin;
 
@@ -54,7 +57,8 @@ public interface IAdminData
     Task<AdminOffer?> SaveOffer(int id, OfferInput input, CancellationToken ct);
     Task<AdminOffer?> ApproveOffer(int id, CancellationToken ct);
     Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct);
-    Task<AdminMatching?> ApproveMatching(int id, int productId, CancellationToken ct);
+    Task<DomainProductMatching?> MatchingForApproval(int id, int productId, CancellationToken ct);
+    Task SaveMatching(DomainProductMatching matching, CancellationToken ct);
     Task<Page<AdminAuditEntry>> AuditLogs(int page, int pageSize, CancellationToken ct);
     Task<AdminDashboard> Dashboard(CancellationToken ct);
     Task<Page<AdminPriceAlert>> PriceAlerts(int page, int pageSize, int? productId, int? userId, CancellationToken ct);
@@ -77,8 +81,6 @@ public sealed class AdminBootstrapCompletedException() : Exception("The first ad
 
 public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstrapSubjects = null)
 {
-    private static readonly HashSet<string> SettingKeys = ["price_alert_default_threshold", "offers_display_count"];
-
     private async Task<string> Authorize(string? subject, string permission, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
@@ -122,7 +124,15 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     public Task<AdminOffer> ApproveOffer(string? s, int id, CancellationToken ct) => Write(s, AdminPermissions.OffersApprove, "approve", "offer", id.ToString(), async t => { var before = (await data.Offers(t)).SingleOrDefault(x => x.Id == id); return before is null ? (null, null, null) : (await data.ApproveOffer(id, t), before, new { isActive = true, isOutlier = false }); }, ct);
 
     public async Task<IReadOnlyList<AdminMatching>> MatchingList(string? s, CancellationToken ct) { await Authorize(s, AdminPermissions.MatchingRead, ct); return await data.Matching(ct); }
-    public Task<AdminMatching> ApproveMatching(string? s, int id, int productId, CancellationToken ct) => Write(s, AdminPermissions.MatchingApprove, "approve", "matching", id.ToString(), async t => { var before = (await data.Matching(t)).SingleOrDefault(x => x.Id == id); return before is null ? (null, null, null) : (await data.ApproveMatching(id, productId, t), before, new { productId }); }, ct);
+    public Task<AdminMatching> ApproveMatching(string? s, int id, int productId, CancellationToken ct) => Write(s, AdminPermissions.MatchingApprove, "approve", "matching", id.ToString(), async t =>
+    {
+        var before = (await data.Matching(t)).SingleOrDefault(x => x.Id == id);
+        if (before is null) return (null, null, null);
+        var matching = await data.MatchingForApproval(id, productId, t);
+        if (matching is null || !matching.TryApprove(productId)) return (null, null, null);
+        await data.SaveMatching(matching, t);
+        return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved), before, new { productId });
+    }, ct);
     public async Task<Page<AdminAuditEntry>> AuditLogs(string? s, int p, int z, CancellationToken ct) { await Authorize(s, AdminPermissions.AuditRead, ct); ValidatePage(p, z); return await data.AuditLogs(p, z, ct); }
     public async Task<AdminDashboard> Dashboard(string? s, CancellationToken ct) { await Authorize(s, AdminPermissions.DashboardRead, ct); return await data.Dashboard(ct); }
     public async Task<Page<AdminPriceAlert>> PriceAlerts(string? s, int p, int z, int? product, int? user, CancellationToken ct) { await Authorize(s, AdminPermissions.PriceAlertsReadAll, ct); ValidatePage(p, z); if (product is <= 0 || user is <= 0) throw new ArgumentException("Filter IDs must be positive."); return await data.PriceAlerts(p, z, product, user, ct); }
@@ -142,20 +152,20 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         return roles;
     }
     public async Task<IReadOnlyList<AdminFeatureFlag>> FeatureFlags(string? s, CancellationToken ct) { await Authorize(s, AdminPermissions.FeatureFlagsRead, ct); return await data.FeatureFlags(ct); }
-    public Task<AdminFeatureFlag> SaveFeatureFlag(string? s, string key, FeatureFlagInput input, CancellationToken ct) => Write(s, AdminPermissions.FeatureFlagsUpdate, "update", "feature_flag", key, async t => { key = ValidateKey(key); var before = (await data.FeatureFlags(t)).SingleOrDefault(x => x.Key == key); return (await data.SaveFeatureFlag(key, input with { Description = input.Description?.Trim() }, t), before, input); }, ct);
+    public Task<AdminFeatureFlag> SaveFeatureFlag(string? s, string key, FeatureFlagInput input, CancellationToken ct) => Write(s, AdminPermissions.FeatureFlagsUpdate, "update", "feature_flag", key, async t =>
+    {
+        var featureFlag = new DomainAdminFeatureFlag(key, input.Enabled, input.Description);
+        var before = (await data.FeatureFlags(t)).SingleOrDefault(x => x.Key == featureFlag.Key);
+        return (await data.SaveFeatureFlag(featureFlag.Key, new(featureFlag.Enabled, featureFlag.Description), t), before, featureFlag);
+    }, ct);
     public async Task<IReadOnlyList<AdminSetting>> Settings(string? s, CancellationToken ct) { await Authorize(s, AdminPermissions.SettingsManage, ct); return await data.Settings(ct); }
     public async Task<IReadOnlyList<AdminSetting>> SaveSettings(string? s, IReadOnlyDictionary<string, string>? settings, CancellationToken ct)
     {
         var actor = await Authorize(s, AdminPermissions.SettingsManage, ct);
-        if (settings is null || settings.Count == 0 || settings.Keys.Any(k => !SettingKeys.Contains(k))) throw new ArgumentException("Only supported settings may be changed.");
-        foreach (var (key, value) in settings)
-        {
-            if (!int.TryParse(value, out var n) || (key == "price_alert_default_threshold" ? n <= 0 : n is < 1 or > 50)) throw new ArgumentException($"Invalid value for {key}.");
-        }
-        return await data.ExecuteAudited(actor, "update", "settings", string.Join(",", settings.Keys.Order(StringComparer.Ordinal)), async t => { var before = await data.Settings(t); var after = await data.SaveSettings(settings, t) ?? throw new KeyNotFoundException(); return (after, before, after); }, ct);
+        var validatedSettings = DomainAdminSetting.ValidateUpdates(settings);
+        return await data.ExecuteAudited(actor, "update", "settings", string.Join(",", validatedSettings.Keys.Order(StringComparer.Ordinal)), async t => { var before = await data.Settings(t); var after = await data.SaveSettings(validatedSettings, t) ?? throw new KeyNotFoundException(); return (after, before, after); }, ct);
     }
 
-    private static string ValidateKey(string key) { key = key?.Trim() ?? ""; if (key.Length is < 1 or > 120 || key.Any(c => !(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.'))) throw new ArgumentException("Invalid key."); return key; }
     private static void ValidatePage(int page, int size) { if (page < 1 || size is < 1 or > 100) throw new ArgumentException("Page must be positive and pageSize must be between 1 and 100."); }
     private static CategoryInput Validate(CategoryInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160) throw new ArgumentException("Invalid category."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
     private static ShopInput Validate(ShopInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160 || x.WebsiteUrl?.Length > 2048) throw new ArgumentException("Invalid shop."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }

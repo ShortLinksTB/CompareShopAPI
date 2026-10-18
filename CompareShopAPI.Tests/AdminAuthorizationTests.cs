@@ -31,6 +31,31 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
     }
 
     [Fact]
+    public void AdminDomainTypesEnforceSettingsFlagAndMatchingInvariants()
+    {
+        var normalizedSettings = CompareShopAPI.Domain.Admin.AdminSetting.ValidateUpdates(
+            new Dictionary<string, string> { ["offers_display_count"] = " 8 " });
+        Assert.Equal("8", normalizedSettings["offers_display_count"]);
+        Assert.Throws<ArgumentException>(() => CompareShopAPI.Domain.Admin.AdminSetting.ValidateUpdates(
+            new Dictionary<string, string> { ["unknown"] = "1" }));
+        Assert.Throws<ArgumentException>(() => CompareShopAPI.Domain.Admin.AdminSetting.ValidateUpdates(
+            new Dictionary<string, string> { ["offers_display_count"] = "51" }));
+
+        var flag = new CompareShopAPI.Domain.Admin.AdminFeatureFlag(" admin-ui ", true, "  enabled  ");
+        Assert.Equal("admin-ui", flag.Key);
+        Assert.Equal("enabled", flag.Description);
+        Assert.Throws<ArgumentException>(() => new CompareShopAPI.Domain.Admin.AdminFeatureFlag("invalid key", true, null));
+        Assert.Throws<ArgumentException>(() => new CompareShopAPI.Domain.Admin.AdminFeatureFlag("flag", true, new string('x', 501)));
+
+        var matching = new CompareShopAPI.Domain.Admin.ProductMatching("Unmatched", null, DateTime.UtcNow);
+        Assert.True(matching.TryApprove(42));
+        Assert.Equal(42, matching.ProductId);
+        Assert.True(matching.IsApproved);
+        Assert.False(matching.TryApprove(43));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new CompareShopAPI.Domain.Admin.ProductMatching("Pending", null, DateTime.UtcNow).TryApprove(0));
+    }
+
+    [Fact]
     public async Task ConfiguredFirstAdminCanBootstrapThroughProductionRouteOnce()
     {
         var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"CompareShopAdminBootstrap_{Guid.NewGuid():N}" }.ConnectionString;
@@ -200,7 +225,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
 
             var affiliate = new CompareShopAPI.Domain.Catalog.AffiliateLink { ProductOfferId = offer.Id, DestinationUrl = offer.Url!, IsEnabled = true, IsStale = false, ClickCount = 7, ConversionCount = 2, Revenue = 12.5m };
             db.AffiliateLinks.Add(affiliate);
-            var matching = new CompareShopAPI.Domain.Admin.ProductMatching { Name = "Unmatched", Brand = "Brand", CreatedAtUtc = DateTime.UtcNow };
+            var matching = new CompareShopAPI.Domain.Admin.ProductMatching("Unmatched", "Brand", DateTime.UtcNow);
             db.ProductMatchings.Add(matching);
             db.PriceAlerts.Add(new CompareShopAPI.Domain.UserCommerce.PriceAlert(userId, product.Id, 50, DateTime.UtcNow));
             await db.SaveChangesAsync();

@@ -116,12 +116,12 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
 
     public async Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct) => await db.ProductMatchings.AsNoTracking().Where(x => x.ProductId == null && !x.IsApproved).OrderBy(x => x.CreatedAtUtc).Select(MatchingDto).ToListAsync(ct);
-    public async Task<AdminMatching?> ApproveMatching(int id, int productId, CancellationToken ct)
+    public async Task<CompareShopAPI.Domain.Admin.ProductMatching?> MatchingForApproval(int id, int productId, CancellationToken ct)
     {
         if (!await db.Products.AnyAsync(x => x.Id == productId, ct)) throw new ArgumentException("Product does not exist.");
-        var item = await db.ProductMatchings.SingleOrDefaultAsync(x => x.Id == id && x.ProductId == null && !x.IsApproved, ct); if (item is null) return null;
-        item.ProductId = productId; item.IsApproved = true; await db.SaveChangesAsync(ct); return new(item.Id, item.Name, item.Brand, item.ProductId, item.CreatedAtUtc, item.IsApproved);
+        return await db.ProductMatchings.SingleOrDefaultAsync(x => x.Id == id, ct);
     }
+    public async Task SaveMatching(CompareShopAPI.Domain.Admin.ProductMatching matching, CancellationToken ct) => await db.SaveChangesAsync(ct);
 
     public async Task<Page<AdminAuditEntry>> AuditLogs(int page, int size, CancellationToken ct)
     {
@@ -190,8 +190,8 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     public async Task<AdminFeatureFlag> SaveFeatureFlag(string key, FeatureFlagInput input, CancellationToken ct)
     {
         var item = await db.AdminFeatureFlags.SingleOrDefaultAsync(x => x.Key == key, ct);
-        if (item is null) { item = new DomainFeatureFlag { Key = key, Enabled = input.Enabled, Description = input.Description }; db.AdminFeatureFlags.Add(item); }
-        else { item.Enabled = input.Enabled; item.Description = input.Description; }
+        if (item is null) { item = new DomainFeatureFlag(key, input.Enabled, input.Description); db.AdminFeatureFlags.Add(item); }
+        else item.Update(input.Enabled, input.Description);
         await db.SaveChangesAsync(ct); return new(item.Id, item.Key, item.Enabled, item.Description);
     }
     public async Task<IReadOnlyList<AdminSetting>> Settings(CancellationToken ct) => await db.AdminSettings.AsNoTracking().OrderBy(x => x.Key).Select(x => new AdminSetting(x.Key, x.Value)).ToListAsync(ct);
@@ -200,7 +200,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         foreach (var (key, value) in settings)
         {
             var row = await db.AdminSettings.SingleOrDefaultAsync(x => x.Key == key, ct);
-            if (row is null) db.AdminSettings.Add(new DomainSetting { Key = key, Value = value }); else row.Value = value;
+            if (row is null) db.AdminSettings.Add(new DomainSetting(key, value)); else row.UpdateValue(value);
         }
         await db.SaveChangesAsync(ct); return await Settings(ct);
     }

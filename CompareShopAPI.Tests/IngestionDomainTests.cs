@@ -1,4 +1,5 @@
 using CompareShopAPI.Domain.Ingestion;
+using Xunit;
 
 namespace CompareShopAPI.Tests;
 

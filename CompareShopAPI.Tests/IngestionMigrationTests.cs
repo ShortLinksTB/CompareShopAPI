@@ -1,6 +1,7 @@
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Xunit;
 
 namespace CompareShopAPI.Tests;
 

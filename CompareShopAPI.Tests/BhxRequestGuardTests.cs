@@ -10,13 +10,13 @@ namespace CompareShopAPI.Tests;
 public sealed class BhxRequestGuardTests
 {
     [Theory]
-    [InlineData("https://bachhoaxanh.com/bia", true)]
-    [InlineData("https://BACHHOAXANH.COM/robots.txt", true)]
-    [InlineData("https://www.bachhoaxanh.com/bia", false)]
-    [InlineData("http://bachhoaxanh.com/bia", false)]
+    [InlineData("https://www.bachhoaxanh.com/bia", true)]
+    [InlineData("https://WWW.BACHHOAXANH.COM/robots.txt", true)]
+    [InlineData("https://bachhoaxanh.com/bia", false)]
+    [InlineData("http://www.bachhoaxanh.com/bia", false)]
     [InlineData("https://other.example/bia", false)]
-    [InlineData("https://bachhoaxanh.com:444/bia", false)]
-    [InlineData("https://user@bachhoaxanh.com/bia", false)]
+    [InlineData("https://www.bachhoaxanh.com:444/bia", false)]
+    [InlineData("https://user@www.bachhoaxanh.com/bia", false)]
     [InlineData("not a url", false)]
     public void Playwright_guard_allows_only_exact_https_host(string url, bool expected)
     {
@@ -29,18 +29,18 @@ public sealed class BhxRequestGuardTests
         var transport = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
         using var client = WorkerIngestion.BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(2), transport);
 
-        using var response = await client.GetAsync("https://bachhoaxanh.com/robots.txt");
+        using var response = await client.GetAsync("https://www.bachhoaxanh.com/robots.txt");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("https://bachhoaxanh.com/robots.txt", Assert.Single(transport.Requests).ToString());
+        Assert.Equal("https://www.bachhoaxanh.com/robots.txt", Assert.Single(transport.Requests).ToString());
 
-        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("http://bachhoaxanh.com/robots.txt"));
-        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("https://www.bachhoaxanh.com/robots.txt"));
-        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("https://bachhoaxanh.com:444/robots.txt"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("https://bachhoaxanh.com/robots.txt"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("http://www.bachhoaxanh.com/robots.txt"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => client.GetAsync("https://www.bachhoaxanh.com:444/robots.txt"));
         Assert.Single(transport.Requests);
     }
 
     [Fact]
-    public async Task Reader_uses_guarded_robots_request_before_playwright_navigation()
+    public async Task Reader_uses_canonical_www_host_for_guarded_robots_request()
     {
         var transport = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -49,7 +49,7 @@ public sealed class BhxRequestGuardTests
         var reader = new WorkerIngestion.BhxPlaywrightCatalogReader(() => WorkerIngestion.BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(2), transport));
 
         await Assert.ThrowsAsync<InvalidDataException>(() => reader.ReadValidatedBiaAsync(CancellationToken.None));
-        Assert.Equal("https://bachhoaxanh.com/robots.txt", Assert.Single(transport.Requests).ToString());
+        Assert.Equal("https://www.bachhoaxanh.com/robots.txt", Assert.Single(transport.Requests).ToString());
     }
 
     [Fact]
@@ -83,13 +83,13 @@ public sealed class BhxRequestGuardTests
     }
 
     [Theory]
-    [InlineData(403, "https://bachhoaxanh.com/bia", "", true)]
-    [InlineData(null, "https://bachhoaxanh.com/captcha", "", true)]
-    [InlineData(null, "https://bachhoaxanh.com/challenge", "", true)]
-    [InlineData(null, "https://bachhoaxanh.com/bia", "captcha", true)]
-    [InlineData(null, "https://bachhoaxanh.com/bia", "verify you are human", true)]
-    [InlineData(null, "https://bachhoaxanh.com/bia", "truy cập bất thường", true)]
-    [InlineData(200, "https://bachhoaxanh.com/bia", "valid catalog", false)]
+    [InlineData(403, "https://www.bachhoaxanh.com/bia", "", true)]
+    [InlineData(null, "https://www.bachhoaxanh.com/captcha", "", true)]
+    [InlineData(null, "https://www.bachhoaxanh.com/challenge", "", true)]
+    [InlineData(null, "https://www.bachhoaxanh.com/bia", "captcha", true)]
+    [InlineData(null, "https://www.bachhoaxanh.com/bia", "verify you are human", true)]
+    [InlineData(null, "https://www.bachhoaxanh.com/bia", "truy cập bất thường", true)]
+    [InlineData(200, "https://www.bachhoaxanh.com/bia", "valid catalog", false)]
     public void Reader_rejects_blocked_or_challenge_responses(int? status, string url, string pageText, bool blocked)
     {
         if (blocked)
@@ -99,11 +99,11 @@ public sealed class BhxRequestGuardTests
     }
 
     [Theory]
-    [InlineData("https://bachhoaxanh.com/robots.txt", true)]
-    [InlineData("https://www.bachhoaxanh.com/robots.txt", false)]
-    [InlineData("http://bachhoaxanh.com/robots.txt", false)]
+    [InlineData("https://www.bachhoaxanh.com/robots.txt", true)]
+    [InlineData("https://bachhoaxanh.com/robots.txt", false)]
+    [InlineData("http://www.bachhoaxanh.com/robots.txt", false)]
     [InlineData("https://other.example/robots.txt", false)]
-    [InlineData("https://bachhoaxanh.com:444/robots.txt", false)]
+    [InlineData("https://www.bachhoaxanh.com:444/robots.txt", false)]
     public async Task Guarded_http_send_checks_each_redirect_target(string redirectTarget, bool allowed)
     {
         var requestCount = 0;
@@ -118,7 +118,7 @@ public sealed class BhxRequestGuardTests
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
         using var client = WorkerIngestion.BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(2), transport);
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://bachhoaxanh.com/robots.txt");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://www.bachhoaxanh.com/robots.txt");
 
         if (allowed)
         {

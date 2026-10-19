@@ -70,6 +70,20 @@ public sealed class IngestionServiceTests
     }
 
     [Fact]
+    public async Task CoordinatorPersistsSafeRedirectDenialCodeAndStatus()
+    {
+        var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
+        var reader = new FakeReader { Failure = new SourceRedirectDeniedException(302) };
+
+        await new IngestionCoordinator(jobs, reader, new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+
+        Assert.Equal(SyncJobState.Failed, jobs.CompletedState);
+        Assert.Equal("redirect_target_denied", jobs.ErrorCode);
+        Assert.Equal("BHX redirect was denied by the approved host policy (HTTP 302).", jobs.ErrorSummary);
+        Assert.False(jobs.SourcePaused);
+    }
+
+    [Fact]
     public async Task AdminServiceEnforcesPermissionsAndReturnsJobsOrRetry()
     {
         var jobs = new FakeJobs();

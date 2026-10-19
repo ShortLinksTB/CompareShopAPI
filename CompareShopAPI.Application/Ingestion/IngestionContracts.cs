@@ -21,6 +21,17 @@ public sealed class SourceAccessBlockedException : Exception
     public const string SanitizedSummary = "BHX access was blocked or challenged; source paused.";
     public SourceAccessBlockedException() : base(SanitizedSummary) { }
 }
+public sealed class SourceRedirectDeniedException : Exception
+{
+    public const string SanitizedErrorCode = "redirect_target_denied";
+    public int RedirectStatusCode { get; }
+    public string SanitizedSummary => $"BHX redirect was denied by the approved host policy (HTTP {RedirectStatusCode}).";
+
+    public SourceRedirectDeniedException(int redirectStatusCode) : base(SanitizedErrorCode)
+    {
+        RedirectStatusCode = redirectStatusCode;
+    }
+}
 
 public sealed class IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReader source, IPriceHistoryRecorder history, TimeProvider clock)
 {
@@ -52,6 +63,11 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReade
             {
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     "source_blocked", SourceAccessBlockedException.SanitizedSummary, ct, pauseSource: true);
+            }
+            catch (SourceRedirectDeniedException ex)
+            {
+                await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
+                    SourceRedirectDeniedException.SanitizedErrorCode, ex.SanitizedSummary, ct);
             }
             catch (Exception ex)
             {

@@ -53,6 +53,16 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  worker-runtime-image:
+    name: Verify Worker runtime image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build Worker image and verify runtime
+        run: ./scripts/verify-worker-runtime.sh
+
   publish:
     if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
     needs: test

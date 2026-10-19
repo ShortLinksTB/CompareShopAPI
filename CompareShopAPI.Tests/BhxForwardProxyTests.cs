@@ -102,15 +102,6 @@ public sealed class BhxForwardProxyTests
         Assert.Throws<ArgumentException>(() => WorkerIngestion.BhxBrowserLaunchOptions.Create(""));
     }
 
-    [Fact]
-    public void Browser_launch_uses_desktop_chrome_user_agent_without_headless_marker()
-    {
-        var options = WorkerIngestion.BhxBrowserLaunchOptions.Create("http://127.0.0.1:43127");
-
-        Assert.Contains($"--user-agent={WorkerIngestion.BhxBrowserLaunchOptions.DesktopUserAgent}", options.Args!);
-        Assert.DoesNotContain("HeadlessChrome", WorkerIngestion.BhxBrowserLaunchOptions.DesktopUserAgent, StringComparison.Ordinal);
-    }
-
     private static async Task<string> SendProxyRequestAsync(string proxyServer, string request, CancellationToken ct = default)
     {
         var endpoint = new Uri(proxyServer);

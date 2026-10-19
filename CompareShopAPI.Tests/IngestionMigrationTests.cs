@@ -94,6 +94,46 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
     }
 
     [Fact]
+    public async Task Blocked_source_completion_persists_pause_and_sanitized_error()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopBlocked_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var now = DateTime.UtcNow;
+        try
+        {
+            int sourceId;
+            SyncJob job;
+            await using (var setup = new CompareShopDbContext(options))
+            {
+                await setup.Database.EnsureCreatedAsync();
+                var source = new DataSource("bhx", "BHX", "/bia", null, now);
+                setup.DataSources.Add(source);
+                await setup.SaveChangesAsync();
+                sourceId = source.Id;
+                job = (await new EfSyncJobStore(setup).TryClaim(sourceId, now, CancellationToken.None))!;
+            }
+
+            await using (var db = new CompareShopDbContext(options))
+                await new EfSyncJobStore(db).Complete(sourceId, job, SyncJobState.Failed, now.AddMinutes(1), 0, 0, 0,
+                    "source_blocked", SourceAccessBlockedException.SanitizedSummary, CancellationToken.None, pauseSource: true);
+
+            await using var verification = new CompareShopDbContext(options);
+            var persistedSource = await verification.DataSources.SingleAsync(x => x.Id == sourceId);
+            var persistedJob = await verification.SyncJobs.SingleAsync(x => x.Id == job.Id);
+            Assert.Equal(DataSourceState.Paused, persistedSource.State);
+            Assert.Null(persistedSource.NextAttemptAtUtc);
+            Assert.Equal("source_blocked", persistedJob.ErrorCode);
+            Assert.Equal(SourceAccessBlockedException.SanitizedSummary, persistedJob.ErrorSummary);
+            Assert.Empty(await new EfSyncJobStore(verification).DueSources(now.AddDays(365), CancellationToken.None));
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task Full_snapshot_deactivates_omitted_mapped_offer_even_with_unmapped_skus()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopIngestionSnapshot_{Guid.NewGuid():N}" }.ConnectionString;

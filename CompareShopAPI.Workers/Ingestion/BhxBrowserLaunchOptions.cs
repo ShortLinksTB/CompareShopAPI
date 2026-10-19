@@ -5,9 +5,6 @@ namespace CompareShopAPI.Workers.Ingestion;
 
 public static class BhxBrowserLaunchOptions
 {
-    // Microsoft.Playwright 1.56.0 bundles Chromium 141; keep this major aligned when updating Playwright.
-    public static readonly string DesktopUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
-
     public static BrowserTypeLaunchOptions Create(string proxyServer)
     {
         if (!Uri.TryCreate(proxyServer, UriKind.Absolute, out var proxyUri) ||
@@ -24,8 +21,7 @@ public static class BhxBrowserLaunchOptions
                 "--disable-dev-shm-usage",
                 "--disable-quic",
                 "--disable-webrtc",
-                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-                $"--user-agent={DesktopUserAgent}"
+                "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
             ],
             Proxy = new Proxy
             {

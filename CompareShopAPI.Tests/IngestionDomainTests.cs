@@ -37,6 +37,16 @@ public sealed class IngestionDomainTests
     }
 
     [Fact]
+    public void PausedSourceIsNotDueUntilExplicitlyReactivated()
+    {
+        var now = DateTime.UtcNow;
+        var source = new DataSource("bhx", "BHX", "/bia", null, now);
+        source.Pause();
+
+        Assert.False(source.IsDue(now.AddYears(1)));
+    }
+
+    [Fact]
     public void RetryAndMappingTransitionsEnforceTheirInvariants()
     {
         var now = new DateTime(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc);

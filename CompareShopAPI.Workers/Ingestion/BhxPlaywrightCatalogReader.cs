@@ -22,8 +22,8 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
         using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(CategoryUri, "/robots.txt"));
         robotsRequest.Headers.UserAgent.ParseAdd("CompareShopPriceMonitor/1.0 (+https://giamha.online)");
         using var robotsResponse = await BhxRequestGuard.SendWithRedirectsAsync(robotsClient, robotsRequest, ct);
-        if (robotsResponse.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized)
-            throw new InvalidDataException("BHX robots policy denied access.");
+        if (robotsResponse.StatusCode is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.TooManyRequests)
+            throw new SourceAccessBlockedException();
         if (robotsResponse.IsSuccessStatusCode)
         {
             var robots = await robotsResponse.Content.ReadAsStringAsync(ct);
@@ -51,11 +51,12 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
                 finally { requestGate.Release(); }
             }
         });
-        await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
-        if (page.Url.Contains("captcha", StringComparison.OrdinalIgnoreCase) || page.Url.Contains("challenge", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("BHX access challenge detected.");
+        var navigationResponse = await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
+        if (navigationResponse?.Status is 401 or 403 or 429) throw new SourceAccessBlockedException();
+        if (page.Url.Contains("captcha", StringComparison.OrdinalIgnoreCase) || page.Url.Contains("challenge", StringComparison.OrdinalIgnoreCase)) throw new SourceAccessBlockedException();
         var pageText = (await page.Locator("body").InnerTextAsync()).ToLowerInvariant();
         if (pageText.Contains("captcha") || pageText.Contains("verify you are human") || pageText.Contains("truy cập bất thường"))
-            throw new InvalidDataException("BHX access challenge detected.");
+            throw new SourceAccessBlockedException();
         var cards = page.Locator("[data-product-code]");
         var count = await cards.CountAsync();
         if (count is < 1 or > 500) throw new InvalidDataException("Validated BHX product selector changed.");

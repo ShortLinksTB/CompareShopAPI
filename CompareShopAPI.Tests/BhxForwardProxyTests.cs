@@ -102,6 +102,14 @@ public sealed class BhxForwardProxyTests
         Assert.Throws<ArgumentException>(() => WorkerIngestion.BhxBrowserLaunchOptions.Create(""));
     }
 
+    [Fact]
+    public void Browser_launch_does_not_override_playwright_user_agent()
+    {
+        var options = WorkerIngestion.BhxBrowserLaunchOptions.Create("http://127.0.0.1:43127");
+
+        Assert.DoesNotContain(options.Args!, argument => argument.StartsWith("--user-agent", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static async Task<string> SendProxyRequestAsync(string proxyServer, string request, CancellationToken ct = default)
     {
         var endpoint = new Uri(proxyServer);

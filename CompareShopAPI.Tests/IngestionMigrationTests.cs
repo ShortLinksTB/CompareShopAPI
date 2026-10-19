@@ -1,3 +1,4 @@
+using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Infrastructure.Persistence;
 using CompareShopAPI.Infrastructure.Ingestion;
 using CompareShopAPI.Domain.Catalog;

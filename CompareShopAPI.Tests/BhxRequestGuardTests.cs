@@ -1,6 +1,7 @@
 extern alias Workers;
 
 using System.Net;
+using Microsoft.Extensions.Logging;
 using WorkerIngestion = Workers::CompareShopAPI.Workers.Ingestion;
 using Xunit;
 
@@ -59,6 +60,26 @@ public sealed class BhxRequestGuardTests
 
         await Assert.ThrowsAsync<CompareShopAPI.Application.Ingestion.SourceAccessBlockedException>(() => reader.ReadValidatedBiaAsync(CancellationToken.None));
         Assert.Single(transport.Requests);
+    }
+
+    [Fact]
+    public async Task Reader_logs_exception_type_and_shortened_stack_without_exception_message()
+    {
+        const string sensitiveResponseDetail = "raw response body with cookie=private-value";
+        var transport = new ThrowingHandler(new InvalidOperationException(sensitiveResponseDetail));
+        var logger = new CapturingLogger<WorkerIngestion.BhxPlaywrightCatalogReader>();
+        var reader = new WorkerIngestion.BhxPlaywrightCatalogReader(
+            () => WorkerIngestion.BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(2), transport), logger);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => reader.ReadValidatedBiaAsync(CancellationToken.None));
+
+        var (level, diagnostic) = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Debug, level);
+        Assert.Contains(nameof(InvalidOperationException), diagnostic, StringComparison.Ordinal);
+        Assert.Contains(nameof(ThrowingHandler.SendAsync), diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(sensitiveResponseDetail, diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-value", diagnostic, StringComparison.Ordinal);
+        Assert.True(diagnostic.Length <= 1400);
     }
 
     [Theory]
@@ -121,5 +142,19 @@ public sealed class BhxRequestGuardTests
             Requests.Add(request.RequestUri!);
             return Task.FromResult(respond(request));
         }
+    }
+
+    private sealed class ThrowingHandler(Exception failure) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => throw failure;
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 }

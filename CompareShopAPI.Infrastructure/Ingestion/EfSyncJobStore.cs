@@ -102,7 +102,7 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
         return new(imported, pending);
     }
 
-    public async Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct)
+    public async Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct, bool pauseSource = false)
     {
         // A failed import transaction may have left rolled-back entities tracked. Reload terminal state from SQL.
         db.ChangeTracker.Clear();
@@ -114,7 +114,9 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
         }
         else
         {
-            var source = await db.DataSources.SingleAsync(x => x.Id == sourceId, ct); source.ScheduleFailureRetry(finishedUtc);
+            var source = await db.DataSources.SingleAsync(x => x.Id == sourceId, ct);
+            if (pauseSource) source.Pause();
+            else source.ScheduleFailureRetry(finishedUtc);
         }
         await db.SaveChangesAsync(ct);
     }

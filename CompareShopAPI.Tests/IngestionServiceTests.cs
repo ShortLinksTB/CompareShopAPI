@@ -56,6 +56,20 @@ public sealed class IngestionServiceTests
     }
 
     [Fact]
+    public async Task CoordinatorPausesSourceOnBlockedOrChallengedAccessWithSanitizedError()
+    {
+        var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
+        var reader = new FakeReader { Failure = new SourceAccessBlockedException() };
+
+        await new IngestionCoordinator(jobs, reader, new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+
+        Assert.Equal(SyncJobState.Failed, jobs.CompletedState);
+        Assert.Equal("source_blocked", jobs.ErrorCode);
+        Assert.Equal(SourceAccessBlockedException.SanitizedSummary, jobs.ErrorSummary);
+        Assert.True(jobs.SourcePaused);
+    }
+
+    [Fact]
     public async Task AdminServiceEnforcesPermissionsAndReturnsJobsOrRetry()
     {
         var jobs = new FakeJobs();
@@ -87,13 +101,15 @@ public sealed class IngestionServiceTests
         public int Imported { get; private set; }
         public int Pending { get; private set; }
         public string? ErrorCode { get; private set; }
+        public string? ErrorSummary { get; private set; }
+        public bool SourcePaused { get; private set; }
         public bool FullSnapshot { get; private set; }
         public SyncJobSummary? Retry { get; set; }
         public Task<IReadOnlyList<DataSource>> DueSources(DateTime nowUtc, CancellationToken ct) => Task.FromResult(Sources);
         public Task<SyncJob?> TryClaim(int sourceId, DateTime nowUtc, CancellationToken ct) => Task.FromResult(Claimed);
         public Task<bool> ShopIsUsable(int sourceId, CancellationToken ct) => Task.FromResult(Usable);
         public Task<ImportCounts> Import(int sourceId, IReadOnlyList<ScrapedOffer> rows, bool fullSnapshot, CancellationToken ct) { FullSnapshot = fullSnapshot; return Task.FromResult(Counts); }
-        public Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct) { CompletedState = state; Seen = seen; Imported = imported; Pending = pending; ErrorCode = errorCode; return Task.CompletedTask; }
+        public Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct, bool pauseSource = false) { CompletedState = state; Seen = seen; Imported = imported; Pending = pending; ErrorCode = errorCode; ErrorSummary = errorSummary; SourcePaused = pauseSource; return Task.CompletedTask; }
         public Task<IReadOnlyList<SyncJobSummary>> ListJobs(CancellationToken ct) => Task.FromResult<IReadOnlyList<SyncJobSummary>>([]);
         public Task<SyncJobSummary?> QueueRetry(int jobId, CancellationToken ct) => Task.FromResult(Retry);
     }

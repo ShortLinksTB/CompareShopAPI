@@ -26,6 +26,7 @@ public sealed class DataSource
     public bool IsDue(DateTime nowUtc) => State == DataSourceState.Active && (LastCompletedAtUtc is null || nowUtc >= LastCompletedAtUtc.Value.AddHours(IntervalHours)) && (NextAttemptAtUtc is null || nowUtc >= NextAttemptAtUtc.Value);
     public void Complete(DateTime atUtc) { LastCompletedAtUtc = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc); NextAttemptAtUtc = null; }
     public void ScheduleFailureRetry(DateTime atUtc) => NextAttemptAtUtc = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc).AddHours(6);
+    public void Pause() { State = DataSourceState.Paused; NextAttemptAtUtc = null; }
     public void AttachPartnerShop(int partnerShopId) { if (partnerShopId <= 0) throw new ArgumentOutOfRangeException(nameof(partnerShopId)); PartnerShopId = partnerShopId; }
     public void MarkError() => State = DataSourceState.Error;
 }

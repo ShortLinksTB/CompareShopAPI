@@ -9,13 +9,18 @@ public interface ISyncJobStore
     Task<SyncJob?> TryClaim(int sourceId, DateTime nowUtc, CancellationToken ct);
     Task<bool> ShopIsUsable(int sourceId, CancellationToken ct);
     Task<ImportCounts> Import(int sourceId, IReadOnlyList<ScrapedOffer> rows, bool fullSnapshot, CancellationToken ct);
-    Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct);
+    Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct, bool pauseSource = false);
     Task<IReadOnlyList<SyncJobSummary>> ListJobs(CancellationToken ct);
     Task<SyncJobSummary?> QueueRetry(int jobId, CancellationToken ct);
 }
 public sealed record SyncJobSummary(int Id, int DataSourceId, string DataSource, SyncJobState State, DateTime QueuedAtUtc, DateTime? StartedAtUtc, DateTime? FinishedAtUtc, int SeenCount, int ImportedCount, int PendingCount, string? ErrorCode, string? ErrorSummary, int? RetryOfJobId);
 public interface IPriceHistoryRecorder { Task RecordForChangedMinimums(CancellationToken ct); }
 public sealed record ImportCounts(int Imported, int Pending);
+public sealed class SourceAccessBlockedException : Exception
+{
+    public const string SanitizedSummary = "BHX access was blocked or challenged; source paused.";
+    public SourceAccessBlockedException() : base(SanitizedSummary) { }
+}
 
 public sealed class IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReader source, IPriceHistoryRecorder history, TimeProvider clock)
 {
@@ -43,6 +48,11 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReade
                 await jobs.Complete(dataSource.Id, job, result.Pending > 0 ? SyncJobState.Partial : SyncJobState.Success, clock.GetUtcNow().UtcDateTime, rows.Count, result.Imported, result.Pending, null, null, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (SourceAccessBlockedException)
+            {
+                await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
+                    "source_blocked", SourceAccessBlockedException.SanitizedSummary, ct, pauseSource: true);
+            }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning("BHX source sync failed; job {0} is recorded as failed ({1}).", job.Id, ex.GetType().Name);

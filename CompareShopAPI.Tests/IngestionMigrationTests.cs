@@ -135,6 +135,43 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
     }
 
     [Fact]
+    public async Task Failed_source_completion_schedules_retry_when_source_is_not_paused()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopRetry_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var now = DateTime.UtcNow;
+        try
+        {
+            int sourceId;
+            SyncJob job;
+            await using (var setup = new CompareShopDbContext(options))
+            {
+                await setup.Database.EnsureCreatedAsync();
+                var source = new DataSource("bhx", "BHX", "/bia", null, now);
+                setup.DataSources.Add(source);
+                await setup.SaveChangesAsync();
+                sourceId = source.Id;
+                job = (await new EfSyncJobStore(setup).TryClaim(sourceId, now, CancellationToken.None))!;
+            }
+
+            var finished = now.AddMinutes(1);
+            await using (var db = new CompareShopDbContext(options))
+                await new EfSyncJobStore(db).Complete(sourceId, job, SyncJobState.Failed, finished, 0, 0, 0,
+                    "temporary_error", "temporary failure", CancellationToken.None);
+
+            await using var verification = new CompareShopDbContext(options);
+            var sourceAfterFailure = await verification.DataSources.SingleAsync(x => x.Id == sourceId);
+            Assert.Equal(DataSourceState.Active, sourceAfterFailure.State);
+            Assert.Equal<DateTime?>(finished.AddHours(6), sourceAfterFailure.NextAttemptAtUtc);
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task Full_snapshot_deactivates_omitted_mapped_offer_even_with_unmapped_skus()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopIngestionSnapshot_{Guid.NewGuid():N}" }.ConnectionString;

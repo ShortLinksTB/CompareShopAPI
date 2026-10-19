@@ -51,6 +51,32 @@ public sealed class BhxRequestGuardTests
         Assert.Equal("https://bachhoaxanh.com/robots.txt", Assert.Single(transport.Requests).ToString());
     }
 
+    [Fact]
+    public async Task Reader_stops_when_robots_request_is_blocked()
+    {
+        var transport = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden));
+        var reader = new WorkerIngestion.BhxPlaywrightCatalogReader(() => WorkerIngestion.BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(2), transport));
+
+        await Assert.ThrowsAsync<CompareShopAPI.Application.Ingestion.SourceAccessBlockedException>(() => reader.ReadValidatedBiaAsync(CancellationToken.None));
+        Assert.Single(transport.Requests);
+    }
+
+    [Theory]
+    [InlineData(403, "https://bachhoaxanh.com/bia", "", true)]
+    [InlineData(null, "https://bachhoaxanh.com/captcha", "", true)]
+    [InlineData(null, "https://bachhoaxanh.com/challenge", "", true)]
+    [InlineData(null, "https://bachhoaxanh.com/bia", "captcha", true)]
+    [InlineData(null, "https://bachhoaxanh.com/bia", "verify you are human", true)]
+    [InlineData(null, "https://bachhoaxanh.com/bia", "truy cập bất thường", true)]
+    [InlineData(200, "https://bachhoaxanh.com/bia", "valid catalog", false)]
+    public void Reader_rejects_blocked_or_challenge_responses(int? status, string url, string pageText, bool blocked)
+    {
+        if (blocked)
+            Assert.Throws<CompareShopAPI.Application.Ingestion.SourceAccessBlockedException>(() => WorkerIngestion.BhxPlaywrightCatalogReader.EnsureAccessible(status, url, pageText));
+        else
+            WorkerIngestion.BhxPlaywrightCatalogReader.EnsureAccessible(status, url, pageText);
+    }
+
     [Theory]
     [InlineData("https://bachhoaxanh.com/robots.txt", true)]
     [InlineData("https://www.bachhoaxanh.com/robots.txt", false)]

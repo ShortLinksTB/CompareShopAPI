@@ -52,11 +52,9 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
             }
         });
         var navigationResponse = await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
-        if (navigationResponse?.Status is 401 or 403 or 429) throw new SourceAccessBlockedException();
-        if (page.Url.Contains("captcha", StringComparison.OrdinalIgnoreCase) || page.Url.Contains("challenge", StringComparison.OrdinalIgnoreCase)) throw new SourceAccessBlockedException();
+        EnsureAccessible(navigationResponse?.Status, page.Url, null);
         var pageText = (await page.Locator("body").InnerTextAsync()).ToLowerInvariant();
-        if (pageText.Contains("captcha") || pageText.Contains("verify you are human") || pageText.Contains("truy cập bất thường"))
-            throw new SourceAccessBlockedException();
+        EnsureAccessible(null, page.Url, pageText);
         var cards = page.Locator("[data-product-code]");
         var count = await cards.CountAsync();
         if (count is < 1 or > 500) throw new InvalidDataException("Validated BHX product selector changed.");
@@ -79,5 +77,14 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
         }
         if (result.Count == 0) throw new InvalidDataException("Validated BHX product cards were not found.");
         return result;
+    }
+
+    internal static void EnsureAccessible(int? status, string pageUrl, string? pageText)
+    {
+        if (status is 401 or 403 or 429) throw new SourceAccessBlockedException();
+        if (pageUrl.Contains("captcha", StringComparison.OrdinalIgnoreCase) || pageUrl.Contains("challenge", StringComparison.OrdinalIgnoreCase))
+            throw new SourceAccessBlockedException();
+        if (pageText is not null && (pageText.Contains("captcha") || pageText.Contains("verify you are human") || pageText.Contains("truy cập bất thường")))
+            throw new SourceAccessBlockedException();
     }
 }

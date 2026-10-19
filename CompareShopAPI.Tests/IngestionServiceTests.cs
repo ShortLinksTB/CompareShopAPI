@@ -1,5 +1,6 @@
 using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Domain.Ingestion;
+using System.Net;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -67,6 +68,23 @@ public sealed class IngestionServiceTests
         Assert.Equal("source_blocked", jobs.ErrorCode);
         Assert.Equal(SourceAccessBlockedException.SanitizedSummary, jobs.ErrorSummary);
         Assert.True(jobs.SourcePaused);
+    }
+
+    [Fact]
+    public async Task CoordinatorPersistsRedirectDenialReasonAndStatusWithoutUntrustedDetails()
+    {
+        var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
+        var sensitiveTarget = "https://unapproved.example/path?token=private-value";
+        var reader = new FakeReader { Failure = new SourceRedirectDeniedException(HttpStatusCode.Found) };
+
+        await new IngestionCoordinator(jobs, reader, new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+
+        Assert.Equal(SyncJobState.Failed, jobs.CompletedState);
+        Assert.Equal("redirect_target_denied_302", jobs.ErrorCode);
+        Assert.Equal(SourceRedirectDeniedException.SanitizedSummary, jobs.ErrorSummary);
+        Assert.DoesNotContain(sensitiveTarget, jobs.ErrorSummary, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-value", jobs.ErrorSummary, StringComparison.Ordinal);
+        Assert.False(jobs.SourcePaused);
     }
 
     [Fact]

@@ -128,7 +128,11 @@ public sealed class BhxRequestGuardTests
         }
         else
         {
-            await Assert.ThrowsAsync<InvalidDataException>(() => WorkerIngestion.BhxRequestGuard.SendWithRedirectsAsync(client, request, CancellationToken.None));
+            var denied = await Assert.ThrowsAsync<CompareShopAPI.Application.Ingestion.SourceRedirectDeniedException>(
+                () => WorkerIngestion.BhxRequestGuard.SendWithRedirectsAsync(client, request, CancellationToken.None));
+            Assert.Equal("redirect_target_denied_302", denied.ErrorCode);
+            Assert.Equal(CompareShopAPI.Application.Ingestion.SourceRedirectDeniedException.SanitizedSummary, denied.Message);
+            Assert.DoesNotContain(redirectTarget, denied.Message, StringComparison.Ordinal);
             Assert.Single(transport.Requests);
         }
     }

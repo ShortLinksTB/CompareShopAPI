@@ -11,7 +11,7 @@ namespace CompareShopAPI.Workers.Ingestion;
 
 public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
 {
-    private static readonly Uri CategoryUri = new("https://bachhoaxanh.com/bia");
+    private static readonly Uri CategoryUri = new("https://www.bachhoaxanh.com/bia");
 
     private readonly Func<HttpClient> robotsClientFactory;
     private readonly ILogger<BhxPlaywrightCatalogReader> logger;

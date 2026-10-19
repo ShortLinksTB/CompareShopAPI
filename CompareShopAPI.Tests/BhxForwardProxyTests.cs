@@ -12,9 +12,9 @@ namespace CompareShopAPI.Tests;
 public sealed class BhxForwardProxyTests
 {
     [Theory]
-    [InlineData("www.bachhoaxanh.com:443")]
+    [InlineData("bachhoaxanh.com:443")]
     [InlineData("other.example:443")]
-    [InlineData("bachhoaxanh.com.evil.example:443")]
+    [InlineData("www.bachhoaxanh.com.evil.example:443")]
     [InlineData("bachhoaxanh.com:444")]
     public async Task Proxy_denies_unapproved_CONNECT_targets_before_upstream_io(string authority)
     {
@@ -48,7 +48,7 @@ public sealed class BhxForwardProxyTests
             return client;
         }, cancellation.Token);
 
-        var status = await SendProxyRequestAsync(proxy.Server, "CONNECT bachhoaxanh.com:443 HTTP/1.1\r\nHost: bachhoaxanh.com:443\r\n\r\n", cancellation.Token);
+        var status = await SendProxyRequestAsync(proxy.Server, "CONNECT www.bachhoaxanh.com:443 HTTP/1.1\r\nHost: www.bachhoaxanh.com:443\r\n\r\n", cancellation.Token);
         using var accepted = await acceptedUpstream;
 
         Assert.StartsWith("HTTP/1.1 200 Connection Established", status, StringComparison.Ordinal);
@@ -65,7 +65,7 @@ public sealed class BhxForwardProxyTests
             throw new InvalidOperationException("Non-CONNECT request reached upstream connector.");
         });
 
-        var status = await SendProxyRequestAsync(proxy.Server, "GET https://bachhoaxanh.com/bia HTTP/1.1\r\nHost: bachhoaxanh.com\r\n\r\n");
+        var status = await SendProxyRequestAsync(proxy.Server, "GET https://www.bachhoaxanh.com/bia HTTP/1.1\r\nHost: www.bachhoaxanh.com\r\n\r\n");
 
         Assert.StartsWith("HTTP/1.1 405 Method Not Allowed", status, StringComparison.Ordinal);
         Assert.Equal(0, upstreamCalls);
@@ -81,7 +81,7 @@ public sealed class BhxForwardProxyTests
             throw new IOException("Approved upstream is unavailable.");
         });
 
-        var status = await SendProxyRequestAsync(proxy.Server, "CONNECT bachhoaxanh.com:443 HTTP/1.1\r\nHost: bachhoaxanh.com:443\r\n\r\n");
+        var status = await SendProxyRequestAsync(proxy.Server, "CONNECT www.bachhoaxanh.com:443 HTTP/1.1\r\nHost: www.bachhoaxanh.com:443\r\n\r\n");
 
         Assert.StartsWith("HTTP/1.1 502 Bad Gateway", status, StringComparison.Ordinal);
         Assert.Equal(1, upstreamCalls);

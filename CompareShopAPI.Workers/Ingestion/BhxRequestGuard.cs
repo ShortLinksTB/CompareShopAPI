@@ -4,7 +4,7 @@ namespace CompareShopAPI.Workers.Ingestion;
 
 public static class BhxRequestGuard
 {
-    public const string AllowedHost = "bachhoaxanh.com";
+    public const string AllowedHost = "www.bachhoaxanh.com";
 
     public static bool IsAllowed(Uri? uri) =>
         uri is { IsAbsoluteUri: true, Port: 443, UserInfo.Length: 0 } &&

@@ -1,7 +1,10 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Domain.Ingestion;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Playwright;
 
 namespace CompareShopAPI.Workers.Ingestion;
@@ -11,12 +14,42 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
     private static readonly Uri CategoryUri = new("https://bachhoaxanh.com/bia");
 
     private readonly Func<HttpClient> robotsClientFactory;
+    private readonly ILogger<BhxPlaywrightCatalogReader> logger;
 
-    public BhxPlaywrightCatalogReader() : this(() => BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(8))) { }
+    public BhxPlaywrightCatalogReader() : this(() => BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(8)), NullLogger<BhxPlaywrightCatalogReader>.Instance) { }
 
-    internal BhxPlaywrightCatalogReader(Func<HttpClient> robotsClientFactory) => this.robotsClientFactory = robotsClientFactory;
+    public BhxPlaywrightCatalogReader(ILogger<BhxPlaywrightCatalogReader> logger)
+        : this(() => BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(8)), logger) { }
+
+    internal BhxPlaywrightCatalogReader(Func<HttpClient> robotsClientFactory)
+        : this(robotsClientFactory, NullLogger<BhxPlaywrightCatalogReader>.Instance) { }
+
+    internal BhxPlaywrightCatalogReader(Func<HttpClient> robotsClientFactory, ILogger<BhxPlaywrightCatalogReader> logger)
+    {
+        this.robotsClientFactory = robotsClientFactory;
+        this.logger = logger;
+    }
 
     public async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct)
+    {
+        try
+        {
+            return await ReadValidatedBiaCoreAsync(ct);
+        }
+        catch (SourceAccessBlockedException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Stack frames are useful for diagnosis without including exception messages, response bodies, or HTML.
+            logger.LogDebug("BHX scrape failed. ExceptionType={ExceptionType}; Stack={DiagnosticStack}",
+                ex.GetType().FullName, FormatDiagnosticStack(ex));
+            throw;
+        }
+    }
+
+    private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaCoreAsync(CancellationToken ct)
     {
         using var robotsClient = robotsClientFactory();
         using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(CategoryUri, "/robots.txt"));
@@ -86,5 +119,16 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
             throw new SourceAccessBlockedException();
         if (pageText is not null && (pageText.Contains("captcha") || pageText.Contains("verify you are human") || pageText.Contains("truy cập bất thường")))
             throw new SourceAccessBlockedException();
+    }
+
+    private static string FormatDiagnosticStack(Exception exception)
+    {
+        const int maxStackLength = 1200;
+        var frames = new StackTrace(exception, fNeedFileInfo: false).ToString()
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Take(8)
+            .Select(frame => new string(frame.Where(character => !char.IsControl(character)).ToArray()).Trim());
+        var stack = string.Join(" | ", frames);
+        return stack.Length <= maxStackLength ? stack : stack[..maxStackLength];
     }
 }

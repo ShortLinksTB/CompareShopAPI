@@ -70,6 +70,20 @@ public sealed class IngestionServiceTests
     }
 
     [Fact]
+    public async Task CoordinatorPersistsSafeRedirectDenialReasonAndStatus()
+    {
+        var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
+        var reader = new FakeReader { Failure = new SourceRedirectDeniedException(302) };
+
+        await new IngestionCoordinator(jobs, reader, new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+
+        Assert.Equal(SyncJobState.Failed, jobs.CompletedState);
+        Assert.Equal("redirect_target_denied_302", jobs.ErrorCode);
+        Assert.Equal(SourceRedirectDeniedException.SanitizedSummary, jobs.ErrorSummary);
+        Assert.False(jobs.SourcePaused);
+    }
+
+    [Fact]
     public async Task AdminServiceEnforcesPermissionsAndReturnsJobsOrRetry()
     {
         var jobs = new FakeJobs();

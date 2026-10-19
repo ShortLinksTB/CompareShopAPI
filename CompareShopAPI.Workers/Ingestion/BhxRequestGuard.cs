@@ -1,3 +1,5 @@
+using CompareShopAPI.Application.Ingestion;
+
 namespace CompareShopAPI.Workers.Ingestion;
 
 public static class BhxRequestGuard
@@ -52,9 +54,10 @@ public static class BhxRequestGuard
                 return response;
 
             var nextUri = location.IsAbsoluteUri ? location : new Uri(uri, location);
+            var redirectStatusCode = (int)response.StatusCode;
             response.Dispose();
             if (!IsAllowed(nextUri))
-                throw new InvalidDataException("BHX redirect target is not approved.");
+                throw new SourceRedirectDeniedException(redirectStatusCode);
 
             uri = nextUri;
         }

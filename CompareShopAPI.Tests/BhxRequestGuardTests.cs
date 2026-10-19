@@ -76,7 +76,7 @@ public sealed class BhxRequestGuardTests
         var (level, diagnostic) = Assert.Single(logger.Entries);
         Assert.Equal(LogLevel.Debug, level);
         Assert.Contains(nameof(InvalidOperationException), diagnostic, StringComparison.Ordinal);
-        Assert.Contains(nameof(ThrowingHandler.SendAsync), diagnostic, StringComparison.Ordinal);
+        Assert.Contains("SendAsync", diagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain(sensitiveResponseDetail, diagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain("private-value", diagnostic, StringComparison.Ordinal);
         Assert.True(diagnostic.Length <= 1400);

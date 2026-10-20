@@ -23,6 +23,15 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         .Join(db.AdminRolePermissions, ur => ur.RoleId, rp => rp.RoleId, (_, rp) => rp.PermissionId)
         .Join(db.AdminPermissions, id => id, p => p.Id, (_, p) => p.Key).AnyAsync(key => key == permission, ct);
 
+    public async Task<IReadOnlyList<string>> PermissionsForSubject(string subject, CancellationToken ct) => await db.AdminUserRoles.AsNoTracking()
+        .Join(db.Users.AsNoTracking(), ur => ur.UserId, user => user.Id, (ur, user) => new { ur.RoleId, user.KeycloakSubject })
+        .Where(ur => ur.KeycloakSubject == subject)
+        .Join(db.AdminRolePermissions.AsNoTracking(), ur => ur.RoleId, rp => rp.RoleId, (_, rp) => rp.PermissionId)
+        .Join(db.AdminPermissions.AsNoTracking(), id => id, permission => permission.Id, (_, permission) => permission.Key)
+        .Distinct()
+        .OrderBy(key => key)
+        .ToListAsync(ct);
+
     public async Task<bool> BootstrapFirstAdmin(string subject, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);

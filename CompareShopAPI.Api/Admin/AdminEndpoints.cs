@@ -8,6 +8,7 @@ public static class AdminEndpoints
     public static RouteGroupBuilder MapAdminEndpoints(this RouteGroupBuilder admin)
     {
         admin.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+        admin.MapGet("/me/permissions", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.MyPermissions(Subject(c), ct)));
         admin.MapPost("/bootstrap/first-admin", (HttpContext c, AdminService s, CancellationToken ct) => Run(async () =>
         {
             await s.BootstrapFirstAdmin(Subject(c), ct);

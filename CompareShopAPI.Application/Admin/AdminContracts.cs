@@ -47,6 +47,7 @@ public sealed record AdminRoleAssignmentSnapshot(
 public interface IAdminData
 {
     Task<bool> HasPermission(string subject, string permission, CancellationToken ct);
+    Task<IReadOnlyList<string>> PermissionsForSubject(string subject, CancellationToken ct);
     Task<bool> BootstrapFirstAdmin(string subject, CancellationToken ct);
     Task<Page<AdminCategory>> Categories(int page, int pageSize, CancellationToken ct);
     Task<AdminCategory?> Category(int id, CancellationToken ct);
@@ -96,6 +97,12 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
         if (!await data.HasPermission(subject, permission, ct)) throw new AdminForbiddenException();
         return subject;
+    }
+
+    public Task<IReadOnlyList<string>> MyPermissions(string? subject, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
+        return data.PermissionsForSubject(subject, ct);
     }
 
     public async Task BootstrapFirstAdmin(string? subject, CancellationToken ct)

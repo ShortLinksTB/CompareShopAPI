@@ -178,11 +178,37 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             {
                 await db.Database.MigrateAsync();
                 var operatorSub = $"operator-{Guid.NewGuid():N}"; var viewerSub = $"viewer-{Guid.NewGuid():N}";
-                await AddUser(db, operatorSub, 2); await AddUser(db, viewerSub, 4);
+                var otherSub = $"other-{Guid.NewGuid():N}";
+                await AddUser(db, operatorSub, 2); await AddUser(db, viewerSub, 4); await AddUser(db, otherSub, 1);
                 var settings = new Dictionary<string, string?> { ["ConnectionStrings:CompareShopDb"] = connection };
                 await using var app = new ApiFactory(settings: settings, signing: true);
                 using var client = app.CreateClient();
                 Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/admin/categories")).StatusCode);
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", includeSubject: false));
+                Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/admin/me/permissions")).StatusCode);
+
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: operatorSub));
+                var ownPermissionsResponse = await client.GetAsync("/admin/me/permissions");
+                Assert.Equal(HttpStatusCode.OK, ownPermissionsResponse.StatusCode);
+                var ownPermissions = await ownPermissionsResponse.Content.ReadFromJsonAsync<string[]>();
+                Assert.NotNull(ownPermissions);
+                Assert.Contains("products.read", ownPermissions);
+                Assert.Contains("products.create", ownPermissions);
+                Assert.DoesNotContain("compliance.manage", ownPermissions);
+                Assert.DoesNotContain("users.manage", ownPermissions);
+
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: viewerSub));
+                var viewerPermissions = await (await client.GetAsync("/admin/me/permissions")).Content.ReadFromJsonAsync<string[]>();
+                Assert.NotNull(viewerPermissions);
+                Assert.Contains("products.read", viewerPermissions);
+                Assert.DoesNotContain("products.create", viewerPermissions);
+                Assert.DoesNotContain("compliance.manage", viewerPermissions);
+
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: otherSub));
+                var otherPermissions = await (await client.GetAsync("/admin/me/permissions")).Content.ReadFromJsonAsync<string[]>();
+                Assert.NotNull(otherPermissions);
+                Assert.Contains("compliance.manage", otherPermissions);
+                Assert.DoesNotContain("compliance.manage", ownPermissions);
 
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: operatorSub));
                 Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/categories")).StatusCode);

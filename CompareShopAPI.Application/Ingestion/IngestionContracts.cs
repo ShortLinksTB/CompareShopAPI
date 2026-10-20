@@ -1,4 +1,5 @@
 using CompareShopAPI.Domain.Ingestion;
+using CompareShopAPI.Application.Admin;
 
 namespace CompareShopAPI.Application.Ingestion;
 
@@ -91,5 +92,4 @@ public sealed class IngestionAdminService(IAdminPermissionReader permissions, IS
         return await jobs.QueueRetry(id, ct) ?? throw new KeyNotFoundException("A failed or partial job was not found.");
     }
 }
-public interface IAdminPermissionReader { Task<bool> HasPermission(string subject, string permission, CancellationToken ct); }
 public sealed class IngestionForbiddenException : Exception { }

@@ -13,6 +13,7 @@
     <ProjectReference Include="../CompareShopAPI.Infrastructure/CompareShopAPI.Infrastructure.csproj" />
     <ProjectReference Include="../CompareShopAPI.Api/CompareShopAPI.Api.csproj" />
     <ProjectReference Include="../CompareShopAPI.Workers/CompareShopAPI.Workers.csproj" Aliases="Workers" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.2.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.0" />

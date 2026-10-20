@@ -48,6 +48,8 @@ builder.Services.AddScoped<WishlistService>();
 builder.Services.AddScoped<PriceAlertService>();
 builder.Services.AddScoped<PriceHistoryService>();
 builder.Services.AddScoped<IAdminData, EfAdminData>();
+builder.Services.AddScoped<IBannedItemData, EfBannedItemData>();
+builder.Services.AddScoped<BannedItemService>();
 builder.Services.AddScoped<IArticleRepository, EfArticleRepository>();
 builder.Services.AddScoped<IArticlePermissionGate, AdminArticlePermissionGate>();
 builder.Services.AddScoped<IArticleProductLookup, UserCommerceArticleProductLookup>();

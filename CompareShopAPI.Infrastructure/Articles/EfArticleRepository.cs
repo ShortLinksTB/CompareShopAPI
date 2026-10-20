@@ -18,12 +18,12 @@ public sealed class EfArticleRepository(CompareShopDbContext db) : IArticleRepos
     {
         var query = Ordered().Where(x => x.Status == ArticleStatus.Published);
         var total = await query.CountAsync(ct);
-        var items = await query.Skip(Offset(page, pageSize)).Take(pageSize).Select(ToPublic).ToListAsync(ct);
+        var items = await PublicProjection(query.Skip(Offset(page, pageSize)).Take(pageSize)).ToListAsync(ct);
         return new(items, page, pageSize, total, (int)Math.Ceiling(total / (double)pageSize));
     }
 
     public Task<PublicArticleDto?> PublishedBySlug(string slug, CancellationToken ct) =>
-        db.Articles.AsNoTracking().Where(x => x.Status == ArticleStatus.Published && x.Slug == slug).Select(ToPublic).SingleOrDefaultAsync(ct);
+        PublicProjection(db.Articles.AsNoTracking().Where(x => x.Status == ArticleStatus.Published && x.Slug == slug)).SingleOrDefaultAsync(ct);
 
     public async Task<AdminArticlePage> AdminList(int page, int pageSize, CancellationToken ct)
     {
@@ -93,6 +93,14 @@ public sealed class EfArticleRepository(CompareShopDbContext db) : IArticleRepos
     private static ArticleSeo ToSeo(ArticleSeoInput x) => ArticleSeo.Create(x.Title, x.Description, x.CanonicalUrl, x.OgImage, x.Index);
     private static int Offset(int page, int size) => (int)Math.Min(int.MaxValue, (long)(page - 1) * size);
     private static bool IsUniqueViolation(DbUpdateException ex) => ex.InnerException is SqlException { Number: 2601 or 2627 };
-    private static readonly System.Linq.Expressions.Expression<Func<Article, PublicArticleDto>> ToPublic = x => new PublicArticleDto(x.Slug, x.Title, x.Excerpt, x.CoverImageUrl, x.AuthorName, x.AuthorAvatarUrl, x.ReadingMinutes, x.Content, x.Seo, x.PublishedAtUtc!.Value, x.UpdatedAtUtc, x.RelatedProducts.Select(p => p.ProductId).ToArray());
+    private IQueryable<PublicArticleDto> PublicProjection(IQueryable<Article> query) => query.Select(x => new PublicArticleDto(
+        x.Slug, x.Title, x.Excerpt, x.CoverImageUrl, x.AuthorName, x.AuthorAvatarUrl, x.ReadingMinutes, x.Content, x.Seo,
+        x.PublishedAtUtc!.Value, x.UpdatedAtUtc,
+        x.RelatedProducts.Where(relation => db.Products.Any(product => product.Id == relation.ProductId
+            && !db.BannedItems.Any(ban => ban.IsActive &&
+                (ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Product && ban.ProductId == product.Id
+                 || ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Brand && product.Brand != null
+                    && ban.NormalizedBrandName == product.Brand.Trim().ToUpper()))))
+            .Select(relation => relation.ProductId).ToArray()));
     private static ArticleDto ToAdmin(Article x) => new(x.Id, x.Slug, x.Title, x.Excerpt, x.CoverImageUrl, x.AuthorSubject, x.AuthorName, x.AuthorAvatarUrl, x.ReadingMinutes, x.Content, x.Status, x.Seo, x.CreatedAtUtc, x.UpdatedAtUtc, x.PublishedAtUtc, x.ScheduledAtUtc, x.RelatedProducts.Select(p => p.ProductId).Order().ToArray());
 }

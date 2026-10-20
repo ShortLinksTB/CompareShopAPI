@@ -1,5 +1,6 @@
 using CompareShopAPI.Application.Catalog;
 using CompareShopAPI.Domain.Catalog;
+using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -10,7 +11,11 @@ public sealed class EfAffiliateRedirectRepository(CompareShopDbContext db, ILogg
 {
     public Task<AffiliateLink?> FindRedirectableLink(int offerId, CancellationToken ct) => db.AffiliateLinks.AsNoTracking()
         .Where(link => link.ProductOfferId == offerId && link.ProductOffer.IsActive && !link.ProductOffer.IsOutlier &&
-            link.ProductOffer.Product.IsActive && link.ProductOffer.Product.Category.IsActive && link.ProductOffer.PartnerShop.IsActive)
+            link.ProductOffer.Product.IsActive && link.ProductOffer.Product.Category.IsActive && link.ProductOffer.PartnerShop.IsActive &&
+            !db.BannedItems.Any(ban => ban.IsActive &&
+                (ban.TargetType == BannedTargetType.Product && ban.ProductId == link.ProductOffer.ProductId
+                 || ban.TargetType == BannedTargetType.Brand && link.ProductOffer.Product.Brand != null
+                    && ban.NormalizedBrandName == link.ProductOffer.Product.Brand.Trim().ToUpper())))
         .FirstOrDefaultAsync(ct);
 
     public async Task<bool> RecordClick(int affiliateLinkId, DateTime clickedAtUtc, string? clientIpDigest, CancellationToken ct)

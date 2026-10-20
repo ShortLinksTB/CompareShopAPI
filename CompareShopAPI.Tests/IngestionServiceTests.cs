@@ -1,4 +1,5 @@
 using CompareShopAPI.Application.Ingestion;
+using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Domain.Ingestion;
 using Xunit;
 

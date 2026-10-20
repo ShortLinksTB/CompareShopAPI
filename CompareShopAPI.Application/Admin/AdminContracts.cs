@@ -16,6 +16,7 @@ public static class AdminPermissions
     public const string AuditRead = "audit_logs.read", DashboardRead = "dashboard.read", PriceAlertsReadAll = "price_alerts.read_all", AnalyticsRead = "analytics.read";
     public const string SeoRead = "seo.read", SeoUpdate = "seo.update", UsersManage = "users.manage", RolesManage = "roles.manage";
     public const string FeatureFlagsRead = "feature_flags.read", FeatureFlagsUpdate = "feature_flags.update", SettingsManage = "settings.manage";
+    public const string ComplianceRead = "compliance.read", ComplianceManage = "compliance.manage";
 }
 
 public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive);
@@ -81,6 +82,8 @@ public interface IAdminData
     Task<IReadOnlyList<AdminSetting>?> SaveSettings(IReadOnlyDictionary<string, string> settings, CancellationToken ct);
     Task<T> ExecuteAudited<T>(string actor, string action, string resourceType, string? resourceId, Func<CancellationToken, Task<(T? Result, object? Before, object? After)>> operation, CancellationToken ct);
 }
+
+public interface IAdminPermissionReader { Task<bool> HasPermission(string subject, string permission, CancellationToken ct); }
 
 public sealed class AdminForbiddenException() : Exception("The caller does not have permission for this operation.");
 public sealed class AdminUnauthorizedException() : Exception("A validated subject is required.");

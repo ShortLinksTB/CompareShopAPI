@@ -1,6 +1,7 @@
 using CompareShopAPI.Application.UserCommerce;
 using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Infrastructure.Persistence;
+using CompareShopAPI.Infrastructure.Catalog;
 using Microsoft.EntityFrameworkCore;
 
 namespace CompareShopAPI.Infrastructure.UserCommerce;
@@ -32,10 +33,17 @@ public sealed class EfUserProvisioning(CompareShopDbContext db, TimeProvider clo
 
 public sealed class EfUserCommerceRepository(CompareShopDbContext db) : IUserCommerceRepository
 {
-    public Task<bool> IsActiveProduct(int productId, CancellationToken ct) => db.Products.AsNoTracking().AnyAsync(x => x.Id == productId && x.IsActive, ct);
+    public Task<bool> IsActiveProduct(int productId, CancellationToken ct) => db.Products.AsNoTracking().AnyAsync(x => x.Id == productId && x.IsActive
+        && !db.BannedItems.Any(ban => ban.IsActive &&
+            (ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Product && ban.ProductId == x.Id
+             || ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Brand && x.Brand != null
+                && ban.NormalizedBrandName == x.Brand.Trim().ToUpper())), ct);
 
     public async Task<IReadOnlyList<WishlistItemDto>> Wishlist(int userId, CancellationToken ct) => await db.WishlistItems.AsNoTracking()
-        .Where(x => x.UserId == userId && x.Product.IsActive).OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.ProductId)
+        .Where(x => x.UserId == userId && x.Product.IsActive && !db.BannedItems.Any(ban => ban.IsActive &&
+            (ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Product && ban.ProductId == x.ProductId
+             || ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Brand && x.Product.Brand != null
+                && ban.NormalizedBrandName == x.Product.Brand.Trim().ToUpper()))).OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.ProductId)
         .Select(x => new WishlistItemDto(x.ProductId, x.Product.Slug, x.Product.Name, x.CreatedAtUtc)).ToListAsync(ct);
 
     public async Task AddWishlist(int userId, int productId, DateTime nowUtc, CancellationToken ct)
@@ -56,7 +64,10 @@ public sealed class EfUserCommerceRepository(CompareShopDbContext db) : IUserCom
     }
 
     public async Task<IReadOnlyList<PriceAlertDto>> PriceAlerts(int userId, CancellationToken ct) => await db.PriceAlerts.AsNoTracking()
-        .Where(x => x.UserId == userId).OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id)
+        .Where(x => x.UserId == userId && !db.BannedItems.Any(ban => ban.IsActive &&
+            (ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Product && ban.ProductId == x.ProductId
+             || ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Brand && x.Product.Brand != null
+                && ban.NormalizedBrandName == x.Product.Brand.Trim().ToUpper()))).OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Id)
         .Select(x => new PriceAlertDto(x.Id, x.ProductId, x.Product.Slug, x.Product.Name, x.TargetPrice, x.IsActive, x.CreatedAtUtc)).ToListAsync(ct);
 
     public async Task<PriceAlertDto> AddPriceAlert(int userId, int productId, int targetPrice, DateTime nowUtc, CancellationToken ct)

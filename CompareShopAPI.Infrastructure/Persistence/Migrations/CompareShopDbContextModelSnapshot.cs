@@ -176,6 +176,41 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.ToTable("AdminSettings");
                 });
 
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.BannedItem", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+                    b.Property<string>("TargetType").IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
+                    b.Property<string>("BrandName").HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<string>("NormalizedBrandName").HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<int?>("ProductId").HasColumnType("int");
+                    b.Property<string>("Reason").IsRequired().HasMaxLength(1000).HasColumnType("nvarchar(1000)");
+                    b.Property<bool>("IsActive").HasColumnType("bit");
+                    b.Property<string>("CreatedBy").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<DateTime>("CreatedAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("RevokedBy").HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<DateTime?>("RevokedAtUtc").HasColumnType("datetime2");
+                    b.HasKey("Id");
+                    b.HasIndex("NormalizedBrandName").IsUnique().HasFilter("[IsActive] = 1 AND [TargetType] = N'Brand' AND [NormalizedBrandName] IS NOT NULL");
+                    b.HasIndex("ProductId").IsUnique().HasFilter("[IsActive] = 1 AND [TargetType] = N'Product' AND [ProductId] IS NOT NULL");
+                    b.ToTable("BannedItems", t => t.HasCheckConstraint("CK_BannedItems_TargetShape", "([TargetType] = N'Brand' AND [BrandName] IS NOT NULL AND [NormalizedBrandName] IS NOT NULL AND [ProductId] IS NULL) OR ([TargetType] = N'Product' AND [BrandName] IS NULL AND [NormalizedBrandName] IS NULL AND [ProductId] IS NOT NULL)"));
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.BannedItemOutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id").HasColumnType("uniqueidentifier");
+                    b.Property<string>("EventType").IsRequired().HasMaxLength(80).HasColumnType("nvarchar(80)");
+                    b.Property<string>("Payload").IsRequired().HasColumnType("nvarchar(max)");
+                    b.Property<DateTime>("CreatedAtUtc").HasColumnType("datetime2");
+                    b.Property<DateTime?>("PublishedAtUtc").HasColumnType("datetime2");
+                    b.Property<DateTime>("NextAttemptAtUtc").HasColumnType("datetime2");
+                    b.Property<int>("AttemptCount").HasColumnType("int");
+                    b.Property<string>("LastError").HasMaxLength(80).HasColumnType("nvarchar(80)");
+                    b.HasKey("Id");
+                    b.HasIndex("PublishedAtUtc", "NextAttemptAtUtc", "CreatedAtUtc");
+                    b.ToTable("BannedItemOutboxMessages");
+                });
+
             modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminUserRole", b =>
                 {
                     b.Property<int>("UserId")
@@ -189,6 +224,15 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.HasIndex("RoleId");
 
                     b.ToTable("AdminUserRoles");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.BannedItem", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.Product", "Product")
+                        .WithMany().HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Product");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Admin.ProductMatching", b =>

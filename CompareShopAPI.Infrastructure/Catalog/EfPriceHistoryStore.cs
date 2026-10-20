@@ -10,13 +10,15 @@ internal static class VisibleCatalogOffers
     public static IQueryable<ProductOffer> Query(CompareShopDbContext db, TimeProvider clock)
     {
         var freshnessCutoff = clock.GetUtcNow().UtcDateTime.AddDays(-CatalogOfferPolicy.FreshnessDays);
-        return db.ProductOffers.AsNoTracking().Where(o => o.IsActive && !o.IsOutlier && o.UpdatedAtUtc >= freshnessCutoff && o.Product.IsActive && o.PartnerShop.IsActive);
+        return BannedItemVisibility.ExcludeBannedProducts(db, db.ProductOffers.AsNoTracking())
+            .Where(o => o.IsActive && !o.IsOutlier && o.UpdatedAtUtc >= freshnessCutoff && o.Product.IsActive && o.PartnerShop.IsActive);
     }
 }
 
 public sealed class EfPriceHistoryStore(CompareShopDbContext db, TimeProvider clock) : IPriceHistoryStore
 {
-    private IQueryable<Product> ActiveProducts() => db.Products.AsNoTracking().Where(p => p.IsActive && p.Category.IsActive);
+    private IQueryable<Product> ActiveProducts() => BannedItemVisibility.ExcludeBannedProducts(db,
+        db.Products.AsNoTracking().Where(p => p.IsActive && p.Category.IsActive));
 
     public async Task<IReadOnlyList<PriceHistoryDto>?> History(int productId, DateTime fromUtc, DateTime toUtc, CancellationToken ct)
     {

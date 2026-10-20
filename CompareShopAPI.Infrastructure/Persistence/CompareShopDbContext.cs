@@ -26,6 +26,8 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<AdminAuditLog> AdminAuditLogs => Set<AdminAuditLog>();
     public DbSet<AdminFeatureFlag> AdminFeatureFlags => Set<AdminFeatureFlag>();
     public DbSet<AdminSetting> AdminSettings => Set<AdminSetting>();
+    public DbSet<BannedItem> BannedItems => Set<BannedItem>();
+    public DbSet<BannedItemOutboxMessage> BannedItemOutboxMessages => Set<BannedItemOutboxMessage>();
     public DbSet<ProductMatching> ProductMatchings => Set<ProductMatching>();
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<ArticleRelatedProduct> ArticleRelatedProducts => Set<ArticleRelatedProduct>();
@@ -93,6 +95,25 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<AdminAuditLog>().HasKey(x => x.Id); model.Entity<AdminAuditLog>().Property(x => x.ActorSubject).HasMaxLength(200).IsRequired(); model.Entity<AdminAuditLog>().Property(x => x.Action).HasMaxLength(80).IsRequired(); model.Entity<AdminAuditLog>().Property(x => x.ResourceType).HasMaxLength(100).IsRequired(); model.Entity<AdminAuditLog>().Property(x => x.ResourceId).HasMaxLength(200); model.Entity<AdminAuditLog>().HasIndex(x => x.CreatedAtUtc);
         model.Entity<AdminFeatureFlag>().HasKey(x => x.Id); model.Entity<AdminFeatureFlag>().HasIndex(x => x.Key).IsUnique(); model.Entity<AdminFeatureFlag>().Property(x => x.Key).HasMaxLength(120).IsRequired(); model.Entity<AdminFeatureFlag>().Property(x => x.Description).HasMaxLength(500);
         model.Entity<AdminSetting>().HasKey(x => x.Id); model.Entity<AdminSetting>().HasIndex(x => x.Key).IsUnique(); model.Entity<AdminSetting>().Property(x => x.Key).HasMaxLength(120).IsRequired(); model.Entity<AdminSetting>().Property(x => x.Value).HasMaxLength(500).IsRequired();
+        model.Entity<BannedItem>().HasKey(x => x.Id);
+        model.Entity<BannedItem>().Property(x => x.TargetType).HasConversion<string>().HasMaxLength(20).IsRequired();
+        model.Entity<BannedItem>().Property(x => x.BrandName).HasMaxLength(200);
+        model.Entity<BannedItem>().Property(x => x.NormalizedBrandName).HasMaxLength(200);
+        model.Entity<BannedItem>().Property(x => x.Reason).HasMaxLength(1000).IsRequired();
+        model.Entity<BannedItem>().Property(x => x.CreatedBy).HasMaxLength(200).IsRequired();
+        model.Entity<BannedItem>().Property(x => x.RevokedBy).HasMaxLength(200);
+        model.Entity<BannedItem>().HasIndex(x => x.NormalizedBrandName).IsUnique()
+            .HasFilter("[IsActive] = 1 AND [TargetType] = N'Brand' AND [NormalizedBrandName] IS NOT NULL");
+        model.Entity<BannedItem>().HasIndex(x => x.ProductId).IsUnique()
+            .HasFilter("[IsActive] = 1 AND [TargetType] = N'Product' AND [ProductId] IS NOT NULL");
+        model.Entity<BannedItem>().HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<BannedItem>().ToTable(table => table.HasCheckConstraint("CK_BannedItems_TargetShape",
+            "([TargetType] = N'Brand' AND [BrandName] IS NOT NULL AND [NormalizedBrandName] IS NOT NULL AND [ProductId] IS NULL) OR ([TargetType] = N'Product' AND [BrandName] IS NULL AND [NormalizedBrandName] IS NULL AND [ProductId] IS NOT NULL)"));
+        model.Entity<BannedItemOutboxMessage>().HasKey(x => x.Id);
+        model.Entity<BannedItemOutboxMessage>().Property(x => x.EventType).HasMaxLength(80).IsRequired();
+        model.Entity<BannedItemOutboxMessage>().Property(x => x.Payload).IsRequired();
+        model.Entity<BannedItemOutboxMessage>().Property(x => x.LastError).HasMaxLength(80);
+        model.Entity<BannedItemOutboxMessage>().HasIndex(x => new { x.PublishedAtUtc, x.NextAttemptAtUtc, x.CreatedAtUtc });
         model.Entity<ProductMatching>().HasKey(x => x.Id); model.Entity<ProductMatching>().Property(x => x.Name).HasMaxLength(300).IsRequired(); model.Entity<ProductMatching>().Property(x => x.Brand).HasMaxLength(200); model.Entity<ProductMatching>().HasIndex(x => new { x.IsApproved, x.CreatedAtUtc });
         model.Entity<ProductMatching>().HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.SetNull);
         model.Entity<ProductMatching>().Property(x => x.ExternalSku).HasMaxLength(160);

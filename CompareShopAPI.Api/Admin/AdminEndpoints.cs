@@ -67,6 +67,14 @@ public static class AdminEndpoints
         admin.MapPatch("/feature-flags/{key}", (HttpContext c, string key, FeatureFlagInput input, AdminService s, CancellationToken ct) => Run(() => s.SaveFeatureFlag(Subject(c), key, input, ct)));
         admin.MapGet("/settings", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.Settings(Subject(c), ct)));
         admin.MapPatch("/settings", (HttpContext c, Dictionary<string, string> input, AdminService s, CancellationToken ct) => Run(() => s.SaveSettings(Subject(c), input, ct)));
+        admin.MapGet("/compliance/bans", (HttpContext c, string? targetType, bool? active, string? search, int? page, int? pageSize, BannedItemService s, CancellationToken ct) =>
+            RunCompliance(() => s.List(Subject(c), targetType, active, search, page ?? 1, pageSize ?? 20, ct)));
+        admin.MapGet("/compliance/bans/{id:int}", (HttpContext c, int id, BannedItemService s, CancellationToken ct) =>
+            RunCompliance(async () => await s.Get(Subject(c), id, ct) is { } item ? Results.Ok(item) : Results.NotFound()));
+        admin.MapPost("/compliance/bans", (HttpContext c, BannedItemInput input, BannedItemService s, CancellationToken ct) =>
+            RunCompliance(() => s.Create(Subject(c), input, ct), StatusCodes.Status201Created));
+        admin.MapDelete("/compliance/bans/{id:int}", (HttpContext c, int id, BannedItemService s, CancellationToken ct) =>
+            RunCompliance(async () => await s.Revoke(Subject(c), id, ct) ? Results.NoContent() : Results.NotFound()));
         return admin;
     }
 
@@ -87,6 +95,30 @@ public static class AdminEndpoints
         catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
+        catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
+    }
+    private static async Task<IResult> RunCompliance<T>(Func<Task<T>> operation, int successStatus = StatusCodes.Status200OK)
+    {
+        try
+        {
+            var result = await operation();
+            return successStatus == StatusCodes.Status201Created ? Results.Json(result, statusCode: successStatus) : Results.Ok(result);
+        }
+        catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
+        catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (BannedItemNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
+        catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
+        catch (BannedItemConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+        catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
+    }
+    private static async Task<IResult> RunCompliance(Func<Task<IResult>> operation)
+    {
+        try { return await operation(); }
+        catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
+        catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (BannedItemNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
+        catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
+        catch (BannedItemConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
     }
     private static async Task<IResult> Run(Func<Task> operation)

@@ -5,7 +5,8 @@ namespace CompareShopAPI.Infrastructure.Catalog;
 public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock) : ICatalogQueries
 {
     private IQueryable<CompareShopAPI.Domain.Catalog.ProductOffer> VisibleOffers() => VisibleCatalogOffers.Query(db, clock);
-    private IQueryable<CompareShopAPI.Domain.Catalog.Product> ActiveProducts() => db.Products.AsNoTracking().Where(p => p.IsActive && p.Category.IsActive);
+    private IQueryable<CompareShopAPI.Domain.Catalog.Product> ActiveProducts() => BannedItemVisibility.ExcludeBannedProducts(db,
+        db.Products.AsNoTracking().Where(p => p.IsActive && p.Category.IsActive));
     public async Task<IReadOnlyList<CategoryDto>> Categories(CancellationToken ct) => await db.Categories.AsNoTracking().Where(c => c.IsActive).OrderBy(c => c.Name).ThenBy(c => c.Id).Select(c => new CategoryDto(c.Id, c.Slug, c.Name)).ToListAsync(ct);
     public async Task<PageDto<ProductListDto>> Products(ProductFilter f, CancellationToken ct)
     {

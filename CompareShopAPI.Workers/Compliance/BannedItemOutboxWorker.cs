@@ -123,8 +123,8 @@ public sealed class BannedItemOutboxDispatcher(CompareShopDbContext db, IBannedI
             catch (Exception exception)
             {
                 message.ScheduleRetry(clock.GetUtcNow().UtcDateTime, exception.GetType().Name);
-                logger.LogWarning("Could not publish compliance outbox event {EventId}; retry scheduled (attempt {AttemptCount}, {ErrorType}).",
-                    message.Id, message.AttemptCount, exception.GetType().Name);
+                logger.LogWarning(exception, "Could not publish compliance outbox event {EventId}; retry scheduled (attempt {AttemptCount}, {ErrorType}): {ErrorMessage}",
+                    message.Id, message.AttemptCount, exception.GetType().Name, exception.Message);
             }
             await db.SaveChangesAsync(ct);
         }

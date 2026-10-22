@@ -72,16 +72,26 @@ public sealed class RabbitMqBannedItemMessagePublisher : IBannedItemMessagePubli
 
     private async Task<IConnection> CreateConnection(string host, CancellationToken ct)
     {
+        var factory = CreateConnectionFactory(host);
+        logger.LogInformation("Connecting compliance outbox publisher to configured RabbitMQ host.");
+        return await factory.CreateConnectionAsync(ct);
+    }
+
+    internal ConnectionFactory CreateConnectionFactory(string host)
+    {
         var factory = new ConnectionFactory
         {
             AutomaticRecoveryEnabled = true,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
             RequestedConnectionTimeout = TimeSpan.FromSeconds(2)
         };
+        var username = configuration["RabbitMQ:Username"];
+        var password = configuration["RabbitMQ:Password"];
+        if (!string.IsNullOrWhiteSpace(username)) factory.UserName = username;
+        if (!string.IsNullOrWhiteSpace(password)) factory.Password = password;
         if (Uri.TryCreate(host, UriKind.Absolute, out var uri) && uri.Scheme is "amqp" or "amqps") factory.Uri = uri;
         else factory.HostName = host;
-        logger.LogInformation("Connecting compliance outbox publisher to configured RabbitMQ host.");
-        return await factory.CreateConnectionAsync(ct);
+        return factory;
     }
 
     public async ValueTask DisposeAsync()

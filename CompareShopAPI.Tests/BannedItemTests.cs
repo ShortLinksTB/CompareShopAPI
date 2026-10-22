@@ -199,6 +199,30 @@ public sealed class BannedItemTests(SqlServerTestFixture fixture)
     }
 
     [Fact]
+    public async Task OutboxDispatcherLogsBrokerExceptionAndMessage()
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options;
+        var now = DateTime.UtcNow;
+        await using var db = new CompareShopDbContext(options);
+        db.BannedItemOutboxMessages.Add(new BannedItemOutboxMessage
+        {
+            Id = Guid.NewGuid(), EventType = "BannedItemCreated", Payload = "{}", CreatedAtUtc = now,
+            NextAttemptAtUtc = now, AttemptCount = 0
+        });
+        await db.SaveChangesAsync();
+        var logger = new CapturingLogger<WorkerCompliance.BannedItemOutboxDispatcher>();
+        var dispatcher = new WorkerCompliance.BannedItemOutboxDispatcher(db, new FakePublisher { Fail = true },
+            new FixedTimeProvider(now), logger);
+
+        await dispatcher.DispatchBatch(default);
+
+        Assert.IsType<InvalidOperationException>(logger.Exception);
+        Assert.Contains("broker unavailable", logger.Message);
+        Assert.Equal(nameof(InvalidOperationException), (string?)logger.Properties["ErrorType"]);
+        Assert.Equal("broker unavailable", (string?)logger.Properties["ErrorMessage"]);
+    }
+
+    [Fact]
     public async Task RabbitPublisherSendsPersistentEventToPrefixedDurableQueue()
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -313,6 +337,24 @@ public sealed class BannedItemTests(SqlServerTestFixture fixture)
     private sealed class FixedTimeProvider(DateTime value) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(value);
+    }
+
+    private sealed class CapturingLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+    {
+        public Exception? Exception { get; private set; }
+        public string Message { get; private set; } = string.Empty;
+        public IReadOnlyDictionary<string, object?> Properties { get; private set; } = new Dictionary<string, object?>();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId,
+            TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Exception = exception;
+            Message = formatter(state, exception);
+            if (state is IEnumerable<KeyValuePair<string, object?>> values)
+                Properties = values.ToDictionary(pair => pair.Key, pair => pair.Value);
+        }
     }
 
     public class RabbitConnectionProxy : DispatchProxy

@@ -234,6 +234,41 @@ public sealed class BannedItemTests(SqlServerTestFixture fixture)
     }
 
     [Fact]
+    public async Task RabbitPublisherAppliesConfiguredCredentialsToConnectionFactory()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RabbitMQ:Username"] = "compareshop",
+            ["RabbitMQ:Password"] = "test-password"
+        }).Build();
+        await using var publisher = new WorkerCompliance.RabbitMqBannedItemMessagePublisher(configuration,
+            NullLogger<WorkerCompliance.RabbitMqBannedItemMessagePublisher>.Instance);
+
+        var factory = publisher.CreateConnectionFactory("broker.example");
+
+        Assert.Equal("compareshop", factory.UserName);
+        Assert.Equal("test-password", factory.Password);
+        Assert.Equal("broker.example", factory.HostName);
+    }
+
+    [Fact]
+    public async Task RabbitPublisherKeepsDefaultCredentialsWhenConfigurationIsBlank()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["RabbitMQ:Username"] = " ",
+            ["RabbitMQ:Password"] = ""
+        }).Build();
+        await using var publisher = new WorkerCompliance.RabbitMqBannedItemMessagePublisher(configuration,
+            NullLogger<WorkerCompliance.RabbitMqBannedItemMessagePublisher>.Instance);
+
+        var factory = publisher.CreateConnectionFactory("broker.example");
+
+        Assert.Equal("guest", factory.UserName);
+        Assert.Equal("guest", factory.Password);
+    }
+
+    [Fact]
     public async Task RabbitPublisherRejectsMissingHostAndRetriesConnectionFailureWithoutBlockingCaller()
     {
         var noHost = new WorkerCompliance.RabbitMqBannedItemMessagePublisher(new ConfigurationBuilder().Build(),

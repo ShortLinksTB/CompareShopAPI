@@ -28,7 +28,10 @@ public sealed record AdminAuditEntry(long Id, string Actor, string Action, strin
 public sealed record AdminDashboard(int Products, int Offers, int Articles, bool ArticlesAvailable);
 public sealed record AdminPriceAlert(int Id, int UserId, int ProductId, string ProductSlug, string ProductName, int TargetPrice, bool IsActive, DateTime CreatedAtUtc);
 public sealed record AdminAnalytics(long Clicks, long Conversions, decimal Revenue);
-public sealed record AdminUser(int Id, DateTime CreatedAtUtc, IReadOnlyList<string> Roles);
+public sealed record AdminUser(int Id, DateTime CreatedAtUtc, IReadOnlyList<string> Roles)
+{
+    public string KeycloakSubject { get; init; } = string.Empty;
+}
 public sealed record AdminFeatureFlag(int Id, string Key, bool Enabled, string? Description);
 public sealed record AdminSetting(string Key, string Value);
 public sealed record PermissionsResponse(IReadOnlyList<string> Permissions);

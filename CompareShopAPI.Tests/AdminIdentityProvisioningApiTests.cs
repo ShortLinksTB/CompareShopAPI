@@ -56,13 +56,32 @@ public sealed class AdminIdentityProvisioningApiTests(SqlServerTestFixture fixtu
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/me/permissions")).StatusCode);
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(clientAdminRole, subject: superAdminSubject));
-            using var usersResponse = await client.GetAsync("/admin/users");
+            using var usersResponse = await client.GetAsync("/admin/users?page=1&pageSize=1");
             Assert.Equal(HttpStatusCode.OK, usersResponse.StatusCode);
             using var usersJson = JsonDocument.Parse(await usersResponse.Content.ReadAsStringAsync());
             await using var verify = new CompareShopDbContext(options);
             var noClientRoleId = await verify.Users.Where(user => user.KeycloakSubject == noClientRoleSubject).Select(user => user.Id).SingleAsync();
-            var listedUser = usersJson.RootElement.GetProperty("items").EnumerateArray()
-                .Single(user => user.GetProperty("id").GetInt32() == noClientRoleId);
+            var firstPage = usersJson.RootElement;
+            var rootId = await verify.Users.Where(user => user.KeycloakSubject == superAdminSubject).Select(user => user.Id).SingleAsync();
+            Assert.Equal(1, firstPage.GetProperty("pageNumber").GetInt32());
+            Assert.Equal(1, firstPage.GetProperty("pageSize").GetInt32());
+            Assert.Equal(3, firstPage.GetProperty("totalItems").GetInt32());
+            var firstUser = firstPage.GetProperty("items")[0];
+            Assert.Equal(rootId, firstUser.GetProperty("id").GetInt32());
+            Assert.Equal(superAdminSubject, firstUser.GetProperty("keycloakSubject").GetString());
+            Assert.True(firstUser.TryGetProperty("createdAtUtc", out _));
+            Assert.Equal(new[] { "Super Admin" }, firstUser.GetProperty("roles").EnumerateArray().Select(role => role.GetString()).ToArray());
+
+            using var secondPageResponse = await client.GetAsync("/admin/users?page=2&pageSize=1");
+            Assert.Equal(HttpStatusCode.OK, secondPageResponse.StatusCode);
+            using var secondPageJson = JsonDocument.Parse(await secondPageResponse.Content.ReadAsStringAsync());
+            var secondPage = secondPageJson.RootElement;
+            Assert.Equal(2, secondPage.GetProperty("pageNumber").GetInt32());
+            Assert.Equal(1, secondPage.GetProperty("pageSize").GetInt32());
+            Assert.Equal(3, secondPage.GetProperty("totalItems").GetInt32());
+            var listedUser = secondPage.GetProperty("items")[0];
+            Assert.Equal(noClientRoleId, listedUser.GetProperty("id").GetInt32());
+            Assert.Equal(noClientRoleSubject, listedUser.GetProperty("keycloakSubject").GetString());
             Assert.Empty(listedUser.GetProperty("roles").EnumerateArray());
             Assert.Equal(1, await verify.AdminAuditLogs.CountAsync(entry => entry.ActorSubject == noClientRoleSubject && entry.Action == "user_provisioned"));
             Assert.Equal(1, await verify.AdminAuditLogs.CountAsync(entry => entry.ActorSubject == noPermissionSubject && entry.Action == "user_provisioned"));
@@ -72,6 +91,11 @@ public sealed class AdminIdentityProvisioningApiTests(SqlServerTestFixture fixtu
             var noPermissionId = await verify.Users.Where(user => user.KeycloakSubject == noPermissionSubject).Select(user => user.Id).SingleAsync();
             Assert.Empty(await verify.AdminUserRoles.Where(role => role.UserId == noPermissionId).ToListAsync());
             Assert.False(await verify.Users.AnyAsync(user => user.KeycloakSubject == "invalid-token"));
+
+            client.DefaultRequestHeaders.Authorization = null;
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/admin/users")).StatusCode);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(clientAdminRole, subject: noPermissionSubject));
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/users")).StatusCode);
         }
         finally
         {

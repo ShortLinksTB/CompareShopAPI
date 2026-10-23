@@ -169,10 +169,10 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     public async Task<Page<AdminUser>> Users(int page, int size, CancellationToken ct)
     {
         var q = db.Users.AsNoTracking().OrderBy(x => x.Id); var total = await q.CountAsync(ct);
-        var users = await q.Skip(Offset(page, size)).Take(BoundSize(size)).Select(x => new { x.Id, x.CreatedAtUtc }).ToListAsync(ct);
+        var users = await q.Skip(Offset(page, size)).Take(BoundSize(size)).Select(x => new { x.Id, x.CreatedAtUtc, x.KeycloakSubject }).ToListAsync(ct);
         var ids = users.Select(x => x.Id).ToArray();
         var roles = await db.AdminUserRoles.AsNoTracking().Where(x => ids.Contains(x.UserId)).Join(db.AdminRoles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.Name }).ToListAsync(ct);
-        return new(users.Select(x => new AdminUser(x.Id, x.CreatedAtUtc, roles.Where(r => r.UserId == x.Id).Select(r => r.Name).Order().ToArray())).ToArray(), page, BoundSize(size), total);
+        return new(users.Select(x => new AdminUser(x.Id, x.CreatedAtUtc, roles.Where(r => r.UserId == x.Id).Select(r => r.Name).Order().ToArray()) { KeycloakSubject = x.KeycloakSubject }).ToArray(), page, BoundSize(size), total);
     }
     public async Task<AdminUser?> User(int id, CancellationToken ct)
     {

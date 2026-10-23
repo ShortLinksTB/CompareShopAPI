@@ -103,6 +103,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         {
             await using var cleanup = new CompareShopDbContext(options); await cleanup.Database.EnsureDeletedAsync();
         }
+
     }
 
     [Fact]
@@ -190,7 +191,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: operatorSub));
                 var ownPermissionsResponse = await client.GetAsync("/admin/me/permissions");
                 Assert.Equal(HttpStatusCode.OK, ownPermissionsResponse.StatusCode);
-                var ownPermissions = await ownPermissionsResponse.Content.ReadFromJsonAsync<string[]>();
+                var ownPermissions = await ReadPermissions(ownPermissionsResponse);
                 Assert.NotNull(ownPermissions);
                 Assert.Contains("products.read", ownPermissions);
                 Assert.Contains("products.create", ownPermissions);
@@ -198,14 +199,14 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
                 Assert.DoesNotContain("users.manage", ownPermissions);
 
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: viewerSub));
-                var viewerPermissions = await (await client.GetAsync("/admin/me/permissions")).Content.ReadFromJsonAsync<string[]>();
+                var viewerPermissions = await ReadPermissions(await client.GetAsync("/admin/me/permissions"));
                 Assert.NotNull(viewerPermissions);
                 Assert.Contains("products.read", viewerPermissions);
                 Assert.DoesNotContain("products.create", viewerPermissions);
                 Assert.DoesNotContain("compliance.manage", viewerPermissions);
 
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: otherSub));
-                var otherPermissions = await (await client.GetAsync("/admin/me/permissions")).Content.ReadFromJsonAsync<string[]>();
+                var otherPermissions = await ReadPermissions(await client.GetAsync("/admin/me/permissions"));
                 Assert.NotNull(otherPermissions);
                 Assert.Contains("compliance.manage", otherPermissions);
                 Assert.Contains("users.manage", otherPermissions);
@@ -285,5 +286,17 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         {
             await using var cleanup = new CompareShopDbContext(options); await cleanup.Database.EnsureDeletedAsync();
         }
+
+    }
+
+    private static async Task<string[]> ReadPermissions(HttpResponseMessage response)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = document.RootElement;
+        Assert.Equal(System.Text.Json.JsonValueKind.Object, root.ValueKind);
+        Assert.NotEqual(System.Text.Json.JsonValueKind.Array, root.ValueKind);
+        Assert.True(root.TryGetProperty("permissions", out var permissions));
+        Assert.Equal(System.Text.Json.JsonValueKind.Array, permissions.ValueKind);
+        return permissions.EnumerateArray().Select(permission => permission.GetString()!).ToArray();
     }
 }

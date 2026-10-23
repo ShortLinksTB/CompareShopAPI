@@ -31,6 +31,7 @@ public sealed record AdminAnalytics(long Clicks, long Conversions, decimal Reven
 public sealed record AdminUser(int Id, DateTime CreatedAtUtc, IReadOnlyList<string> Roles);
 public sealed record AdminFeatureFlag(int Id, string Key, bool Enabled, string? Description);
 public sealed record AdminSetting(string Key, string Value);
+public sealed record PermissionsResponse(IReadOnlyList<string> Permissions);
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int TotalItems);
 public sealed record CategoryInput(string Slug, string Name, bool IsActive = true);
 public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true);
@@ -99,10 +100,10 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         return subject;
     }
 
-    public Task<IReadOnlyList<string>> MyPermissions(string? subject, CancellationToken ct)
+    public async Task<PermissionsResponse> MyPermissions(string? subject, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
-        return data.PermissionsForSubject(subject, ct);
+        return new PermissionsResponse(await data.PermissionsForSubject(subject, ct));
     }
 
     public async Task BootstrapFirstAdmin(string? subject, CancellationToken ct)

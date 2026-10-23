@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using CompareShopAPI.Application.UserCommerce;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -24,6 +25,11 @@ public sealed class ApiFactory(string environment = "Production", Dictionary<str
     {
         builder.UseEnvironment(environment);
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(settings ?? new()));
+        if (string.IsNullOrWhiteSpace(settings?.GetValueOrDefault("ConnectionStrings:CompareShopDb"))) builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IUserProvisioning>();
+            services.AddSingleton<IUserProvisioning, InMemoryUserProvisioning>();
+        });
         if (timeProvider is not null) builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<TimeProvider>();
@@ -49,6 +55,25 @@ public sealed class ApiFactory(string environment = "Production", Dictionary<str
             signingCredentials: new SigningCredentials(Key, SecurityAlgorithms.HmacSha256)));
     }
 }
+
+internal sealed class InMemoryUserProvisioning : IUserProvisioning
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> _users = new(StringComparer.Ordinal);
+    private int _nextId;
+
+    public Task<int> GetOrCreate(string keycloakSubject, CancellationToken ct) =>
+        Task.FromResult(_users.GetOrAdd(keycloakSubject, _ => Interlocked.Increment(ref _nextId)));
+
+    public Task<UserProvisioningResult> GetOrCreateForAdmin(string keycloakSubject, CancellationToken ct)
+    {
+        if (_users.TryGetValue(keycloakSubject, out var existing)) return Task.FromResult(new UserProvisioningResult(existing, false));
+        var id = Interlocked.Increment(ref _nextId);
+        return Task.FromResult(_users.TryAdd(keycloakSubject, id)
+            ? new UserProvisioningResult(id, true)
+            : new UserProvisioningResult(_users[keycloakSubject], false));
+    }
+}
+
 public sealed class SkeletonTests
 {
     [Fact]

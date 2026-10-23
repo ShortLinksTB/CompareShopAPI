@@ -8,9 +8,14 @@ namespace CompareShopAPI.Infrastructure.UserCommerce;
 
 public sealed class EfUserProvisioning(CompareShopDbContext db, TimeProvider clock) : IUserProvisioning
 {
-    public async Task<int> GetOrCreate(string keycloakSubject, CancellationToken ct)
+    private static void ValidateSubject(string keycloakSubject)
     {
         if (string.IsNullOrWhiteSpace(keycloakSubject)) throw new ArgumentException("A Keycloak subject is required.", nameof(keycloakSubject));
+    }
+
+    public async Task<int> GetOrCreate(string keycloakSubject, CancellationToken ct)
+    {
+        ValidateSubject(keycloakSubject);
         var existing = await db.Users.AsNoTracking().Where(x => x.KeycloakSubject == keycloakSubject).Select(x => (int?)x.Id).SingleOrDefaultAsync(ct);
         if (existing.HasValue) return existing.Value;
 
@@ -29,6 +34,51 @@ public sealed class EfUserProvisioning(CompareShopDbContext db, TimeProvider clo
             throw;
         }
     }
+
+    public async Task<UserProvisioningResult> GetOrCreateForAdmin(string keycloakSubject, CancellationToken ct)
+    {
+        ValidateSubject(keycloakSubject);
+        var existing = await FindUserId(keycloakSubject, ct);
+        if (existing.HasValue) return new(existing.Value, false);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            var user = new User(keycloakSubject, clock.GetUtcNow().UtcDateTime);
+            db.Users.Add(user);
+            await db.SaveChangesAsync(ct);
+
+            db.AdminAuditLogs.Add(new CompareShopAPI.Domain.Admin.AdminAuditLog
+            {
+                ActorSubject = keycloakSubject,
+                Action = "user_provisioned",
+                ResourceType = "user",
+                ResourceId = user.Id.ToString(),
+                CreatedAtUtc = clock.GetUtcNow().UtcDateTime,
+                AfterJson = System.Text.Json.JsonSerializer.Serialize(new { roleCount = 0 })
+            });
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+            return new(user.Id, true);
+        }
+        catch (DbUpdateException)
+        {
+            await transaction.RollbackAsync(ct);
+            db.ChangeTracker.Clear();
+            var winner = await FindUserId(keycloakSubject, ct);
+            if (winner.HasValue) return new(winner.Value, false);
+            throw;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct);
+            db.ChangeTracker.Clear();
+            throw;
+        }
+    }
+
+    private Task<int?> FindUserId(string subject, CancellationToken ct) => db.Users.AsNoTracking()
+        .Where(x => x.KeycloakSubject == subject).Select(x => (int?)x.Id).SingleOrDefaultAsync(ct);
 }
 
 public sealed class EfUserCommerceRepository(CompareShopDbContext db) : IUserCommerceRepository

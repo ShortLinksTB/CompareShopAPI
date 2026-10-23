@@ -43,6 +43,7 @@ builder.Services.AddSingleton<IAffiliateRedirectRateLimiter>(services => new Red
     services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AffiliateRedirectRateLimitOptions>>(),
     services.GetRequiredService<ILogger<RedisAffiliateRedirectRateLimiter>>()));
 builder.Services.AddScoped<IUserProvisioning, EfUserProvisioning>();
+builder.Services.AddScoped<AdminIdentityProvisioningService>();
 builder.Services.AddScoped<IUserCommerceRepository, EfUserCommerceRepository>();
 builder.Services.AddScoped<WishlistService>();
 builder.Services.AddScoped<PriceAlertService>();
@@ -100,6 +101,7 @@ var app = builder.Build();
 if (await CatalogSeedCommand.TryRunAsync(args, app.Environment, app.Configuration, app.Services, app.Logger)) return;
 app.UseCors("UiClients");
 app.UseAuthentication();
+app.UseMiddleware<AdminIdentityProvisioningMiddleware>();
 app.UseAuthorization();
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();

@@ -1,4 +1,5 @@
 using CompareShopAPI.Application.UserCommerce;
+using Microsoft.AspNetCore.Authorization;
 
 namespace CompareShopAPI.Api.Admin;
 
@@ -6,7 +7,7 @@ public sealed class AdminIdentityProvisioningMiddleware(RequestDelegate next)
 {
     public async Task InvokeAsync(HttpContext context, AdminIdentityProvisioningService provisioning)
     {
-        if (context.User.Identity?.IsAuthenticated == true && IsAdminRoute(context.Request.Path))
+        if (context.User.Identity?.IsAuthenticated == true && IsAdminEndpoint(context.GetEndpoint()))
         {
             var subject = context.User.FindFirst("sub")?.Value;
             if (!string.IsNullOrWhiteSpace(subject))
@@ -16,7 +17,7 @@ public sealed class AdminIdentityProvisioningMiddleware(RequestDelegate next)
         await next(context);
     }
 
-    private static bool IsAdminRoute(PathString path) =>
-        path.StartsWithSegments("/admin", StringComparison.OrdinalIgnoreCase)
-        || path.StartsWithSegments("/api/v1/admin", StringComparison.OrdinalIgnoreCase);
+    private static bool IsAdminEndpoint(Endpoint? endpoint) => endpoint is not null
+        && endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>()
+            .Any(metadata => string.Equals(metadata.Policy, "Admin", StringComparison.Ordinal));
 }

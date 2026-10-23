@@ -47,13 +47,13 @@ public sealed class AdminIdentityProvisioningApiTests(SqlServerTestFixture fixtu
             Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/admin/me/permissions")).StatusCode);
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(subject: noClientRoleSubject));
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/health")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/me/permissions")).StatusCode);
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(clientAdminRole, subject: noPermissionSubject));
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/admin/articles")).StatusCode);
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(subject: noClientRoleSubject));
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/health")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/me/permissions")).StatusCode);
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(clientAdminRole, subject: superAdminSubject));
             using var usersResponse = await client.GetAsync("/admin/users");
@@ -68,6 +68,7 @@ public sealed class AdminIdentityProvisioningApiTests(SqlServerTestFixture fixtu
             Assert.Equal(1, await verify.AdminAuditLogs.CountAsync(entry => entry.ActorSubject == noPermissionSubject && entry.Action == "user_provisioned"));
             Assert.Equal(3, await verify.Users.CountAsync());
             Assert.Empty(await verify.AdminUserRoles.Where(role => role.UserId == noClientRoleId).ToListAsync());
+            Assert.Equal(1, await verify.Users.CountAsync(user => user.KeycloakSubject == noClientRoleSubject));
             var noPermissionId = await verify.Users.Where(user => user.KeycloakSubject == noPermissionSubject).Select(user => user.Id).SingleAsync();
             Assert.Empty(await verify.AdminUserRoles.Where(role => role.UserId == noPermissionId).ToListAsync());
             Assert.False(await verify.Users.AnyAsync(user => user.KeycloakSubject == "invalid-token"));

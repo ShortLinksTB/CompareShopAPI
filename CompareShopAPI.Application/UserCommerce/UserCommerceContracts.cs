@@ -8,6 +8,18 @@ public sealed record PriceAlertDto(int Id, int ProductId, string Slug, string Na
 public interface IUserProvisioning
 {
     Task<int> GetOrCreate(string keycloakSubject, CancellationToken ct);
+    Task<UserProvisioningResult> GetOrCreateForAdmin(string keycloakSubject, CancellationToken ct);
+}
+
+public sealed record UserProvisioningResult(int UserId, bool Created);
+
+public sealed class AdminIdentityProvisioningService(IUserProvisioning users)
+{
+    public Task<UserProvisioningResult> Provision(string? subject, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject)) throw new ArgumentException("A Keycloak subject is required.", nameof(subject));
+        return users.GetOrCreateForAdmin(subject, ct);
+    }
 }
 
 public interface IUserCommerceRepository

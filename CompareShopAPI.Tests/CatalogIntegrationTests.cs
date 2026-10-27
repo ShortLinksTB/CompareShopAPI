@@ -55,6 +55,16 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Equal(counts, (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync()));
 
             var trackedOffer = await db.ProductOffers.OrderBy(x => x.Id).FirstAsync();
+            var productOneId = await db.Products.Where(x => x.Slug == "sample-product-01").Select(x => x.Id).SingleAsync();
+            var representatives = await db.ProductOffers.Where(x => x.ProductId == productOneId).ToListAsync();
+            foreach (var representative in representatives)
+            {
+                representative.ImageUrl = "https://images.example.test/mac.jpg";
+                representative.OriginalPriceVnd = 1_200_000;
+                representative.SpecificationsJson = "{\"memory\":\"16GB\"}";
+                representative.StockStatus = "in_stock";
+            }
+            await db.SaveChangesAsync();
             var affiliateLink = new AffiliateLink
             {
                 ProductOfferId = trackedOffer.Id,
@@ -92,7 +102,20 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.NotNull(sample); Assert.Equal(2, sample.OfferSummary.OfferCount); Assert.Equal(1_010_000, sample.OfferSummary.MinPrice); Assert.Equal(1_060_000, sample.OfferSummary.MaxPrice);
             Assert.Equal(2, first.Items.Single(x => x.Slug == "sample-product-01").OfferSummary.OfferCount);
             Assert.Single(sample.SpecificationGroups); Assert.Equal("Example One", sample.SpecificationGroups[0].Items[0].Value);
+            Assert.Equal("https://images.example.test/mac.jpg", sample.ImageUrl);
+            Assert.Equal("16GB", sample.OfferSpecifications!["memory"]);
+            var listSample = first.Items.Single(x => x.Slug == "sample-product-01");
+            Assert.Equal("https://images.example.test/mac.jpg", listSample.ImageUrl);
+            Assert.Equal("16GB", listSample.OfferSpecifications!["memory"]);
             var offers = await queries.Offers(sample.Id, default); Assert.NotNull(offers); Assert.Equal(2, offers.Count);
+            Assert.Equal(1_200_000, offers[0].OriginalPrice);
+            Assert.Equal("https://images.example.test/mac.jpg", offers[0].ImageUrl);
+            Assert.Equal("in_stock", offers[0].StockStatus);
+            Assert.Equal("16GB", offers[0].Specifications!["memory"]);
+            var malformedSpecsOffer = await db.ProductOffers.SingleAsync(x => x.Id == offers[0].Id);
+            malformedSpecsOffer.SpecificationsJson = "not-json";
+            await db.SaveChangesAsync();
+            Assert.Null((await queries.Offers(sample.Id, default))![0].Specifications);
             var noOffers = await queries.Product("sample-product-10", default);
             Assert.NotNull(noOffers); Assert.Equal(0, noOffers.OfferSummary.OfferCount); Assert.Null(noOffers.OfferSummary.MinPrice); Assert.Empty((await queries.Offers(noOffers.Id, default))!);
             Assert.Null(await queries.Product("inactive-sample-product", default)); Assert.Null(await queries.Product("missing", default));

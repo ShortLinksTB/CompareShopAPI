@@ -12,30 +12,33 @@ public sealed class BhxForwardProxy : IAsyncDisposable
     private readonly TcpListener listener;
     private readonly CancellationTokenSource shutdown = new();
     private readonly Func<string, int, CancellationToken, Task<TcpClient>> connectUpstream;
+    private readonly IReadOnlySet<string> allowedHosts;
     private readonly ConcurrentBag<Task> connectionTasks = [];
     private readonly SemaphoreSlim connectionSlots = new(64, 64);
     private Task? acceptTask;
 
-    private BhxForwardProxy(TcpListener listener, Func<string, int, CancellationToken, Task<TcpClient>> connectUpstream)
+    private BhxForwardProxy(TcpListener listener, Func<string, int, CancellationToken, Task<TcpClient>> connectUpstream, IReadOnlySet<string> allowedHosts)
     {
         this.listener = listener;
         this.connectUpstream = connectUpstream;
+        this.allowedHosts = allowedHosts;
         Server = $"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}";
     }
 
     public string Server { get; }
 
-    public static Task<BhxForwardProxy> StartAsync(CancellationToken ct = default) =>
-        StartAsync(ConnectUpstreamAsync, ct);
+    public static Task<BhxForwardProxy> StartAsync(CancellationToken ct = default) => StartAsync([BhxRequestGuard.AllowedHost], ct);
+    public static Task<BhxForwardProxy> StartAsync(IEnumerable<string> hosts, CancellationToken ct = default) => StartAsync(ConnectUpstreamAsync, hosts, ct);
 
-    internal static Task<BhxForwardProxy> StartAsync(
-        Func<string, int, CancellationToken, Task<TcpClient>> connectUpstream,
-        CancellationToken ct = default)
+    internal static Task<BhxForwardProxy> StartAsync(Func<string, int, CancellationToken, Task<TcpClient>> connectUpstream, CancellationToken ct = default) => StartAsync(connectUpstream, [BhxRequestGuard.AllowedHost], ct);
+    internal static Task<BhxForwardProxy> StartAsync(Func<string, int, CancellationToken, Task<TcpClient>> connectUpstream, IEnumerable<string> hosts, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start(64);
-        var proxy = new BhxForwardProxy(listener, connectUpstream);
+        var allowedHosts = hosts.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (allowedHosts.Count == 0 || allowedHosts.Any(host => string.IsNullOrWhiteSpace(host) || host.Contains('/'))) { listener.Stop(); throw new ArgumentException("Exact allowed hosts are required.", nameof(hosts)); }
+        var proxy = new BhxForwardProxy(listener, connectUpstream, allowedHosts);
         proxy.acceptTask = proxy.AcceptLoopAsync(proxy.shutdown.Token);
         return Task.FromResult(proxy);
     }
@@ -101,7 +104,7 @@ public sealed class BhxForwardProxy : IAsyncDisposable
                     return;
                 }
 
-                if (!TryGetAllowedTarget(fields[1], out var host))
+                if (!TryGetAllowedTarget(fields[1], allowedHosts, out var host))
                 {
                     await WriteStatusAsync(stream, "403 Forbidden", ct);
                     return;
@@ -134,13 +137,12 @@ public sealed class BhxForwardProxy : IAsyncDisposable
         }
     }
 
-    private static bool TryGetAllowedTarget(string authority, out string host)
+    private static bool TryGetAllowedTarget(string authority, IReadOnlySet<string> allowedHosts, out string host)
     {
         host = string.Empty;
-        if (!string.Equals(authority, $"{BhxRequestGuard.AllowedHost}:443", StringComparison.OrdinalIgnoreCase) ||
-            !Uri.TryCreate($"https://{authority}", UriKind.Absolute, out var uri) ||
+        if (!Uri.TryCreate($"https://{authority}", UriKind.Absolute, out var uri) ||
             uri.UserInfo.Length != 0 || uri.Port != 443 || uri.AbsolutePath != "/" || uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
-            !string.Equals(uri.IdnHost, BhxRequestGuard.AllowedHost, StringComparison.OrdinalIgnoreCase))
+            !allowedHosts.Contains(uri.IdnHost) || !string.Equals(authority, $"{uri.IdnHost}:443", StringComparison.OrdinalIgnoreCase))
             return false;
 
         host = uri.IdnHost;

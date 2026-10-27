@@ -332,6 +332,10 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
                     b.Property<int>("DataSourceId").HasColumnType("int");
+                    b.Property<string>("ImageUrl").HasMaxLength(2048).HasColumnType("nvarchar(2048)");
+                    b.Property<int?>("OriginalPriceVnd").HasColumnType("int");
+                    b.Property<string>("SpecificationsJson").HasColumnType("nvarchar(max)");
+                    b.Property<string>("StockStatus").IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
                     b.Property<string>("ExternalSku").IsRequired().HasMaxLength(160).HasColumnType("nvarchar(160)");
                     b.Property<string>("Name").IsRequired().HasMaxLength(300).HasColumnType("nvarchar(300)");
                     b.Property<string>("Brand").HasMaxLength(200).HasColumnType("nvarchar(200)");
@@ -654,6 +658,11 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("ImageUrl").HasMaxLength(2048).HasColumnType("nvarchar(2048)");
+                    b.Property<int?>("OriginalPriceVnd").HasColumnType("int");
+                    b.Property<string>("SpecificationsJson").HasColumnType("nvarchar(max)");
+                    b.Property<string>("StockStatus").IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -684,6 +693,23 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId", "IsActive", "IsOutlier");
 
                     b.ToTable("ProductOffers");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.ProductOfferSnapshot", b =>
+                {
+                    b.Property<long>("Id").ValueGeneratedOnAdd().HasColumnType("bigint");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+                    b.Property<DateTime>("CapturedAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("ImageUrl").HasMaxLength(2048).HasColumnType("nvarchar(2048)");
+                    b.Property<int?>("OriginalPriceVnd").HasColumnType("int");
+                    b.Property<int>("PriceVnd").HasColumnType("int");
+                    b.Property<int>("ProductOfferId").HasColumnType("int");
+                    b.Property<string>("SpecificationsJson").HasColumnType("nvarchar(max)");
+                    b.Property<string>("StockStatus").IsRequired().HasMaxLength(20).HasColumnType("nvarchar(20)");
+                    b.Property<string>("Url").HasMaxLength(2048).HasColumnType("nvarchar(2048)");
+                    b.HasKey("Id");
+                    b.HasIndex("ProductOfferId", "CapturedAtUtc");
+                    b.ToTable("ProductOfferSnapshots");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.SpecificationGroup", b =>
@@ -988,6 +1014,15 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Navigation("PartnerShop");
 
                     b.Navigation("Product");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.ProductOfferSnapshot", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.ProductOffer", null)
+                        .WithMany()
+                        .HasForeignKey("ProductOfferId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.Product", b =>

@@ -250,7 +250,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             db.ProductOffers.Add(offer); await db.SaveChangesAsync();
             await service.UpdateProduct(subject, product.Id, new("admin-product", "Updated Product", "Brand", "Updated", category.Id, true), default);
             Assert.NotNull(await service.Product(subject, product.Id, default)); Assert.Single((await service.Products(subject, 1, 20, default)).Items);
-            Assert.Single((await service.Shops(subject, 1, 20, default)).Items); Assert.NotNull(await service.Shop(subject, shop.Id, default));
+            Assert.Contains((await service.Shops(subject, 1, 20, default)).Items, item => item.Slug == shop.Slug); Assert.NotNull(await service.Shop(subject, shop.Id, default));
             Assert.Single(await service.Offers(subject, default));
             await service.UpdateOffer(subject, offer.Id, new(200, "https://shop.example/item?access_token=do-not-log", false, true), default);
             await service.ApproveOffer(subject, offer.Id, default);

@@ -5,11 +5,13 @@ public enum SyncJobState { Queued, Running, Success, Partial, Failed }
 
 public sealed class DataSource
 {
+    public const string BhxKey = "bhx";
+    public const string CellphoneSKey = "cellphones";
     private DataSource() { }
     public DataSource(string key, string displayName, string categoryPath, int? partnerShopId, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(key) || key.Length > 80) throw new ArgumentException("Invalid source key.", nameof(key));
-        if (string.IsNullOrWhiteSpace(categoryPath) || categoryPath != "/bia") throw new ArgumentException("Only the validated /bia category is supported.", nameof(categoryPath));
+        if (!IsSupportedCategory(key, categoryPath)) throw new ArgumentException("Category is not supported for this source.", nameof(categoryPath));
         Key = key; DisplayName = displayName; CategoryPath = categoryPath; PartnerShopId = partnerShopId;
         State = DataSourceState.Active; IntervalHours = 72; CreatedAtUtc = DateTime.SpecifyKind(nowUtc, DateTimeKind.Utc);
     }
@@ -29,6 +31,9 @@ public sealed class DataSource
     public void Pause() { State = DataSourceState.Paused; NextAttemptAtUtc = null; }
     public void AttachPartnerShop(int partnerShopId) { if (partnerShopId <= 0) throw new ArgumentOutOfRangeException(nameof(partnerShopId)); PartnerShopId = partnerShopId; }
     public void MarkError() => State = DataSourceState.Error;
+    public static bool IsSupportedCategory(string key, string categoryPath) =>
+        (string.Equals(key, BhxKey, StringComparison.Ordinal) && categoryPath == "/bia") ||
+        (string.Equals(key, CellphoneSKey, StringComparison.Ordinal) && categoryPath == "/laptop/mac.html");
 }
 
 public sealed class SyncJob
@@ -87,12 +92,21 @@ public sealed class SourceItemMapping
     public string ExternalSku { get; private set; } = "";
     public string Name { get; private set; } = "";
     public string? Brand { get; private set; }
+    public string? ImageUrl { get; private set; }
+    public int? OriginalPriceVnd { get; private set; }
+    public string? SpecificationsJson { get; private set; }
+    public string StockStatus { get; private set; } = "unknown";
     public int? ProductId { get; private set; }
     public int? ProductOfferId { get; private set; }
     public bool IsApproved => ProductId.HasValue;
     public void Approve(int productId) { if (ProductId.HasValue || productId <= 0) throw new InvalidOperationException("Mapping cannot be approved."); ProductId = productId; }
-    public void UpdateSnapshot(string name, string? brand) { Name = name[..Math.Min(name.Length, 300)]; Brand = brand is null ? null : brand[..Math.Min(brand.Length, 200)]; }
+    public void UpdateSnapshot(string name, string? brand, ScrapedOffer? offer = null) { Name = name[..Math.Min(name.Length, 300)]; Brand = brand is null ? null : brand[..Math.Min(brand.Length, 200)]; if (offer is not null) { ImageUrl = offer.ImageUrl; OriginalPriceVnd = offer.OriginalPriceVnd; SpecificationsJson = offer.SpecificationsJson; StockStatus = offer.StockStatus; } }
     public void SetOffer(int offerId) { if (offerId <= 0) throw new ArgumentOutOfRangeException(nameof(offerId)); ProductOfferId = offerId; }
 }
 
-public sealed record ScrapedOffer(string ExternalSku, string Name, string? Brand, int PriceVnd, string Url);
+public sealed record ScrapedOffer(string ExternalSku, string Name, string? Brand, int PriceVnd, string Url, string? ImageUrl = null, int? OriginalPriceVnd = null, IReadOnlyDictionary<string,string>? Specifications = null, string StockStatus = "unknown")
+{
+    public string? SpecificationsJson => Specifications is null ? null : System.Text.Json.JsonSerializer.Serialize(Specifications);
+    public bool IsValid => !string.IsNullOrWhiteSpace(ExternalSku) && ExternalSku.Length <= 160 && !string.IsNullOrWhiteSpace(Name) && Name.Length <= 300 && (Brand?.Length ?? 0) <= 200 && PriceVnd > 0 && (OriginalPriceVnd is null || OriginalPriceVnd >= PriceVnd) && Url.Length <= 2048 && IsHttps(Url) && (ImageUrl is null || ImageUrl.Length <= 2048 && IsHttps(ImageUrl)) && (StockStatus is "in_stock" or "out_of_stock" or "coming_soon" or "unknown") && (Specifications?.Count ?? 0) <= 30 && (Specifications?.All(x => !string.IsNullOrWhiteSpace(x.Key) && x.Key.Length <= 80 && x.Value is not null && x.Value.Length <= 500) ?? true);
+    private static bool IsHttps(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && uri.UserInfo.Length == 0;
+}

@@ -3,7 +3,12 @@ using CompareShopAPI.Application.Admin;
 
 namespace CompareShopAPI.Application.Ingestion;
 
-public interface ISourceCatalogReader { Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct); }
+public interface ISourceCatalogReader
+{
+    bool Supports(string sourceKey) => true;
+    Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct) => ReadValidatedBiaAsync(ct);
+    Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => throw new NotSupportedException("Source reader requires a source-aware request.");
+}
 public interface ISyncJobStore
 {
     Task<IReadOnlyList<DataSource>> DueSources(DateTime nowUtc, CancellationToken ct);
@@ -19,13 +24,13 @@ public interface IPriceHistoryRecorder { Task RecordForChangedMinimums(Cancellat
 public sealed record ImportCounts(int Imported, int Pending);
 public sealed class SourceAccessBlockedException : Exception
 {
-    public const string SanitizedSummary = "BHX access was blocked or challenged; source paused.";
+    public const string SanitizedSummary = "Catalog source access was blocked or challenged; source paused.";
     public SourceAccessBlockedException() : base(SanitizedSummary) { }
 }
 public sealed class SourceRedirectDeniedException : Exception
 {
     public const string ReasonCode = "redirect_target_denied";
-    public const string SanitizedSummary = "BHX redirect destination was denied by the host policy.";
+    public const string SanitizedSummary = "Catalog source redirect destination was denied by the host policy.";
     public string ErrorCode { get; }
 
     public SourceRedirectDeniedException(int redirectStatusCode) : base(SanitizedSummary)
@@ -34,8 +39,9 @@ public sealed class SourceRedirectDeniedException : Exception
     }
 }
 
-public sealed class IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReader source, IPriceHistoryRecorder history, TimeProvider clock)
+public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISourceCatalogReader> readers, IPriceHistoryRecorder history, TimeProvider clock)
 {
+    public IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReader reader, IPriceHistoryRecorder history, TimeProvider clock) : this(jobs, [reader], history, clock) { }
     public async Task RunDueSources(CancellationToken ct)
     {
         var now = clock.GetUtcNow().UtcDateTime;
@@ -53,8 +59,11 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReade
                 // Keep active work shorter than the persisted lease so an expired claim is always safe to reclaim.
                 using var execution = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 execution.CancelAfter(TimeSpan.FromMinutes(SyncJob.LeaseDurationMinutes - 10));
-                var rows = await source.ReadValidatedBiaAsync(execution.Token);
-                if (rows.Count == 0) throw new InvalidDataException("Source returned no validated products.");
+                var sourceKey = dataSource.Key;
+                var reader = readers.SingleOrDefault(candidate => candidate.Supports(sourceKey));
+                if (reader is null || !DataSource.IsSupportedCategory(sourceKey, dataSource.CategoryPath)) throw new InvalidDataException("No reader supports this source category.");
+                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, execution.Token);
+                if (rows.Count == 0 || rows.Any(row => !row.IsValid)) throw new InvalidDataException("Source returned no validated products.");
                 var result = await jobs.Import(dataSource.Id, rows, true, execution.Token);
                 await history.RecordForChangedMinimums(execution.Token);
                 await jobs.Complete(dataSource.Id, job, result.Pending > 0 ? SyncJobState.Partial : SyncJobState.Success, clock.GetUtcNow().UtcDateTime, rows.Count, result.Imported, result.Pending, null, null, ct);
@@ -72,8 +81,8 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReade
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Trace.TraceWarning("BHX source sync failed; job {0} is recorded as failed ({1}).", job.Id, ex.GetType().Name);
-                await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0, "source_failure", "BHX source could not be read or imported.", ct);
+                System.Diagnostics.Trace.TraceWarning("Catalog source sync failed; job {0} is recorded as failed ({1}).", job.Id, ex.GetType().Name);
+                await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0, "source_failure", "Catalog source could not be read or imported.", ct);
             }
         }
     }

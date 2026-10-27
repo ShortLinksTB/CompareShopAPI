@@ -50,7 +50,14 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
         if (source is null) return false;
         if (source.PartnerShopId is null)
         {
-            var repaired = await db.PartnerShops.Where(x => x.Slug == "bach-hoa-xanh" || x.Slug == "bachhoaxanh" || x.Slug == "bhx").OrderByDescending(x => x.IsActive).FirstOrDefaultAsync(ct);
+            var key = source.Key;
+            var repaired = key switch
+            {
+                DataSource.CellphoneSKey => await db.PartnerShops.SingleOrDefaultAsync(x => x.Slug == "cellphones", ct),
+                DataSource.BhxKey => await db.PartnerShops.Where(x => x.Slug == "bach-hoa-xanh" || x.Slug == "bachhoaxanh" || x.Slug == "bhx")
+                    .OrderByDescending(x => x.IsActive).ThenBy(x => x.Id).FirstOrDefaultAsync(ct),
+                _ => null
+            };
             if (repaired is null) return false;
             source.AttachPartnerShop(repaired.Id);
             await db.SaveChangesAsync(ct);
@@ -66,28 +73,31 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
         var imported = 0; var pending = 0; var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
-            if (string.IsNullOrWhiteSpace(row.ExternalSku) || row.PriceVnd <= 0 || !Uri.TryCreate(row.Url, UriKind.Absolute, out var url) || url.Scheme != "https")
+            if (!row.IsValid)
                 throw new InvalidDataException("Imported offer did not pass validation.");
             if (!seen.Add(row.ExternalSku)) continue;
             var mapping = await db.SourceItemMappings.SingleOrDefaultAsync(m => m.DataSourceId == sourceId && m.ExternalSku == row.ExternalSku, ct);
             if (mapping is null)
             {
                 mapping = new SourceItemMapping(sourceId, row.ExternalSku, row.Name, row.Brand);
+                mapping.UpdateSnapshot(row.Name, row.Brand, row);
                 db.SourceItemMappings.Add(mapping);
                 db.ProductMatchings.Add(ProductMatching.ForSourceItem(row.Name, row.Brand, DateTime.UtcNow, sourceId, row.ExternalSku));
                 pending++; continue;
             }
-            mapping.UpdateSnapshot(row.Name, row.Brand);
+            mapping.UpdateSnapshot(row.Name, row.Brand, row);
             if (mapping.ProductId is not int productId) { pending++; continue; }
             if (mapping.ProductOfferId is int offerId)
             {
                 var offer = await db.ProductOffers.SingleOrDefaultAsync(o => o.Id == offerId && o.ProductId == productId && o.PartnerShopId == shopId, ct);
                 if (offer is null) throw new InvalidOperationException("Mapped offer is inconsistent.");
-                offer.PriceVnd = row.PriceVnd; offer.Url = row.Url; offer.UpdatedAtUtc = DateTime.UtcNow; offer.IsActive = true;
+                var changed = offer.PriceVnd != row.PriceVnd || offer.Url != row.Url || offer.OriginalPriceVnd != row.OriginalPriceVnd || offer.ImageUrl != row.ImageUrl || offer.SpecificationsJson != row.SpecificationsJson || offer.StockStatus != row.StockStatus;
+                if (changed) db.ProductOfferSnapshots.Add(new ProductOfferSnapshot { ProductOfferId = offer.Id, PriceVnd = offer.PriceVnd, Url = offer.Url, OriginalPriceVnd = offer.OriginalPriceVnd, ImageUrl = offer.ImageUrl, SpecificationsJson = offer.SpecificationsJson, StockStatus = offer.StockStatus, CapturedAtUtc = DateTime.UtcNow });
+                offer.PriceVnd = row.PriceVnd; offer.OriginalPriceVnd = row.OriginalPriceVnd; offer.ImageUrl = row.ImageUrl; offer.SpecificationsJson = row.SpecificationsJson; offer.StockStatus = row.StockStatus; offer.Url = row.Url; offer.UpdatedAtUtc = DateTime.UtcNow; offer.IsActive = true;
             }
             else
             {
-                var offer = new ProductOffer { ProductId = productId, PartnerShopId = shopId, PriceVnd = row.PriceVnd, Url = row.Url, UpdatedAtUtc = DateTime.UtcNow, IsActive = true };
+                var offer = new ProductOffer { ProductId = productId, PartnerShopId = shopId, PriceVnd = row.PriceVnd, OriginalPriceVnd = row.OriginalPriceVnd, ImageUrl = row.ImageUrl, SpecificationsJson = row.SpecificationsJson, StockStatus = row.StockStatus, Url = row.Url, UpdatedAtUtc = DateTime.UtcNow, IsActive = true };
                 db.ProductOffers.Add(offer);
                 await db.SaveChangesAsync(ct); mapping.SetOffer(offer.Id);
             }

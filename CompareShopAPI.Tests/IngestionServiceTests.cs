@@ -1,6 +1,7 @@
 using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Domain.Ingestion;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -10,13 +11,28 @@ public sealed class IngestionServiceTests
     private static readonly DateTime Now = new(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc);
 
     [Fact]
+    public void CoordinatorResolvesFromDependencyInjectionWithMultipleReaders()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ISyncJobStore>(new FakeJobs());
+        services.AddSingleton<ISourceCatalogReader, FakeReader>();
+        services.AddSingleton<ISourceCatalogReader, FakeReader>();
+        services.AddSingleton<IPriceHistoryRecorder, FakeHistory>();
+        services.AddSingleton(TimeProvider.System);
+        services.AddScoped<IngestionCoordinator>();
+
+        using var provider = services.BuildServiceProvider();
+        Assert.NotNull(provider.GetRequiredService<IngestionCoordinator>());
+    }
+
+    [Fact]
     public async Task CoordinatorImportsAndCompletesPartialJob()
     {
         var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now), Counts = new(1, 1) };
         var reader = new FakeReader { Rows = [new ScrapedOffer("sku", "item", null, 12000, "https://bhx.vn/item")] };
         var history = new FakeHistory();
 
-        await new IngestionCoordinator(jobs, reader, history, TimeProvider.System).RunDueSources(CancellationToken.None);
+        await new IngestionCoordinator(jobs, [reader], history, TimeProvider.System).RunDueSources(CancellationToken.None);
 
         Assert.Equal(SyncJobState.Partial, jobs.CompletedState);
         Assert.Equal(1, jobs.Seen);
@@ -30,15 +46,15 @@ public sealed class IngestionServiceTests
     public async Task CoordinatorSkipsClaimedWorkAndFailsUnavailableOrEmptySources()
     {
         var skipped = new FakeJobs { Sources = [Source()], Claimed = null };
-        await new IngestionCoordinator(skipped, new FakeReader(), new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+        await new IngestionCoordinator(skipped, [new FakeReader()], new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
         Assert.Null(skipped.CompletedState);
 
         var unavailable = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now), Usable = false };
-        await new IngestionCoordinator(unavailable, new FakeReader(), new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+        await new IngestionCoordinator(unavailable, [new FakeReader()], new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
         Assert.Equal("shop_unavailable", unavailable.ErrorCode);
 
         var empty = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
-        await new IngestionCoordinator(empty, new FakeReader(), new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+        await new IngestionCoordinator(empty, [new FakeReader()], new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
         Assert.Equal("source_failure", empty.ErrorCode);
     }
 
@@ -47,13 +63,13 @@ public sealed class IngestionServiceTests
     {
         var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
         var reader = new FakeReader { Rows = [new ScrapedOffer("sku", "item", null, 12000, "https://bhx.vn/item")] };
-        await new IngestionCoordinator(jobs, reader, new FakeHistory { Failure = new InvalidOperationException() }, TimeProvider.System).RunDueSources(CancellationToken.None);
+        await new IngestionCoordinator(jobs, [reader], new FakeHistory { Failure = new InvalidOperationException() }, TimeProvider.System).RunDueSources(CancellationToken.None);
         Assert.Equal("source_failure", jobs.ErrorCode);
 
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         reader.Failure = new OperationCanceledException(cancellation.Token);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new IngestionCoordinator(new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) }, reader, new FakeHistory(), TimeProvider.System).RunDueSources(cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new IngestionCoordinator(new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) }, [reader], new FakeHistory(), TimeProvider.System).RunDueSources(cancellation.Token));
     }
 
     [Fact]
@@ -62,7 +78,7 @@ public sealed class IngestionServiceTests
         var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
         var reader = new FakeReader { Failure = new SourceAccessBlockedException() };
 
-        await new IngestionCoordinator(jobs, reader, new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+        await new IngestionCoordinator(jobs, [reader], new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
 
         Assert.Equal(SyncJobState.Failed, jobs.CompletedState);
         Assert.Equal("source_blocked", jobs.ErrorCode);
@@ -76,7 +92,7 @@ public sealed class IngestionServiceTests
         var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
         var reader = new FakeReader { Failure = new SourceRedirectDeniedException(302) };
 
-        await new IngestionCoordinator(jobs, reader, new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+        await new IngestionCoordinator(jobs, [reader], new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
 
         Assert.Equal(SyncJobState.Failed, jobs.CompletedState);
         Assert.Equal("redirect_target_denied_302", jobs.ErrorCode);

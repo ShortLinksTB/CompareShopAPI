@@ -280,7 +280,9 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             await db.Database.MigrateAsync("20261018140000_AddBhxIngestion");
             await db.Database.ExecuteSqlRawAsync("""
                 INSERT INTO [PartnerShops] ([Slug],[Name],[WebsiteUrl],[IsActive]) VALUES (N'cellphones',N'CellphoneS',N'https://cellphones.com.vn',1);
-                INSERT INTO [DataSources] ([Key],[DisplayName],[CategoryPath],[PartnerShopId],[State],[IntervalHours],[CreatedAtUtc]) VALUES (N'cellphones',N'Existing CellphoneS',N'/laptop/',NULL,N'Active',72,SYSUTCDATETIME());
+                INSERT INTO [PartnerShops] ([Slug],[Name],[WebsiteUrl],[IsActive]) VALUES (N'wrong-shop',N'Wrong shop',N'https://wrong.example',1);
+                DECLARE @WrongShopId int = (SELECT [Id] FROM [PartnerShops] WHERE [Slug] = N'wrong-shop');
+                INSERT INTO [DataSources] ([Key],[DisplayName],[CategoryPath],[PartnerShopId],[State],[IntervalHours],[CreatedAtUtc]) VALUES (N'cellphones',N'Existing CellphoneS',N'/laptop/mac.html',@WrongShopId,N'Active',72,SYSUTCDATETIME());
                 ALTER TABLE [ProductOffers] ADD [ImageUrl] nvarchar(2048) NULL;
                 CREATE TABLE [ProductOfferSnapshots] ([Id] bigint IDENTITY(1,1) NOT NULL PRIMARY KEY, [ProductOfferId] int NULL);
                 """);
@@ -291,6 +293,39 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ProductOfferSnapshots') AND name = N'StockStatus'").SingleAsync());
             Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.foreign_keys WHERE name = N'FK_ProductOfferSnapshots_ProductOffers_ProductOfferId'").SingleAsync());
             Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [DataSources] WHERE [Key] = N'cellphones'").SingleAsync());
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("ProductOffers")]
+    [InlineData("SourceItemMappings")]
+    [InlineData("PartnerShops")]
+    [InlineData("DataSources")]
+    public async Task CellphoneS_migration_fails_and_is_not_recorded_when_a_required_table_is_missing(string missingTable)
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopMissing_{missingTable}_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            await using var db = new CompareShopDbContext(options);
+            await db.Database.MigrateAsync("20261018140000_AddBhxIngestion");
+            var dropSql = $"""
+                DECLARE @dropConstraints nvarchar(max) = N'';
+                SELECT @dropConstraints += N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME([parent_object_id])) + N'.' + QUOTENAME(OBJECT_NAME([parent_object_id])) + N' DROP CONSTRAINT ' + QUOTENAME([name]) + N';'
+                FROM sys.foreign_keys WHERE [referenced_object_id] = OBJECT_ID(N'dbo.{missingTable}');
+                EXEC sp_executesql @dropConstraints;
+                DROP TABLE [dbo].[{missingTable}];
+                """;
+            await db.Database.ExecuteSqlRawAsync(dropSql);
+
+            await Assert.ThrowsAsync<SqlException>(() => db.Database.MigrateAsync());
+            Assert.Equal(0, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20261027150000_AddCellphoneSOfferData'").SingleAsync());
+            Assert.Equal(0, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.tables WHERE name = N'ProductOfferSnapshots'").SingleAsync());
         }
         finally
         {

@@ -11,9 +11,16 @@ public static class CellphoneSRequestGuard
     public static bool IsAllowed(Uri? uri) => uri is { IsAbsoluteUri: true, Port: 443, UserInfo.Length: 0 } &&
         string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) && AllowedHosts.Contains(uri.IdnHost);
 
-    public static bool IsAllowedProductPage(Uri? uri) => IsAllowed(uri) &&
-        (uri!.IdnHost is not ("cellphones.com.vn" or "www.cellphones.com.vn") ||
-         uri.AbsolutePath.StartsWith("/laptop/", StringComparison.OrdinalIgnoreCase) || uri.AbsolutePath == "/robots.txt");
+    public static bool IsAllowedProductPage(Uri? uri)
+    {
+        if (!IsAllowed(uri)) return false;
+        var path = uri!.AbsolutePath;
+        if (uri.IdnHost is "cdn.cellphones.com.vn" or "cdn2.cellphones.com.vn")
+            return (path.StartsWith("/images/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/media/", StringComparison.OrdinalIgnoreCase)) &&
+                new[] { ".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+        if (path == "/robots.txt" || path == "/laptop/mac.html") return true;
+        return System.Text.RegularExpressions.Regex.IsMatch(path, @"^/(?:apple-)?macbook-[a-z0-9-]+\.html$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
 
     public static async Task<HttpResponseMessage> SendWithRedirectsAsync(HttpClient client, HttpRequestMessage request, CancellationToken ct)
     {

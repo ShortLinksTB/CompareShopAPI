@@ -8,6 +8,12 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations;
 public sealed class AddCellphoneSOfferData : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder) => migrationBuilder.Sql("""
+        IF OBJECT_ID(N'[ProductOffers]', N'U') IS NULL
+           OR OBJECT_ID(N'[SourceItemMappings]', N'U') IS NULL
+           OR OBJECT_ID(N'[PartnerShops]', N'U') IS NULL
+           OR OBJECT_ID(N'[DataSources]', N'U') IS NULL
+          THROW 51000, 'CellphoneS offer migration requires ProductOffers, SourceItemMappings, PartnerShops, and DataSources; no import was performed.', 1;
+
         IF OBJECT_ID(N'[ProductOffers]', N'U') IS NOT NULL
         BEGIN
           IF COL_LENGTH(N'dbo.ProductOffers', N'ImageUrl') IS NULL ALTER TABLE [ProductOffers] ADD [ImageUrl] nvarchar(2048) NULL;
@@ -60,7 +66,7 @@ public sealed class AddCellphoneSOfferData : Migration
             IF NOT EXISTS (SELECT 1 FROM [DataSources] WHERE [Key] = N'cellphones')
               INSERT INTO [DataSources] ([Key],[DisplayName],[CategoryPath],[PartnerShopId],[State],[IntervalHours],[CreatedAtUtc]) VALUES (N'cellphones',N'CellphoneS',N'/laptop/mac.html',@CellphoneSShopId,N'Active',72,SYSUTCDATETIME());
             ELSE
-              UPDATE [DataSources] SET [PartnerShopId] = @CellphoneSShopId, [CategoryPath] = N'/laptop/mac.html' WHERE [Key] = N'cellphones' AND ([PartnerShopId] IS NULL OR [CategoryPath] <> N'/laptop/mac.html');
+              UPDATE [DataSources] SET [PartnerShopId] = @CellphoneSShopId, [CategoryPath] = N'/laptop/mac.html' WHERE [Key] = N'cellphones' AND ([PartnerShopId] IS NULL OR [PartnerShopId] <> @CellphoneSShopId OR [CategoryPath] <> N'/laptop/mac.html');
           END;
         END;
         """);

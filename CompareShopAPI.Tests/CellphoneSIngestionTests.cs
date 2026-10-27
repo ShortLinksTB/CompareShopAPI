@@ -23,8 +23,7 @@ public sealed class CellphoneSIngestionTests
 
     [Theory]
     [InlineData("https://www.cellphones.com.vn/laptop/mac.html", true)]
-    [InlineData("https://cellphones.com.vn/product", true)]
-    [InlineData("https://cdn.cellphones.com.vn/a.jpg", true)]
+    [InlineData("https://cellphones.com.vn/macbook-air-m4-13-inch.html", true)]
     [InlineData("http://www.cellphones.com.vn/laptop/mac.html", false)]
     [InlineData("https://evil.cellphones.com.vn/laptop/mac.html", false)]
     [InlineData("https://www.cellphones.com.vn:444/laptop/mac.html", false)]
@@ -37,6 +36,13 @@ public sealed class CellphoneSIngestionTests
     [Fact]
     public async Task Product_path_is_limited_and_redirect_targets_are_revalidated()
     {
+        Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/laptop/mac.html")));
+        Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/macbook-air-m4-13-inch.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/laptop/windows.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/admin")));
+        Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cdn.cellphones.com.vn/images/macbook.jpg")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cdn.cellphones.com.vn/admin")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cdn.cellphones.com.vn/images/macbook.js")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/admin")));
         Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cdn2.cellphones.com.vn/images/mac.jpg")));
         using var client = new HttpClient(new StubHandler(new HttpResponseMessage(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://evil.test/redirect") } }));

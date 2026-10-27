@@ -78,11 +78,14 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
         {
             await using var db = new CompareShopDbContext(options);
             await db.Database.MigrateAsync();
-            var source = await db.DataSources.SingleAsync();
+            var source = await db.DataSources.SingleAsync(x => x.Key == "bhx");
             Assert.Equal("bhx", source.Key);
             Assert.Equal("/bia", source.CategoryPath);
             Assert.Equal(72, source.IntervalHours);
             Assert.Null(source.PartnerShopId);
+            var cellphones = await db.DataSources.SingleAsync(x => x.Key == "cellphones");
+            Assert.Equal("/laptop/mac.html", cellphones.CategoryPath);
+            Assert.Equal("cellphones", await db.PartnerShops.Where(x => x.Id == cellphones.PartnerShopId).Select(x => x.Slug).SingleAsync());
             Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.tables WHERE name = N'SourceItemMappings'").SingleAsync());
             Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.columns WHERE object_id = OBJECT_ID(N'SyncJobs') AND name = N'LeaseExpiresAtUtc'").SingleAsync());
             Assert.Equal(0, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.tables WHERE name = N'ShopeeDataSources'").SingleAsync());
@@ -208,12 +211,121 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             {
                 var store = new EfSyncJobStore(db);
                 var counts = await store.Import(sourceId,
-                    [new ScrapedOffer("new-unmapped-sku", "Pending product", null, 12000, "https://bhx.example/new")],
+                    [new ScrapedOffer("mapped-sku", "Mapped product", null, 11000, "https://bhx.example/mapped", "https://images.bhx.example/item.jpg", 12000, new Dictionary<string,string> { ["memory"] = "16GB" }, "in_stock"),
+                     new ScrapedOffer("new-unmapped-sku", "Pending product", null, 12000, "https://bhx.example/new", "https://images.bhx.example/pending.jpg", 13000, new Dictionary<string,string> { ["storage"] = "512GB" }, "coming_soon")],
                     fullSnapshot: true, CancellationToken.None);
 
+                Assert.Equal(1, counts.Imported);
                 Assert.Equal(1, counts.Pending);
-                Assert.False(await db.ProductOffers.Where(x => x.Id == oldOfferId).Select(x => x.IsActive).SingleAsync());
+                var updated = await db.ProductOffers.SingleAsync(x => x.Id == oldOfferId);
+                Assert.True(updated.IsActive);
+                Assert.Equal(12000, updated.OriginalPriceVnd);
+                Assert.Equal("https://images.bhx.example/item.jpg", updated.ImageUrl);
+                Assert.Equal("in_stock", updated.StockStatus);
+                Assert.Contains("16GB", updated.SpecificationsJson);
+                var snapshot = await db.ProductOfferSnapshots.SingleAsync(x => x.ProductOfferId == oldOfferId);
+                Assert.Equal(10000, snapshot.PriceVnd);
+                Assert.Equal("https://bhx.example/old", snapshot.Url);
+                var pending = await db.SourceItemMappings.SingleAsync(x => x.ExternalSku == "new-unmapped-sku");
+                Assert.Null(pending.ProductId);
+                Assert.Equal("https://images.bhx.example/pending.jpg", pending.ImageUrl);
+                Assert.Equal(13000, pending.OriginalPriceVnd);
+                Assert.Contains("512GB", pending.SpecificationsJson);
+                Assert.Equal("coming_soon", pending.StockStatus);
             }
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CellphoneS_import_is_not_attempted_without_its_partner_shop()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopMissingShop_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            await using var db = new CompareShopDbContext(options);
+            await db.Database.EnsureCreatedAsync();
+            var bhxShop = new PartnerShop { Slug = "bhx", Name = "Bách Hóa Xanh" };
+            var source = new DataSource("cellphones", "CellphoneS", "/laptop/mac.html", null, DateTime.UtcNow);
+            var bhx = new DataSource("bhx", "Bách Hóa Xanh", "/bia", null, DateTime.UtcNow);
+            db.AddRange(bhxShop, source, bhx);
+            await db.SaveChangesAsync();
+            var store = new EfSyncJobStore(db);
+            Assert.False(await store.ShopIsUsable(source.Id, default));
+            Assert.True(await store.ShopIsUsable(bhx.Id, default));
+            Assert.Equal(bhxShop.Id, bhx.PartnerShopId);
+            Assert.Empty(await db.SourceItemMappings.ToListAsync());
+            Assert.Empty(await db.ProductOffers.ToListAsync());
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CellphoneS_migration_repairs_partial_offer_objects_and_reuses_existing_source_rows()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopPartialCellphoneS_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            await using var db = new CompareShopDbContext(options);
+            await db.Database.MigrateAsync("20261018140000_AddBhxIngestion");
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO [PartnerShops] ([Slug],[Name],[WebsiteUrl],[IsActive]) VALUES (N'cellphones',N'CellphoneS',N'https://cellphones.com.vn',1);
+                INSERT INTO [PartnerShops] ([Slug],[Name],[WebsiteUrl],[IsActive]) VALUES (N'wrong-shop',N'Wrong shop',N'https://wrong.example',1);
+                DECLARE @WrongShopId int = (SELECT [Id] FROM [PartnerShops] WHERE [Slug] = N'wrong-shop');
+                INSERT INTO [DataSources] ([Key],[DisplayName],[CategoryPath],[PartnerShopId],[State],[IntervalHours],[CreatedAtUtc]) VALUES (N'cellphones',N'Existing CellphoneS',N'/laptop/mac.html',@WrongShopId,N'Active',72,SYSUTCDATETIME());
+                ALTER TABLE [ProductOffers] ADD [ImageUrl] nvarchar(2048) NULL;
+                CREATE TABLE [ProductOfferSnapshots] ([Id] bigint IDENTITY(1,1) NOT NULL PRIMARY KEY, [ProductOfferId] int NULL);
+                """);
+            await db.Database.MigrateAsync();
+            var source = await db.DataSources.SingleAsync(x => x.Key == "cellphones");
+            Assert.Equal("/laptop/mac.html", source.CategoryPath);
+            Assert.Equal("cellphones", await db.PartnerShops.Where(x => x.Id == source.PartnerShopId).Select(x => x.Slug).SingleAsync());
+            Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.ProductOfferSnapshots') AND name = N'StockStatus'").SingleAsync());
+            Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.foreign_keys WHERE name = N'FK_ProductOfferSnapshots_ProductOffers_ProductOfferId'").SingleAsync());
+            Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [DataSources] WHERE [Key] = N'cellphones'").SingleAsync());
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("ProductOffers")]
+    [InlineData("SourceItemMappings")]
+    [InlineData("PartnerShops")]
+    [InlineData("DataSources")]
+    public async Task CellphoneS_migration_fails_and_is_not_recorded_when_a_required_table_is_missing(string missingTable)
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopMissing_{missingTable}_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            await using var db = new CompareShopDbContext(options);
+            await db.Database.MigrateAsync("20261018140000_AddBhxIngestion");
+            var dropSql = $"""
+                DECLARE @dropConstraints nvarchar(max) = N'';
+                SELECT @dropConstraints += N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME([parent_object_id])) + N'.' + QUOTENAME(OBJECT_NAME([parent_object_id])) + N' DROP CONSTRAINT ' + QUOTENAME([name]) + N';'
+                FROM sys.foreign_keys WHERE [referenced_object_id] = OBJECT_ID(N'dbo.{missingTable}');
+                EXEC sp_executesql @dropConstraints;
+                DROP TABLE [dbo].[{missingTable}];
+                """;
+            await db.Database.ExecuteSqlRawAsync(dropSql);
+
+            await Assert.ThrowsAsync<SqlException>(() => db.Database.MigrateAsync());
+            Assert.Equal(0, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [__EFMigrationsHistory] WHERE [MigrationId] = N'20261027150000_AddCellphoneSOfferData'").SingleAsync());
+            Assert.Equal(0, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.tables WHERE name = N'ProductOfferSnapshots'").SingleAsync());
         }
         finally
         {

@@ -30,6 +30,14 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
         this.logger = logger;
     }
 
+    public bool Supports(string sourceKey) => sourceKey == DataSource.BhxKey;
+
+    public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct)
+    {
+        if (!Supports(sourceKey) || categoryPath != "/bia") throw new InvalidDataException("BHX source category is not supported.");
+        return ReadValidatedBiaAsync(ct);
+    }
+
     public async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct)
     {
         try

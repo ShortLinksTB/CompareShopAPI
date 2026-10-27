@@ -11,6 +11,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<Product> Products => Set<Product>();
     public DbSet<PartnerShop> PartnerShops => Set<PartnerShop>();
     public DbSet<ProductOffer> ProductOffers => Set<ProductOffer>();
+    public DbSet<ProductOfferSnapshot> ProductOfferSnapshots => Set<ProductOfferSnapshot>();
     public DbSet<SpecificationGroup> SpecificationGroups => Set<SpecificationGroup>();
     public DbSet<SpecificationItem> SpecificationItems => Set<SpecificationItem>();
     public DbSet<AffiliateLink> AffiliateLinks => Set<AffiliateLink>();
@@ -45,9 +46,14 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<Product>().Property(x => x.Name).HasMaxLength(300); model.Entity<Product>().Property(x => x.Brand).HasMaxLength(200);
         model.Entity<Product>().HasOne(x => x.Category).WithMany().HasForeignKey(x => x.CategoryId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<ProductOffer>().HasKey(x => x.Id); model.Entity<ProductOffer>().HasIndex(x => new { x.ProductId, x.IsActive, x.IsOutlier });
+        model.Entity<ProductOffer>().Property(x => x.ImageUrl).HasMaxLength(2048); model.Entity<ProductOffer>().Property(x => x.StockStatus).HasMaxLength(20).IsRequired();
+        model.Entity<ProductOffer>().Property(x => x.SpecificationsJson);
+        model.Entity<ProductOfferSnapshot>().HasKey(x => x.Id); model.Entity<ProductOfferSnapshot>().Property(x => x.Url).HasMaxLength(2048); model.Entity<ProductOfferSnapshot>().Property(x => x.ImageUrl).HasMaxLength(2048); model.Entity<ProductOfferSnapshot>().Property(x => x.StockStatus).HasMaxLength(20).IsRequired();
+        model.Entity<ProductOfferSnapshot>().HasIndex(x => new { x.ProductOfferId, x.CapturedAtUtc });
         model.Entity<ProductOffer>().HasIndex(x => new { x.PartnerShopId, x.ProductId }); model.Entity<ProductOffer>().HasIndex(x => new { x.PriceVnd, x.UpdatedAtUtc });
         model.Entity<ProductOffer>().HasOne(x => x.Product).WithMany(x => x.Offers).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<ProductOffer>().HasOne(x => x.PartnerShop).WithMany().HasForeignKey(x => x.PartnerShopId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<ProductOfferSnapshot>().HasOne<ProductOffer>().WithMany().HasForeignKey(x => x.ProductOfferId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<SpecificationGroup>().HasOne(x => x.Product).WithMany(x => x.SpecificationGroups).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<SpecificationItem>().HasOne(x => x.Group).WithMany(x => x.Items).HasForeignKey(x => x.SpecificationGroupId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<SpecificationGroup>().Property(x => x.Name).HasMaxLength(200);
@@ -165,6 +171,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<SourceItemMapping>().Property(x => x.ExternalSku).HasMaxLength(160).IsRequired();
         model.Entity<SourceItemMapping>().Property(x => x.Name).HasMaxLength(300).IsRequired();
         model.Entity<SourceItemMapping>().Property(x => x.Brand).HasMaxLength(200);
+        model.Entity<SourceItemMapping>().Property(x => x.ImageUrl).HasMaxLength(2048); model.Entity<SourceItemMapping>().Property(x => x.StockStatus).HasMaxLength(20).IsRequired();
         model.Entity<SourceItemMapping>().HasOne<DataSource>().WithMany().HasForeignKey(x => x.DataSourceId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<SourceItemMapping>().HasOne<Product>().WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<SourceItemMapping>().HasOne<ProductOffer>().WithMany().HasForeignKey(x => x.ProductOfferId).OnDelete(DeleteBehavior.SetNull);

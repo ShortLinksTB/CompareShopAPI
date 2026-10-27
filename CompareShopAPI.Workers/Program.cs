@@ -14,6 +14,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ISyncJobStore, EfSyncJobStore>();
 builder.Services.AddScoped<IPriceHistoryRecorder, EfPriceHistoryRecorder>();
 builder.Services.AddSingleton<ISourceCatalogReader, BhxPlaywrightCatalogReader>();
+builder.Services.AddSingleton<ISourceCatalogReader, CellphoneSPlaywrightCatalogReader>();
 builder.Services.AddScoped<IngestionCoordinator>();
 builder.Services.AddHostedService<BhxIngestionWorker>();
 builder.Services.AddSingleton<IBannedItemMessagePublisher, RabbitMqBannedItemMessagePublisher>();

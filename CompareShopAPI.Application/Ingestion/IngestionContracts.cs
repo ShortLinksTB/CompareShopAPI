@@ -41,7 +41,6 @@ public sealed class SourceRedirectDeniedException : Exception
 
 public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISourceCatalogReader> readers, IPriceHistoryRecorder history, TimeProvider clock)
 {
-    public IngestionCoordinator(ISyncJobStore jobs, ISourceCatalogReader reader, IPriceHistoryRecorder history, TimeProvider clock) : this(jobs, [reader], history, clock) { }
     public async Task RunDueSources(CancellationToken ct)
     {
         var now = clock.GetUtcNow().UtcDateTime;

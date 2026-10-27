@@ -17,5 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/* /tmp/packages-microsoft-prod.deb
 COPY --from=build /app/publish .
 RUN pwsh ./playwright.ps1 install chromium
+RUN chmod 0755 /app/.playwright/node/linux-x64/node
 USER app
 ENTRYPOINT ["dotnet", "CompareShopAPI.Workers.dll"]

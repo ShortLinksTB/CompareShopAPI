@@ -166,6 +166,16 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             var sourceAfterFailure = await verification.DataSources.SingleAsync(x => x.Id == sourceId);
             Assert.Equal(DataSourceState.Active, sourceAfterFailure.State);
             Assert.Equal<DateTime?>(finished.AddHours(6), sourceAfterFailure.NextAttemptAtUtc);
+            var store = new EfSyncJobStore(verification);
+            Assert.Empty(await store.DueSources(finished.AddMinutes(5), default));
+            Assert.Null(await store.TryClaim(sourceId, finished.AddHours(6).AddTicks(-1), default));
+            Assert.Single(await store.DueSources(finished.AddHours(6), default));
+            var retry = await store.TryClaim(sourceId, finished.AddHours(6), default);
+            Assert.NotNull(retry);
+            Assert.Empty(await store.DueSources(finished.AddHours(6).AddMinutes(5), default));
+            await store.Complete(sourceId, retry!, SyncJobState.Success, finished.AddHours(6).AddMinutes(1), 1, 1, 0, null, null, default);
+            Assert.Empty(await store.DueSources(finished.AddHours(78), default));
+            Assert.Single(await store.DueSources(finished.AddHours(78).AddMinutes(1), default));
         }
         finally
         {

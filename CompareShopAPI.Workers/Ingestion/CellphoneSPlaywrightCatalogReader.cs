@@ -4,6 +4,8 @@ using System.Text.RegularExpressions;
 using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Domain.Ingestion;
 using Microsoft.Playwright;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CompareShopAPI.Workers.Ingestion;
 
@@ -13,14 +15,28 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     private const string UserAgent = "CompareShopPriceMonitor/1.0 (+https://giamha.online)";
     private readonly Func<string, HttpClient> robotsClientFactory;
 
-    public CellphoneSPlaywrightCatalogReader() : this(CreateRobotsClient) { }
-    internal CellphoneSPlaywrightCatalogReader(Func<string, HttpClient> robotsClientFactory) => this.robotsClientFactory = robotsClientFactory;
+    private readonly ILogger<CellphoneSPlaywrightCatalogReader> logger;
+
+    public CellphoneSPlaywrightCatalogReader() : this(CreateRobotsClient, NullLogger<CellphoneSPlaywrightCatalogReader>.Instance) { }
+    public CellphoneSPlaywrightCatalogReader(ILogger<CellphoneSPlaywrightCatalogReader> logger) : this(CreateRobotsClient, logger) { }
+    internal CellphoneSPlaywrightCatalogReader(Func<string, HttpClient> robotsClientFactory)
+        : this(robotsClientFactory, NullLogger<CellphoneSPlaywrightCatalogReader>.Instance) { }
+    internal CellphoneSPlaywrightCatalogReader(Func<string, HttpClient> robotsClientFactory, ILogger<CellphoneSPlaywrightCatalogReader> logger)
+    {
+        this.robotsClientFactory = robotsClientFactory;
+        this.logger = logger;
+    }
 
     public bool Supports(string sourceKey) => sourceKey == DataSource.CellphoneSKey;
 
-    public async Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct)
+    public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct)
     {
         if (!Supports(sourceKey) || categoryPath != "/laptop/mac.html") throw new InvalidDataException("CellphoneS category is not supported.");
+        return CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedCoreAsync(ct));
+    }
+
+    private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedCoreAsync(CancellationToken ct)
+    {
         await using var proxy = await BhxForwardProxy.StartAsync(CellphoneSRequestGuard.AllowedHosts, ct);
         using var robotsClient = robotsClientFactory(proxy.Server);
         using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(CategoryUri, "/robots.txt"));
@@ -28,7 +44,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         using var robots = await CellphoneSRequestGuard.SendWithRedirectsAsync(robotsClient, robotsRequest, ct);
         if (!robots.IsSuccessStatusCode) throw new SourceAccessBlockedException();
         var robotsText = await robots.Content.ReadAsStringAsync(ct);
-        if (IsDisallowed(robotsText, "/laptop/mac.html")) throw new InvalidDataException("CellphoneS robots policy denies the validated category.");
+        if (IsDisallowed(robotsText, "/laptop/mac.html")) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
 
         using var playwright = await Playwright.CreateAsync();
         await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(proxy.Server));
@@ -46,7 +62,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         BhxPlaywrightCatalogReader.EnsureAccessible(response?.Status, page.Url, (await page.Locator("body").InnerTextAsync()).ToLowerInvariant());
         var cards = page.Locator(".product-info");
         var count = await cards.CountAsync();
-        if (count is < 1 or > 300) throw new InvalidDataException("Validated CellphoneS product selector changed.");
+        if (count is < 1 or > 300) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductCountInvalid);
         var rows = new List<ScrapedOffer>(count);
         for (var i = 0; i < count; i++)
         {
@@ -59,9 +75,9 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             var priceText = await card.Locator(".product__price, .price").First.InnerTextAsync();
             var price = ParsePrice(priceText);
             if (string.IsNullOrWhiteSpace(sku) || string.IsNullOrWhiteSpace(href) || string.IsNullOrWhiteSpace(name) || price <= 0)
-                throw new InvalidDataException("A CellphoneS product card did not match the validated schema.");
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
             var url = new Uri(CategoryUri, href);
-            if (!CellphoneSRequestGuard.IsAllowedProductPage(url)) throw new InvalidDataException("CellphoneS product link points outside the approved product path.");
+            if (!CellphoneSRequestGuard.IsAllowedProductPage(url)) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
             var image = await card.Locator("img").First.GetAttributeAsync("src") ?? await card.Locator("img").First.GetAttributeAsync("data-src");
             var imageUrl = image is null ? null : new Uri(CategoryUri, image).ToString();
             if (imageUrl is not null && !CellphoneSRequestGuard.IsAllowed(new Uri(imageUrl))) imageUrl = null;

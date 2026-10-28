@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using CompareShopAPI.Application.Ingestion;
@@ -38,24 +37,8 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
         return ReadValidatedBiaAsync(ct);
     }
 
-    public async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct)
-    {
-        try
-        {
-            return await ReadValidatedBiaCoreAsync(ct);
-        }
-        catch (SourceAccessBlockedException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Stack frames are useful for diagnosis without including exception messages, response bodies, or HTML.
-            logger.LogDebug("BHX scrape failed. ExceptionType={ExceptionType}; Stack={DiagnosticStack}",
-                ex.GetType().FullName, FormatDiagnosticStack(ex));
-            throw;
-        }
-    }
+    public Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) =>
+        CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedBiaCoreAsync(ct));
 
     private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaCoreAsync(CancellationToken ct)
     {
@@ -74,7 +57,7 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
                 var path = line[(line.IndexOf(':') + 1)..].Trim();
                 return path is "/" or "/bia" || path.StartsWith("/bia/", StringComparison.OrdinalIgnoreCase);
             }))
-                throw new InvalidDataException("BHX robots policy denies the validated category.");
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
         }
         using var playwright = await Playwright.CreateAsync();
         await using var egressProxy = await BhxForwardProxy.StartAsync(ct);
@@ -98,7 +81,7 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
         EnsureAccessible(null, page.Url, pageText);
         var cards = page.Locator("[data-product-code]");
         var count = await cards.CountAsync();
-        if (count is < 1 or > 500) throw new InvalidDataException("Validated BHX product selector changed.");
+        if (count is < 1 or > 500) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductCountInvalid);
         var result = new List<ScrapedOffer>();
         for (var i = 0; i < count; i++)
         {
@@ -110,13 +93,13 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
             var anchor = card.Locator("a").First;
             var href = await anchor.GetAttributeAsync("href");
             if (string.IsNullOrWhiteSpace(sku) || string.IsNullOrWhiteSpace(name) || !int.TryParse(Regex.Replace(priceText ?? "", "[^0-9]", ""), NumberStyles.None, CultureInfo.InvariantCulture, out var price) || price <= 0 || string.IsNullOrWhiteSpace(href))
-                throw new InvalidDataException("A BHX product card did not match the validated schema.");
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
             var url = new Uri(CategoryUri, href);
-            if (!BhxRequestGuard.IsAllowed(url)) throw new InvalidDataException("BHX product link points to an unapproved host.");
+            if (!BhxRequestGuard.IsAllowed(url)) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
             result.Add(new ScrapedOffer(sku, name, null, price, url.ToString()));
             await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
         }
-        if (result.Count == 0) throw new InvalidDataException("Validated BHX product cards were not found.");
+        if (result.Count == 0) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.EmptyCatalog);
         return result;
     }
 
@@ -129,14 +112,4 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
             throw new SourceAccessBlockedException();
     }
 
-    private static string FormatDiagnosticStack(Exception exception)
-    {
-        const int maxStackLength = 1200;
-        var frames = new StackTrace(exception, fNeedFileInfo: false).ToString()
-            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
-            .Take(8)
-            .Select(frame => new string(frame.Where(character => !char.IsControl(character)).ToArray()).Trim());
-        var stack = string.Join(" | ", frames);
-        return stack.Length <= maxStackLength ? stack : stack[..maxStackLength];
-    }
 }

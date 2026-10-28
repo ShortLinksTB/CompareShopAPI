@@ -126,6 +126,13 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
 
     public async Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct) => await db.ProductMatchings.AsNoTracking().Where(x => x.ProductId == null && !x.IsApproved).OrderBy(x => x.CreatedAtUtc).Select(MatchingDto).ToListAsync(ct);
+    public async Task<IReadOnlyList<MatchingCandidateProduct>> MatchingCandidateProducts(IReadOnlyList<MatchingCandidateInput> pending, CancellationToken ct)
+    {
+        if (pending.Count == 0) return [];
+        // All active products remain eligible: the advisory policy has no score threshold.
+        return await db.Products.AsNoTracking().Where(x => x.IsActive)
+            .Select(x => new MatchingCandidateProduct(x.Id, x.Name, x.Brand)).ToListAsync(ct);
+    }
     public async Task<CompareShopAPI.Domain.Admin.ProductMatching?> MatchingForApproval(int id, int productId, CancellationToken ct)
     {
         if (!await db.Products.AnyAsync(x => x.Id == productId && x.IsActive, ct)) throw new ArgumentException("Active product does not exist.");

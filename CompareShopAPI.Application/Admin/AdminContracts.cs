@@ -23,7 +23,13 @@ public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActi
 public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive);
 public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive);
 public sealed record AdminOffer(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc);
-public sealed record AdminMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku = null, int? DataSourceId = null);
+public sealed record AdminMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku = null, int? DataSourceId = null)
+{
+    public IReadOnlyList<AdminMatchingCandidate> Candidates { get; init; } = [];
+}
+public sealed record MatchingCandidateInput(string Name, string? Brand);
+public sealed record MatchingCandidateProduct(int ProductId, string Name, string? Brand);
+public sealed record AdminMatchingCandidate(int ProductId, string Name, string? Brand, double SimilarityScore);
 public sealed record AdminAuditEntry(long Id, string Actor, string Action, string ResourceType, string? ResourceId, DateTime CreatedAtUtc, JsonElement? Before, JsonElement? After);
 public sealed record AdminDashboard(int Products, int Offers, int Articles, bool ArticlesAvailable);
 public sealed record AdminPriceAlert(int Id, int UserId, int ProductId, string ProductSlug, string ProductName, int TargetPrice, bool IsActive, DateTime CreatedAtUtc);
@@ -69,6 +75,7 @@ public interface IAdminData
     Task<AdminOffer?> SaveOffer(int id, OfferInput input, CancellationToken ct);
     Task<AdminOffer?> ApproveOffer(int id, CancellationToken ct);
     Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct);
+    Task<IReadOnlyList<MatchingCandidateProduct>> MatchingCandidateProducts(IReadOnlyList<MatchingCandidateInput> pending, CancellationToken ct);
     Task<DomainProductMatching?> MatchingForApproval(int id, int productId, CancellationToken ct);
     Task SaveMatching(DomainProductMatching matching, CancellationToken ct);
     Task<Page<AdminAuditEntry>> AuditLogs(int page, int pageSize, CancellationToken ct);
@@ -144,7 +151,15 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     public Task<AdminOffer> UpdateOffer(string? s, int id, OfferInput input, CancellationToken ct) => Write(s, AdminPermissions.OffersUpdate, "update", "offer", id.ToString(), async t => { var before = (await data.Offers(t)).SingleOrDefault(x => x.Id == id); return before is null ? (null, null, null) : (await data.SaveOffer(id, Validate(input), t), before, input); }, ct);
     public Task<AdminOffer> ApproveOffer(string? s, int id, CancellationToken ct) => Write(s, AdminPermissions.OffersApprove, "approve", "offer", id.ToString(), async t => { var before = (await data.Offers(t)).SingleOrDefault(x => x.Id == id); return before is null ? (null, null, null) : (await data.ApproveOffer(id, t), before, new { isActive = true, isOutlier = false }); }, ct);
 
-    public async Task<IReadOnlyList<AdminMatching>> MatchingList(string? s, CancellationToken ct) { await Authorize(s, AdminPermissions.MatchingRead, ct); return await data.Matching(ct); }
+    public async Task<IReadOnlyList<AdminMatching>> MatchingList(string? s, CancellationToken ct)
+    {
+        await Authorize(s, AdminPermissions.MatchingRead, ct);
+        var pending = await data.Matching(ct);
+        if (pending.Count == 0) return pending;
+        var products = await data.MatchingCandidateProducts(pending.Select(x => new MatchingCandidateInput(x.Name, x.Brand)).ToArray(), ct);
+        var ranker = new MatchingCandidateRanker(products);
+        return pending.Select(x => x with { Candidates = ranker.Rank(x.Name, x.Brand) }).ToArray();
+    }
     public Task<AdminMatching> ApproveMatching(string? s, int id, int productId, CancellationToken ct) => Write(s, AdminPermissions.MatchingApprove, "approve", "matching", id.ToString(), async t =>
     {
         var before = (await data.Matching(t)).SingleOrDefault(x => x.Id == id);

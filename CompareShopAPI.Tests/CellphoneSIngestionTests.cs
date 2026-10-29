@@ -34,6 +34,31 @@ public sealed class CellphoneSIngestionTests
     }
 
     [Fact]
+    public void Diagnostic_url_redacts_credentials_tracking_query_and_fragment_but_keeps_numeric_product_id()
+    {
+        var safe = WorkerIngestion.CellphoneSRequestGuard.SafeUrlForDiagnostics(
+            "https://user:password@cellphones.com.vn/macbook-neo.html?product_id=125876&token=session-secret&utm_source=private#auth-secret");
+
+        Assert.Equal("https://cellphones.com.vn/macbook-neo.html?product_id=125876", safe);
+        Assert.DoesNotContain("password", safe);
+        Assert.DoesNotContain("session-secret", safe);
+        Assert.DoesNotContain("private", safe);
+        Assert.DoesNotContain("auth-secret", safe);
+    }
+
+    [Fact]
+    public void Diagnostic_url_resolves_real_relative_card_href_and_drops_duplicate_product_ids()
+    {
+        var category = new Uri("https://www.cellphones.com.vn/laptop/mac.html");
+        var safe = WorkerIngestion.CellphoneSRequestGuard.SafeUrlForDiagnostics(
+            "/macbook-neo-13-a18-pro.html?product_id=125876&product_id=125877&sid=secret", category);
+
+        Assert.Equal("https://www.cellphones.com.vn/macbook-neo-13-a18-pro.html", safe);
+        Assert.DoesNotContain("secret", safe);
+        Assert.Equal("[invalid-uri]", WorkerIngestion.CellphoneSRequestGuard.SafeUrlForDiagnostics("%%%"));
+    }
+
+    [Fact]
     public async Task Product_path_is_limited_and_redirect_targets_are_revalidated()
     {
         Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/laptop/mac.html")));

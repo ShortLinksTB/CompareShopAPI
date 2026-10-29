@@ -62,13 +62,8 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         var page = await browser.NewPageAsync(new BrowserNewPageOptions { AcceptDownloads = false, UserAgent = UserAgent });
         page.SetDefaultNavigationTimeout(20_000); page.SetDefaultTimeout(8_000);
         using var gate = new SemaphoreSlim(1, 1);
-        await page.RouteAsync("**/*", async route =>
-        {
-            if (!Uri.TryCreate(route.Request.Url, UriKind.Absolute, out var uri) || !CellphoneSRequestGuard.IsAllowedProductPage(uri)) { await route.AbortAsync(); return; }
-            await gate.WaitAsync(ct);
-            try { await Task.Delay(TimeSpan.FromMilliseconds(250), ct); await route.ContinueAsync(); }
-            finally { gate.Release(); }
-        });
+        string? activeCardHref = null;
+        await page.RouteAsync("**/*", route => HandleRouteAsync(route, context, activeCardHref, gate, ct));
         context.Stage = CatalogReadStage.Navigation;
         var response = await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
         context.Stage = CatalogReadStage.AccessCheck;
@@ -90,7 +85,11 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             if (string.IsNullOrWhiteSpace(href) || string.IsNullOrWhiteSpace(name) || price <= 0)
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
             var url = new Uri(CategoryUri, href);
-            if (!CellphoneSRequestGuard.IsAllowedProductPage(url)) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
+            if (!CellphoneSRequestGuard.IsAllowedProductPage(url))
+            {
+                LogDeniedProductUrl(context, href, null);
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
+            }
             var image = await card.Locator("img").First.GetAttributeAsync("src") ?? await card.Locator("img").First.GetAttributeAsync("data-src");
             var imageUrl = image is null ? null : new Uri(CategoryUri, image).ToString();
             if (imageUrl is not null && !CellphoneSRequestGuard.IsAllowed(new Uri(imageUrl))) imageUrl = null;
@@ -110,13 +109,12 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
 
             context.Stage = CatalogReadStage.Navigation;
+            activeCardHref = product.Url.ToString();
             var detailResponse = await page.GotoAsync(product.Url.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
             context.Stage = CatalogReadStage.AccessCheck;
             var detailText = (await page.Locator("body").InnerTextAsync()).ToLowerInvariant();
             BhxPlaywrightCatalogReader.EnsureAccessible(detailResponse?.Status, page.Url, detailText);
-            if (!Uri.TryCreate(page.Url, UriKind.Absolute, out var detailUri) ||
-                !CellphoneSRequestGuard.IsAllowedProductPage(detailUri) ||
-                !string.Equals(detailUri.AbsolutePath, product.Url.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+            if (!TryValidateDetailUrl(context, product.Url, page.Url, out var detailUri))
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
 
             context.Stage = CatalogReadStage.ProductFields;
@@ -125,6 +123,42 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
                 product.OriginalPriceVnd, product.Specifications, product.StockStatus));
         }
         return rows;
+    }
+
+    internal async Task HandleRouteAsync(IRoute route, CatalogReadContext context, string? activeCardHref, SemaphoreSlim gate, CancellationToken ct)
+    {
+        if (!Uri.TryCreate(route.Request.Url, UriKind.Absolute, out var uri) || !CellphoneSRequestGuard.IsAllowedProductPage(uri))
+        {
+            if (activeCardHref is not null && route.Request.IsNavigationRequest && route.Request.Frame.ParentFrame is null)
+                LogDeniedProductUrl(context, activeCardHref, route.Request.Url);
+            await route.AbortAsync();
+            return;
+        }
+        await gate.WaitAsync(ct);
+        try { await Task.Delay(TimeSpan.FromMilliseconds(250), ct); await route.ContinueAsync(); }
+        finally { gate.Release(); }
+    }
+
+    internal bool TryValidateDetailUrl(CatalogReadContext context, Uri expectedUrl, string finalUrl, out Uri detailUri)
+    {
+        if (!Uri.TryCreate(finalUrl, UriKind.Absolute, out var parsedUri) || parsedUri is null ||
+            !CellphoneSRequestGuard.IsAllowedProductPage(parsedUri) ||
+            !string.Equals(parsedUri.AbsolutePath, expectedUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+        {
+            detailUri = expectedUrl;
+            LogDeniedProductUrl(context, expectedUrl.ToString(), finalUrl);
+            return false;
+        }
+        detailUri = parsedUri;
+        return true;
+    }
+
+    internal void LogDeniedProductUrl(CatalogReadContext context, string? cardHref, string? finalUri)
+    {
+        logger.LogWarning("CellphoneS product URL denied. Source={Source}; JobId={JobId}; Stage={Stage}; CardHref={CardHref}; FinalRequestUri={FinalRequestUri}",
+            context.Source, context.JobId, context.Stage,
+            CellphoneSRequestGuard.SafeUrlForDiagnostics(cardHref, CategoryUri),
+            finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafeUrlForDiagnostics(finalUri, CategoryUri));
     }
 
     private static async Task<string> ReadPublishedProductIdAsync(IPage page, Uri expectedUrl, Uri detailUrl, int listingPrice)

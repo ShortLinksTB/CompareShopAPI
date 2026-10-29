@@ -82,6 +82,76 @@ public sealed class CatalogReadDiagnosticsTests
     }
 
     [Fact]
+    public void Cellphones_denied_url_diagnostic_correlates_job_and_redacts_sensitive_query_values()
+    {
+        var logger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(), logger);
+        var context = new Worker.CatalogReadContext("cellphones", 31) { Stage = Worker.CatalogReadStage.ProductFields };
+        var expectedUrl = new Uri("https://www.cellphones.com.vn/macbook-neo.html?product_id=125876&session=card-secret");
+
+        Assert.False(reader.TryValidateDetailUrl(context, expectedUrl,
+            "https://www.cellphones.com.vn/macbook-pro.html?product_id=125876&token=redirect-secret#private", out _));
+        Assert.True(reader.TryValidateDetailUrl(context, expectedUrl,
+            "https://www.cellphones.com.vn/macbook-neo.html?product_id=125876&token=not-logged", out var finalUri));
+        Assert.Equal(expectedUrl.AbsolutePath, finalUri.AbsolutePath);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Contains("Source=cellphones", entry.Text);
+        Assert.Contains("JobId=31", entry.Text);
+        Assert.Contains("Stage=ProductFields", entry.Text);
+        Assert.Contains("CardHref=https://www.cellphones.com.vn/macbook-neo.html?product_id=125876", entry.Text);
+        Assert.Contains("FinalRequestUri=https://www.cellphones.com.vn/macbook-pro.html?product_id=125876", entry.Text);
+        Assert.DoesNotContain("card-secret", entry.Text);
+        Assert.DoesNotContain("redirect-secret", entry.Text);
+        Assert.DoesNotContain("private", entry.Text);
+        Assert.Null(entry.Exception);
+    }
+
+    [Fact]
+    public async Task Cellphones_route_aborts_and_logs_denied_main_frame_redirect_then_continues_allowed_request()
+    {
+        var logger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(), logger);
+        var context = new Worker.CatalogReadContext("cellphones", 32) { Stage = Worker.CatalogReadStage.Navigation };
+        var frame = Stub.Create<IFrame>((method, _) => method == "get_ParentFrame" ? null : throw new NotSupportedException(method));
+        var requestUrl = "https://evil.test/macbook-neo.html?product_id=125876&token=route-secret";
+        var request = Stub.Create<IRequest>((method, _) => method switch
+        {
+            "get_Url" => requestUrl,
+            "get_IsNavigationRequest" => true,
+            "get_Frame" => frame,
+            _ => throw new NotSupportedException(method)
+        });
+        var aborts = 0;
+        var continues = 0;
+        var route = Stub.Create<IRoute>((method, _) => method switch
+        {
+            "get_Request" => request,
+            "AbortAsync" => CountAbort(),
+            "ContinueAsync" => CountContinue(),
+            _ => throw new NotSupportedException(method)
+        });
+
+        await reader.HandleRouteAsync(route, context,
+            "/macbook-neo.html?product_id=125876&session=card-secret", new SemaphoreSlim(1, 1), default);
+        Assert.Equal(1, aborts);
+        Assert.Equal(0, continues);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Contains("JobId=32", entry.Text);
+        Assert.Contains("CardHref=https://www.cellphones.com.vn/macbook-neo.html?product_id=125876", entry.Text);
+        Assert.Contains("FinalRequestUri=https://evil.test/macbook-neo.html?product_id=125876", entry.Text);
+        Assert.DoesNotContain("secret", entry.Text);
+
+        requestUrl = "https://www.cellphones.com.vn/macbook-neo.html?product_id=125876";
+        await reader.HandleRouteAsync(route, context, "/macbook-neo.html", new SemaphoreSlim(1, 1), default);
+        Assert.Equal(1, aborts);
+        Assert.Equal(1, continues);
+
+        Task CountAbort() { aborts++; return Task.CompletedTask; }
+        Task CountContinue() { continues++; return Task.CompletedTask; }
+    }
+
+    [Fact]
     public async Task Concurrent_failures_keep_their_own_context()
     {
         var stageValue = (int)Worker.CatalogReadStage.Navigation;

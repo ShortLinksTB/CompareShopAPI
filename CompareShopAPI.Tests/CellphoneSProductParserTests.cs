@@ -151,6 +151,18 @@ public sealed class CellphoneSProductParserTests
             18_790_000, variants, finalUrl));
     }
 
+    [Fact]
+    public void Redirect_changing_listing_product_id_fails_closed_even_when_final_id_matches_active()
+    {
+        var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
+            variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
+        var listingUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125875");
+        var finalUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125876");
+
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(listingUrl,
+            18_790_000, variants, finalUrl));
+    }
+
     [Theory]
     [InlineData("?product_id=125876&product_id=125876")]
     [InlineData("?product_id=125876&product_id=125875")]
@@ -161,6 +173,8 @@ public sealed class CellphoneSProductParserTests
 
         Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl + query),
             18_790_000, variants));
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+            18_790_000, variants, new Uri(SourceFixture.ProductUrl + query)));
     }
 
     [Fact]
@@ -180,6 +194,17 @@ public sealed class CellphoneSProductParserTests
         var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
             variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
         variants[3] = variants[3] with { Href = variants[3].Href + "&product_id=125876" };
+
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+            18_790_000, variants));
+    }
+
+    [Fact]
+    public void Conflicting_variant_product_ids_are_rejected()
+    {
+        var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
+            variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
+        variants[3] = variants[3] with { Href = variants[3].Href!.Replace("125876", "125875", StringComparison.Ordinal) + "&product_id=125876" };
 
         Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
             18_790_000, variants));

@@ -66,6 +66,11 @@ public sealed class CellphoneSIngestionTests
     {
         Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/laptop/mac.html")));
         Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/macbook-air-m4-13-inch.html")));
+        Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html/extra")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.php")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/iphone-17-pro.html")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/laptop/windows.html")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/admin")));
         Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cdn.cellphones.com.vn/images/macbook.jpg")));
@@ -76,6 +81,13 @@ public sealed class CellphoneSIngestionTests
         using var client = new HttpClient(new StubHandler(new HttpResponseMessage(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://evil.test/redirect") } }));
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://www.cellphones.com.vn/robots.txt");
         await Assert.ThrowsAsync<SourceRedirectDeniedException>(() => WorkerIngestion.CellphoneSRequestGuard.SendWithRedirectsAsync(client, request, default));
+    }
+
+    [Fact]
+    public async Task Reader_rejects_mac_mini_url_outside_the_approved_category()
+    {
+        var reader = new WorkerIngestion.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(new StubHandler(new HttpResponseMessage(HttpStatusCode.OK))));
+        await Assert.ThrowsAsync<InvalidDataException>(() => reader.ReadAsync(DataSource.CellphoneSKey, "/laptop/", default));
     }
 
     [Fact]

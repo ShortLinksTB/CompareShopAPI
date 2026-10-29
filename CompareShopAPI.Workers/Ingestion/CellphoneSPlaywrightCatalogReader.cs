@@ -143,6 +143,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     {
         if (!Uri.TryCreate(finalUrl, UriKind.Absolute, out var parsedUri) || parsedUri is null ||
             !CellphoneSRequestGuard.IsAllowedProductPage(parsedUri) ||
+            !string.Equals(parsedUri.IdnHost, expectedUrl.IdnHost, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(parsedUri.AbsolutePath, expectedUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase))
         {
             detailUri = expectedUrl;

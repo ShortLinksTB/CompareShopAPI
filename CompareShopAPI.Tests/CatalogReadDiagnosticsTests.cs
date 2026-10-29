@@ -110,13 +110,45 @@ public sealed class CatalogReadDiagnosticsTests
     }
 
     [Fact]
+    public void Cellphones_mac_mini_detail_redirect_must_remain_on_the_same_host()
+    {
+        var logger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(), logger);
+        var context = new Worker.CatalogReadContext("cellphones", 33) { Stage = Worker.CatalogReadStage.Navigation };
+        var expected = new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html");
+
+        Assert.True(reader.TryValidateDetailUrl(context, expected, expected.ToString(), out _));
+        Assert.False(reader.TryValidateDetailUrl(context, expected,
+            "https://evil.test/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html?token=private", out _));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Contains("JobId=33", entry.Text);
+        Assert.Contains("Stage=Navigation", entry.Text);
+        Assert.Contains("FinalRequestPath=/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html", entry.Text);
+        Assert.DoesNotContain("private", entry.Text);
+    }
+
+    [Fact]
+    public void Cellphones_detail_validation_rejects_redirect_between_allowed_host_aliases()
+    {
+        var logger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(), logger);
+        var context = new Worker.CatalogReadContext("cellphones", 34) { Stage = Worker.CatalogReadStage.Navigation };
+        var expected = new Uri("https://cellphones.com.vn/macbook-air-m4-13-inch.html");
+
+        Assert.False(reader.TryValidateDetailUrl(context, expected,
+            "https://www.cellphones.com.vn/macbook-air-m4-13-inch.html", out _));
+        Assert.Contains("FinalRequestUri=https://www.cellphones.com.vn/macbook-air-m4-13-inch.html", Assert.Single(logger.Entries).Text);
+    }
+
+    [Fact]
     public async Task Cellphones_route_aborts_and_logs_denied_main_frame_redirect_then_continues_allowed_request()
     {
         var logger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
         var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(), logger);
         var context = new Worker.CatalogReadContext("cellphones", 32) { Stage = Worker.CatalogReadStage.Navigation };
         var frame = Stub.Create<IFrame>((method, _) => method == "get_ParentFrame" ? null : throw new NotSupportedException(method));
-        var requestUrl = "https://evil.test/macbook-neo.html?product_id=125876&token=route-secret";
+        var requestUrl = "https://evil.test/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html?product_id=125876&token=route-secret";
         var request = Stub.Create<IRequest>((method, _) => method switch
         {
             "get_Url" => requestUrl,
@@ -135,19 +167,19 @@ public sealed class CatalogReadDiagnosticsTests
         });
 
         await reader.HandleRouteAsync(route, context,
-            "/macbook-neo.html?product_id=125876&session=card-secret", new SemaphoreSlim(1, 1), default);
+            "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html?product_id=125876&session=card-secret", new SemaphoreSlim(1, 1), default);
         Assert.Equal(1, aborts);
         Assert.Equal(0, continues);
         var entry = Assert.Single(logger.Entries);
         Assert.Contains("JobId=32", entry.Text);
-        Assert.Contains("CardHref=https://www.cellphones.com.vn/macbook-neo.html", entry.Text);
-        Assert.Contains("CardHrefPath=/macbook-neo.html", entry.Text);
-        Assert.Contains("FinalRequestUri=https://evil.test/macbook-neo.html", entry.Text);
-        Assert.Contains("FinalRequestPath=/macbook-neo.html", entry.Text);
+        Assert.Contains("CardHref=https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html", entry.Text);
+        Assert.Contains("CardHrefPath=/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html", entry.Text);
+        Assert.Contains("FinalRequestUri=https://evil.test/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html", entry.Text);
+        Assert.Contains("FinalRequestPath=/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html", entry.Text);
         Assert.DoesNotContain("secret", entry.Text);
 
-        requestUrl = "https://www.cellphones.com.vn/macbook-neo.html?product_id=125876";
-        await reader.HandleRouteAsync(route, context, "/macbook-neo.html", new SemaphoreSlim(1, 1), default);
+        requestUrl = "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html?product_id=125876";
+        await reader.HandleRouteAsync(route, context, "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html", new SemaphoreSlim(1, 1), default);
         Assert.Equal(1, aborts);
         Assert.Equal(1, continues);
 

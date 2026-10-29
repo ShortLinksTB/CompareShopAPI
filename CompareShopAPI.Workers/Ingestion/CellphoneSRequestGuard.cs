@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using CompareShopAPI.Application.Ingestion;
 
@@ -20,6 +21,37 @@ public static class CellphoneSRequestGuard
                 new[] { ".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
         if (path == "/robots.txt" || path == "/laptop/mac.html") return true;
         return System.Text.RegularExpressions.Regex.IsMatch(path, @"^/(?:apple-)?macbook-[a-z0-9-]+\.html$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    }
+
+    internal static string SafeUrlForDiagnostics(string? value, Uri? baseUri = null)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "[missing]";
+        Uri? uri;
+        var hasScheme = System.Text.RegularExpressions.Regex.IsMatch(value, @"^[a-zA-Z][a-zA-Z0-9+.-]*:");
+        if (hasScheme)
+        {
+            if (!Uri.TryCreate(value, UriKind.Absolute, out uri)) return "[invalid-uri]";
+        }
+        else if (baseUri is null || !Uri.TryCreate(baseUri, value, out uri)) return "[invalid-uri]";
+
+        string? productId = null;
+        var productIds = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(pair =>
+            {
+                var separator = pair.IndexOf('=');
+                var key = Uri.UnescapeDataString(separator < 0 ? pair : pair[..separator].Replace('+', ' '));
+                if (!string.Equals(key, "product_id", StringComparison.Ordinal)) return null;
+                var rawValue = separator < 0 ? string.Empty : pair[(separator + 1)..].Replace('+', ' ');
+                return Uri.UnescapeDataString(rawValue);
+            })
+            .Where(id => id is not null)
+            .ToArray();
+        if (productIds.Length == 1 && int.TryParse(productIds[0], NumberStyles.None, CultureInfo.InvariantCulture, out var parsedId) && parsedId > 0)
+            productId = productIds[0];
+
+        var safe = new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty, Fragment = string.Empty };
+        safe.Query = productId is null ? string.Empty : $"product_id={Uri.EscapeDataString(productId)}";
+        return safe.Uri.GetLeftPart(UriPartial.Path) + safe.Query;
     }
 
     public static async Task<HttpResponseMessage> SendWithRedirectsAsync(HttpClient client, HttpRequestMessage request, CancellationToken ct)

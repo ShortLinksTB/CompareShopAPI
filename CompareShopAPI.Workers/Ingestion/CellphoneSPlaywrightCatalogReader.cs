@@ -11,7 +11,7 @@ namespace CompareShopAPI.Workers.Ingestion;
 
 public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
 {
-    private static readonly Uri CategoryUri = new("https://www.cellphones.com.vn/laptop/mac.html");
+    private static readonly Uri CategoryUri = CellphoneSListingProvenance.ApprovedListing;
     private const string UserAgent = "CompareShopPriceMonitor/1.0 (+https://giamha.online)";
     private readonly Func<string, HttpClient> robotsClientFactory;
 
@@ -63,10 +63,15 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         page.SetDefaultNavigationTimeout(20_000); page.SetDefaultTimeout(8_000);
         using var gate = new SemaphoreSlim(1, 1);
         string? activeCardHref = null;
-        await page.RouteAsync("**/*", route => HandleRouteAsync(route, context, activeCardHref, gate, ct));
+        CellphoneSListingProvenance? provenance = null;
+        await page.RouteAsync("**/*", route => HandleRouteAsync(route, context, activeCardHref, () => provenance, gate, ct));
         context.Stage = CatalogReadStage.Navigation;
         var response = await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
         context.Stage = CatalogReadStage.AccessCheck;
+        if (response is null || !CellphoneSListingProvenance.TryCreate(new Uri(response.Url), System.Text.Encoding.UTF8.GetString(await response.BodyAsync()), out var extractedProvenance))
+            throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
+        var approvedListing = extractedProvenance!;
+        provenance = approvedListing;
         BhxPlaywrightCatalogReader.EnsureAccessible(response?.Status, page.Url, (await page.Locator("body").InnerTextAsync()).ToLowerInvariant());
         context.Stage = CatalogReadStage.ProductCount;
         var cards = page.Locator(".product-info");
@@ -85,7 +90,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             if (string.IsNullOrWhiteSpace(href) || string.IsNullOrWhiteSpace(name) || price <= 0)
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
             var url = new Uri(CategoryUri, href);
-            if (!CellphoneSRequestGuard.IsAllowedProductPage(url))
+            if (!approvedListing.Contains(url))
             {
                 LogDeniedProductUrl(context, href, null);
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
@@ -114,20 +119,21 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             context.Stage = CatalogReadStage.AccessCheck;
             var detailText = (await page.Locator("body").InnerTextAsync()).ToLowerInvariant();
             BhxPlaywrightCatalogReader.EnsureAccessible(detailResponse?.Status, page.Url, detailText);
-            if (!TryValidateDetailUrl(context, product.Url, page.Url, out var detailUri))
+            if (!TryValidateDetailUrl(context, approvedListing, product.Url, page.Url, out var detailUri))
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
 
             context.Stage = CatalogReadStage.ProductFields;
-            var sku = await ReadPublishedProductIdAsync(page, product.Url, detailUri, product.PriceVnd);
+            var sku = await ReadPublishedProductIdAsync(page, approvedListing, product.Url, detailUri, product.PriceVnd);
             rows.Add(new ScrapedOffer(sku, product.Name, "Apple", product.PriceVnd, product.Url.ToString(), product.ImageUrl,
                 product.OriginalPriceVnd, product.Specifications, product.StockStatus));
         }
         return rows;
     }
 
-    internal async Task HandleRouteAsync(IRoute route, CatalogReadContext context, string? activeCardHref, SemaphoreSlim gate, CancellationToken ct)
+    internal async Task HandleRouteAsync(IRoute route, CatalogReadContext context, string? activeCardHref,
+        Func<CellphoneSListingProvenance?> provenance, SemaphoreSlim gate, CancellationToken ct)
     {
-        if (!Uri.TryCreate(route.Request.Url, UriKind.Absolute, out var uri) || !CellphoneSRequestGuard.IsAllowedProductPage(uri))
+        if (!Uri.TryCreate(route.Request.Url, UriKind.Absolute, out var uri) || !IsRouteAllowed(uri, provenance()))
         {
             if (activeCardHref is not null && route.Request.IsNavigationRequest && route.Request.Frame.ParentFrame is null)
                 LogDeniedProductUrl(context, activeCardHref, route.Request.Url);
@@ -139,12 +145,11 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         finally { gate.Release(); }
     }
 
-    internal bool TryValidateDetailUrl(CatalogReadContext context, Uri expectedUrl, string finalUrl, out Uri detailUri)
+    internal bool TryValidateDetailUrl(CatalogReadContext context, CellphoneSListingProvenance provenance, Uri expectedUrl, string finalUrl, out Uri detailUri)
     {
         if (!Uri.TryCreate(finalUrl, UriKind.Absolute, out var parsedUri) || parsedUri is null ||
-            !CellphoneSRequestGuard.IsAllowedProductPage(parsedUri) ||
-            !string.Equals(parsedUri.IdnHost, expectedUrl.IdnHost, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(parsedUri.AbsolutePath, expectedUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+            !provenance.Contains(expectedUrl) || !provenance.Contains(parsedUri) ||
+            !string.Equals(CellphoneSListingProvenance.Canonicalize(parsedUri), CellphoneSListingProvenance.Canonicalize(expectedUrl), StringComparison.Ordinal))
         {
             detailUri = expectedUrl;
             LogDeniedProductUrl(context, expectedUrl.ToString(), finalUrl);
@@ -153,6 +158,9 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         detailUri = parsedUri;
         return true;
     }
+
+    private static bool IsRouteAllowed(Uri uri, CellphoneSListingProvenance? provenance) =>
+        CellphoneSRequestGuard.IsAllowedProductPage(uri) || provenance?.Contains(uri) == true;
 
     internal void LogDeniedProductUrl(CatalogReadContext context, string? cardHref, string? finalUri)
     {
@@ -164,7 +172,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafePathForDiagnostics(finalUri, CategoryUri));
     }
 
-    private static async Task<string> ReadPublishedProductIdAsync(IPage page, Uri expectedUrl, Uri detailUrl, int listingPrice)
+    private static async Task<string> ReadPublishedProductIdAsync(IPage page, CellphoneSListingProvenance provenance, Uri expectedUrl, Uri detailUrl, int listingPrice)
     {
         var variants = page.Locator("li.item-variant[data-product-id]");
         var count = await variants.CountAsync();
@@ -183,7 +191,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             rows.Add(new CellphoneSProductVariant(id, href, price, active));
         }
 
-        return CellphoneSProductIdentity.Resolve(expectedUrl, listingPrice, rows, detailUrl);
+        return CellphoneSProductIdentity.Resolve(provenance, expectedUrl, listingPrice, rows, detailUrl);
     }
 
     private static HttpClient CreateRobotsClient(string proxyAddress)
@@ -240,12 +248,12 @@ internal sealed record CellphoneSProductVariant(string? Id, string? Href, int Pr
 
 internal static class CellphoneSProductIdentity
 {
-    internal static string Resolve(Uri expectedUrl, int listingPrice, IReadOnlyList<CellphoneSProductVariant> variants, Uri? finalUrl = null)
+    internal static string Resolve(CellphoneSListingProvenance? provenance, Uri expectedUrl, int listingPrice,
+        IReadOnlyList<CellphoneSProductVariant> variants, Uri? finalUrl = null)
     {
         finalUrl ??= expectedUrl;
-        if (!CellphoneSRequestGuard.IsAllowedProductPage(expectedUrl) ||
-            !CellphoneSRequestGuard.IsAllowedProductPage(finalUrl) ||
-            !string.Equals(finalUrl.AbsolutePath, expectedUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+        if (provenance is null || !provenance.Contains(expectedUrl) || !provenance.Contains(finalUrl) ||
+            !string.Equals(CellphoneSListingProvenance.Canonicalize(finalUrl), CellphoneSListingProvenance.Canonicalize(expectedUrl), StringComparison.Ordinal))
             throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
 
         var listingId = GetUniqueProductId(expectedUrl);
@@ -258,8 +266,8 @@ internal static class CellphoneSProductIdentity
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
 
             if (!Uri.TryCreate(expectedUrl, variant.Href, out var variantUrl) ||
-                !CellphoneSRequestGuard.IsAllowedProductPage(variantUrl) ||
-                !string.Equals(variantUrl.AbsolutePath, expectedUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase) ||
+                !provenance.Contains(variantUrl) ||
+                !string.Equals(CellphoneSListingProvenance.Canonicalize(variantUrl), CellphoneSListingProvenance.Canonicalize(expectedUrl), StringComparison.Ordinal) ||
                 !string.Equals(GetUniqueProductId(variantUrl), variant.Id, StringComparison.Ordinal))
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
         }

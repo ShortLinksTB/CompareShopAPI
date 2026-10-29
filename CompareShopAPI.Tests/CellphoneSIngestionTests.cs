@@ -64,9 +64,10 @@ public sealed class CellphoneSIngestionTests
     [Fact]
     public async Task Product_path_is_limited_and_redirect_targets_are_revalidated()
     {
-        Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/laptop/mac.html")));
-        Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/macbook-air-m4-13-inch.html")));
-        Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html")));
+        Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/laptop/mac.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/laptop/mac.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/macbook-air-m4-13-inch.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html/extra")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.php")));
@@ -81,9 +82,43 @@ public sealed class CellphoneSIngestionTests
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cdn.cellphones.com.vn/images/macbook.js")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/admin")));
         Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cdn2.cellphones.com.vn/images/mac.jpg")));
+        var provenance = CreateProvenance("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html");
         using var client = new HttpClient(new StubHandler(new HttpResponseMessage(HttpStatusCode.Redirect) { Headers = { Location = new Uri("https://evil.test/redirect") } }));
         using var request = new HttpRequestMessage(HttpMethod.Get, "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html");
-        await Assert.ThrowsAsync<SourceRedirectDeniedException>(() => WorkerIngestion.CellphoneSRequestGuard.SendWithRedirectsAsync(client, request, default));
+        await Assert.ThrowsAsync<SourceRedirectDeniedException>(() => WorkerIngestion.CellphoneSRequestGuard.SendWithRedirectsAsync(client, request, provenance.Contains, default));
+    }
+
+    [Fact]
+    public async Task Mac_mini_href_requires_product_card_provenance_from_exact_listing_response()
+    {
+        const string m6 = "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html";
+        const string m4 = "https://cellphones.com.vn/apple-macmini-m4-10cpu-10gpu-24gb-256gb-2024-z1cf.html";
+        var provenance = CreateProvenance(m6, m4);
+
+        Assert.True(provenance.Contains(new Uri(m6 + "?utm_source=card")));
+        Assert.True(provenance.Contains(new Uri(m4)));
+        Assert.False(provenance.Contains(new Uri("https://cellphones.com.vn/apple-macmini-m4-guessed.html")));
+        Assert.False(provenance.Contains(new Uri("https://www.cellphones.com.vn/" + m6.Split('/').Last())));
+
+        var scriptAndMultipleLinks = "<script>" +
+            "<div class='product-info'><a href='https://cellphones.com.vn/script-guessed.html'></a></div>" +
+            "</script><div class='product-info'><a href='" + m6 + "'></a><a href='https://cellphones.com.vn/card-guessed.html'></a></div>";
+        Assert.True(WorkerIngestion.CellphoneSListingProvenance.TryCreate(new Uri("https://cellphones.com.vn/laptop/mac.html"), scriptAndMultipleLinks, out var parsed));
+        Assert.True(parsed!.Contains(new Uri(m6)));
+        Assert.False(parsed.Contains(new Uri("https://cellphones.com.vn/script-guessed.html")));
+        Assert.False(parsed.Contains(new Uri("https://cellphones.com.vn/card-guessed.html")));
+
+        var nonCard = "<div class='navigation'><a href='" + m6 + "'></a></div>";
+        Assert.False(WorkerIngestion.CellphoneSListingProvenance.TryCreate(new Uri("https://cellphones.com.vn/laptop/mac.html"), nonCard, out _));
+        Assert.False(WorkerIngestion.CellphoneSListingProvenance.TryCreate(new Uri("https://cellphones.com.vn/laptop/windows.html"),
+            "<div class='product-info'><a href='" + m6 + "'></a></div>", out _));
+        Assert.False(WorkerIngestion.CellphoneSListingProvenance.TryCreate(new Uri("http://cellphones.com.vn/laptop/mac.html"),
+            "<div class='product-info'><a href='" + m6 + "'></a></div>", out _));
+
+        using var downgradeClient = new HttpClient(new StubHandler(new HttpResponseMessage(HttpStatusCode.Redirect)
+            { Headers = { Location = new Uri("http://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html") } }));
+        using var request = new HttpRequestMessage(HttpMethod.Get, m6);
+        await Assert.ThrowsAsync<SourceRedirectDeniedException>(() => WorkerIngestion.CellphoneSRequestGuard.SendWithRedirectsAsync(downgradeClient, request, provenance.Contains, default));
     }
 
     [Fact]
@@ -151,6 +186,13 @@ public sealed class CellphoneSIngestionTests
     private sealed class StubHandler(HttpResponseMessage response) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(response);
+    }
+
+    private static WorkerIngestion.CellphoneSListingProvenance CreateProvenance(params string[] hrefs)
+    {
+        var html = string.Join(string.Empty, hrefs.Select(href => "<div class='product-info'><a href='" + href + "'></a></div>"));
+        Assert.True(WorkerIngestion.CellphoneSListingProvenance.TryCreate(new Uri("https://cellphones.com.vn/laptop/mac.html"), html, out var provenance));
+        return provenance!;
     }
 
     private sealed class EmptyReader : CompareShopAPI.Application.Ingestion.ISourceCatalogReader { }

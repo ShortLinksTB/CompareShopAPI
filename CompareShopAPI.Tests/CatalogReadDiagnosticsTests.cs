@@ -12,6 +12,15 @@ namespace CompareShopAPI.Tests;
 
 public sealed class CatalogReadDiagnosticsTests
 {
+    private static readonly Worker.CellphoneSListingProvenance MacMiniProvenance = CreateProvenance(
+        "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html");
+
+    private static Worker.CellphoneSListingProvenance CreateProvenance(params string[] hrefs)
+    {
+        var html = string.Join(string.Empty, hrefs.Select(href => $"<div class='product-info'><a href='{href}'></a></div>"));
+        Assert.True(Worker.CellphoneSListingProvenance.TryCreate(new Uri("https://cellphones.com.vn/laptop/mac.html"), html, out var provenance));
+        return provenance!;
+    }
     [Fact]
     public async Task Cellphones_logs_safe_failure_and_preserves_exception()
     {
@@ -87,21 +96,22 @@ public sealed class CatalogReadDiagnosticsTests
         var logger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
         var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(), logger);
         var context = new Worker.CatalogReadContext("cellphones", 31) { Stage = Worker.CatalogReadStage.ProductFields };
-        var expectedUrl = new Uri("https://www.cellphones.com.vn/macbook-neo.html?product_id=125876&session=card-secret");
+        var expectedUrl = new Uri("https://cellphones.com.vn/macbook-neo.html?product_id=125876&session=card-secret");
+        var provenance = CreateProvenance(expectedUrl.ToString());
 
-        Assert.False(reader.TryValidateDetailUrl(context, expectedUrl,
-            "https://www.cellphones.com.vn/macbook-pro.html?product_id=125876&token=redirect-secret#private", out _));
-        Assert.True(reader.TryValidateDetailUrl(context, expectedUrl,
-            "https://www.cellphones.com.vn/macbook-neo.html?product_id=125876&token=not-logged", out var finalUri));
+        Assert.False(reader.TryValidateDetailUrl(context, provenance, expectedUrl,
+            "https://cellphones.com.vn/macbook-pro.html?product_id=125876&token=redirect-secret#private", out _));
+        Assert.True(reader.TryValidateDetailUrl(context, provenance, expectedUrl,
+            "https://cellphones.com.vn/macbook-neo.html?product_id=125876&token=not-logged", out var finalUri));
         Assert.Equal(expectedUrl.AbsolutePath, finalUri.AbsolutePath);
 
         var entry = Assert.Single(logger.Entries);
         Assert.Contains("Source=cellphones", entry.Text);
         Assert.Contains("JobId=31", entry.Text);
         Assert.Contains("Stage=ProductFields", entry.Text);
-        Assert.Contains("CardHref=https://www.cellphones.com.vn/macbook-neo.html", entry.Text);
+        Assert.Contains("CardHref=https://cellphones.com.vn/macbook-neo.html", entry.Text);
         Assert.Contains("CardHrefPath=/macbook-neo.html", entry.Text);
-        Assert.Contains("FinalRequestUri=https://www.cellphones.com.vn/macbook-pro.html", entry.Text);
+        Assert.Contains("FinalRequestUri=https://cellphones.com.vn/macbook-pro.html", entry.Text);
         Assert.Contains("FinalRequestPath=/macbook-pro.html", entry.Text);
         Assert.DoesNotContain("card-secret", entry.Text);
         Assert.DoesNotContain("redirect-secret", entry.Text);
@@ -117,8 +127,8 @@ public sealed class CatalogReadDiagnosticsTests
         var context = new Worker.CatalogReadContext("cellphones", 33) { Stage = Worker.CatalogReadStage.Navigation };
         var expected = new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html");
 
-        Assert.True(reader.TryValidateDetailUrl(context, expected, expected.ToString(), out _));
-        Assert.False(reader.TryValidateDetailUrl(context, expected,
+        Assert.True(reader.TryValidateDetailUrl(context, MacMiniProvenance, expected, expected.ToString(), out _));
+        Assert.False(reader.TryValidateDetailUrl(context, MacMiniProvenance, expected,
             "https://evil.test/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html?token=private", out _));
 
         var entry = Assert.Single(logger.Entries);
@@ -136,7 +146,7 @@ public sealed class CatalogReadDiagnosticsTests
         var context = new Worker.CatalogReadContext("cellphones", 34) { Stage = Worker.CatalogReadStage.Navigation };
         var expected = new Uri("https://cellphones.com.vn/macbook-air-m4-13-inch.html");
 
-        Assert.False(reader.TryValidateDetailUrl(context, expected,
+        Assert.False(reader.TryValidateDetailUrl(context, CreateProvenance(expected.ToString()), expected,
             "https://www.cellphones.com.vn/macbook-air-m4-13-inch.html", out _));
         Assert.Contains("FinalRequestUri=https://www.cellphones.com.vn/macbook-air-m4-13-inch.html", Assert.Single(logger.Entries).Text);
     }
@@ -167,7 +177,7 @@ public sealed class CatalogReadDiagnosticsTests
         });
 
         await reader.HandleRouteAsync(route, context,
-            "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html?product_id=125876&session=card-secret", new SemaphoreSlim(1, 1), default);
+            "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html?product_id=125876&session=card-secret", () => MacMiniProvenance, new SemaphoreSlim(1, 1), default);
         Assert.Equal(1, aborts);
         Assert.Equal(0, continues);
         var entry = Assert.Single(logger.Entries);
@@ -179,7 +189,7 @@ public sealed class CatalogReadDiagnosticsTests
         Assert.DoesNotContain("secret", entry.Text);
 
         requestUrl = "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html?product_id=125876";
-        await reader.HandleRouteAsync(route, context, "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html", new SemaphoreSlim(1, 1), default);
+        await reader.HandleRouteAsync(route, context, "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html", () => MacMiniProvenance, new SemaphoreSlim(1, 1), default);
         Assert.Equal(1, aborts);
         Assert.Equal(1, continues);
 
@@ -234,14 +244,20 @@ public sealed class CatalogReadDiagnosticsTests
         });
         // Locator properties return the same bounded fixture; no browser/network is used.
         ((Stub)(object)locator).Self = locator;
-        var response = Stub.Create<IResponse>((method, _) => method == "get_Status" ? 200 : throw new NotSupportedException(method));
+        var response = Stub.Create<IResponse>((method, _) => method switch
+        {
+            "get_Status" => 200,
+            "get_Url" => "https://cellphones.com.vn/laptop/mac.html",
+            "BodyAsync" => Task.FromResult(System.Text.Encoding.UTF8.GetBytes("<div class='product-info'><a href='https://cellphones.com.vn/macbook-neo.html'></a></div>")),
+            _ => throw new NotSupportedException(method)
+        });
         var page = Stub.Create<IPage>((method, args) => method switch
         {
             "SetDefaultNavigationTimeout" or "SetDefaultTimeout" => null,
             "RouteAsync" => Task.CompletedTask,
             "GotoAsync" when stage == "Navigation" => throw failure,
             "GotoAsync" => Task.FromResult<IResponse?>(response),
-            "get_Url" => bhx ? "https://www.bachhoaxanh.com/bia" : "https://www.cellphones.com.vn/laptop/mac.html",
+            "get_Url" => bhx ? "https://www.bachhoaxanh.com/bia" : "https://cellphones.com.vn/laptop/mac.html",
             "Locator" when stage == "ProductCount" && (string)args![0]! != "body" => throw failure,
             "Locator" => locator,
             _ => throw new NotSupportedException(method)

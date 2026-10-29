@@ -77,7 +77,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         var cards = page.Locator(".product-info");
         var count = await cards.CountAsync();
         if (count is < 1 or > 300) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductCountInvalid);
-        var rows = new List<ScrapedOffer>(count);
+        var categoryProducts = new List<CellphoneSCategoryProduct>(count);
         context.Stage = CatalogReadStage.ProductFields;
         for (var i = 0; i < count; i++)
         {
@@ -86,24 +86,67 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             var anchor = card.Locator("a[href]").First;
             var href = await anchor.GetAttributeAsync("href");
             var name = (await card.Locator(".product__name").First.InnerTextAsync()).Trim();
-            var sku = await card.GetAttributeAsync("data-product-id") ?? await card.GetAttributeAsync("data-sku");
-            var priceText = await card.Locator(".product__price, .price").First.InnerTextAsync();
-            var price = ParsePrice(priceText);
-            if (string.IsNullOrWhiteSpace(sku) || string.IsNullOrWhiteSpace(href) || string.IsNullOrWhiteSpace(name) || price <= 0)
+            var price = ParsePrice(await card.Locator(".product__price--show").First.InnerTextAsync());
+            if (string.IsNullOrWhiteSpace(href) || string.IsNullOrWhiteSpace(name) || price <= 0)
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
             var url = new Uri(CategoryUri, href);
             if (!CellphoneSRequestGuard.IsAllowedProductPage(url)) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
             var image = await card.Locator("img").First.GetAttributeAsync("src") ?? await card.Locator("img").First.GetAttributeAsync("data-src");
             var imageUrl = image is null ? null : new Uri(CategoryUri, image).ToString();
             if (imageUrl is not null && !CellphoneSRequestGuard.IsAllowed(new Uri(imageUrl))) imageUrl = null;
-            var original = ParsePriceOrNull(await OptionalTextAsync(card.Locator(".product__price-old, .price-old, del").First));
+            var original = ParsePriceOrNull(await OptionalTextAsync(card.Locator(".product__price--through").First));
             var text = (await card.InnerTextAsync()).ToLowerInvariant();
             var stock = text.Contains("sắp về hàng") || text.Contains("sắp về") ? "coming_soon" : text.Contains("hết hàng") ? "out_of_stock" : text.Contains("còn hàng") ? "in_stock" : "unknown";
             var specs = ParseSpecifications(await card.InnerTextAsync());
-            rows.Add(new ScrapedOffer(sku, name, "Apple", price, url.ToString(), imageUrl, original, specs, stock));
+            categoryProducts.Add(new CellphoneSCategoryProduct(name, price, url, imageUrl, original, specs, stock));
             await Task.Delay(500, ct);
         }
+
+        var rows = new List<ScrapedOffer>(categoryProducts.Count);
+        foreach (var product in categoryProducts)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (IsDisallowed(robotsText, product.Url.AbsolutePath))
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
+
+            context.Stage = CatalogReadStage.Navigation;
+            var detailResponse = await page.GotoAsync(product.Url.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
+            context.Stage = CatalogReadStage.AccessCheck;
+            var detailText = (await page.Locator("body").InnerTextAsync()).ToLowerInvariant();
+            BhxPlaywrightCatalogReader.EnsureAccessible(detailResponse?.Status, page.Url, detailText);
+            if (!Uri.TryCreate(page.Url, UriKind.Absolute, out var detailUri) ||
+                !CellphoneSRequestGuard.IsAllowedProductPage(detailUri) ||
+                !string.Equals(detailUri.AbsolutePath, product.Url.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
+
+            context.Stage = CatalogReadStage.ProductFields;
+            var sku = await ReadPublishedProductIdAsync(page, product.Url, product.PriceVnd);
+            rows.Add(new ScrapedOffer(sku, product.Name, "Apple", product.PriceVnd, product.Url.ToString(), product.ImageUrl,
+                product.OriginalPriceVnd, product.Specifications, product.StockStatus));
+        }
         return rows;
+    }
+
+    private static async Task<string> ReadPublishedProductIdAsync(IPage page, Uri expectedUrl, int listingPrice)
+    {
+        var variants = page.Locator("li.item-variant[data-product-id]");
+        var count = await variants.CountAsync();
+        if (count is < 1 or > 100) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+
+        var rows = new List<CellphoneSProductVariant>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var variant = variants.Nth(i);
+            var id = await variant.GetAttributeAsync("data-product-id");
+            var active = ((await variant.GetAttributeAsync("class")) ?? string.Empty)
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("active", StringComparer.Ordinal);
+            var href = await variant.Locator("a[href]").First.GetAttributeAsync("href");
+            var priceText = await OptionalTextAsync(variant.Locator(".item-variant-price").First);
+            var price = ParsePrice(priceText);
+            rows.Add(new CellphoneSProductVariant(id, href, price, active));
+        }
+
+        return CellphoneSProductIdentity.Resolve(expectedUrl, listingPrice, rows);
     }
 
     private static HttpClient CreateRobotsClient(string proxyAddress)
@@ -144,5 +187,53 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     {
         try { return await locator.InnerTextAsync(new() { Timeout = 1000 }); }
         catch (PlaywrightException) { return null; }
+    }
+}
+
+internal sealed record CellphoneSCategoryProduct(
+    string Name,
+    int PriceVnd,
+    Uri Url,
+    string? ImageUrl,
+    int? OriginalPriceVnd,
+    IReadOnlyDictionary<string, string> Specifications,
+    string StockStatus);
+
+internal sealed record CellphoneSProductVariant(string? Id, string? Href, int PriceVnd, bool IsActive);
+
+internal static class CellphoneSProductIdentity
+{
+    internal static string Resolve(Uri expectedUrl, int listingPrice, IReadOnlyList<CellphoneSProductVariant> variants)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var variant in variants)
+        {
+            if (!int.TryParse(variant.Id, NumberStyles.None, CultureInfo.InvariantCulture, out var numericId) || numericId <= 0 ||
+                string.IsNullOrWhiteSpace(variant.Href) || variant.PriceVnd <= 0 || !ids.Add(variant.Id!))
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+
+            if (!Uri.TryCreate(expectedUrl, variant.Href, out var variantUrl) ||
+                !CellphoneSRequestGuard.IsAllowedProductPage(variantUrl) ||
+                !string.Equals(variantUrl.AbsolutePath, expectedUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(GetProductId(variantUrl), variant.Id, StringComparison.Ordinal))
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+        }
+
+        var active = variants.Where(variant => variant.IsActive).ToArray();
+        if (active.Length != 1 || active[0].PriceVnd != listingPrice)
+            throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+        return active[0].Id!;
+    }
+
+    private static string? GetProductId(Uri uri)
+    {
+        foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separator = pair.IndexOf('=');
+            if (separator < 0) continue;
+            if (Uri.UnescapeDataString(pair[..separator]) == "product_id")
+                return Uri.UnescapeDataString(pair[(separator + 1)..]);
+        }
+        return null;
     }
 }

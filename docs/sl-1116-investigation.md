@@ -5,6 +5,11 @@ Runtime image: `ghcr.io/shortlinkstb/compareshop-api-workers:f05129bb4245b7d9943
 
 ## Verified observations
 
+Same-service repair probe through the existing exact-host guards/proxy (2026-10-29):
+
+- CellphoneS `/robots.txt`, `/laptop/mac.html`, and the linked MacBook Neo detail page were permitted. The category card published `.product__price--show` (`18.790.000đ`) and `.product__price--through` (`19.490.000đ`). Its linked detail response published four `li.item-variant[data-product-id]` rows; the active `125876` variant's link query and price (`18.790.000₫`) matched the category listing. The parser fixture `CompareShopAPI.Tests/Fixtures/cellphones-macbook-neo-2026-10-29.json` records these source-derived fields and provenance. The detail page also published a slug-like JSON-LD `sku`; the repair deliberately does not use it.
+- BHX `/robots.txt` allowed `/bia`; the exact approved `www.bachhoaxanh.com/bia` response was HTTP 200 (102,851 bytes, SHA-256 `b61cc30ca1cca032bbadd7d9149a56b22108f3b9de069805e77b79145c74119f`). That same-host HTML contains references to `bhxcdn.vn`, but no product card/ID tokens from the current parser (`data-product-code`, `data-product-id`, `productCode`, `productId`, `sku`, or `product_name`). No request was sent to `bhxcdn.vn`. The response therefore does not provide a permitted product fixture or establish that allowing the CDN would fix ingestion; BHX remains fail-closed pending an approved data/rendering strategy.
+
 Read-only Worker logs in `compareshop-dev`, since 10:20 UTC:
 
 - BHX: `Reason=ProductCountInvalid; ExceptionType=System.IO.InvalidDataException`.

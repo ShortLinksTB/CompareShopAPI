@@ -18,11 +18,7 @@ public static class CellphoneSRequestGuard
         if (uri.IdnHost is "cdn.cellphones.com.vn" or "cdn2.cellphones.com.vn")
             return (path.StartsWith("/images/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/media/", StringComparison.OrdinalIgnoreCase)) &&
                 new[] { ".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
-        if (path == "/robots.txt" || path == "/laptop/mac.html") return true;
-        if (string.Equals(uri.IdnHost, "cellphones.com.vn", StringComparison.OrdinalIgnoreCase) &&
-            System.Text.RegularExpressions.Regex.IsMatch(path, @"^/mac-mini-[a-z0-9]+(?:-[a-z0-9]+)*\.html$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
-            return true;
-        return System.Text.RegularExpressions.Regex.IsMatch(path, @"^/(?:apple-)?macbook-[a-z0-9-]+\.html$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        return path == "/robots.txt" || CellphoneSListingProvenance.IsExactListing(uri);
     }
 
     internal static string SafeUrlForDiagnostics(string? value, Uri? baseUri = null)
@@ -49,8 +45,11 @@ public static class CellphoneSRequestGuard
     }
 
     public static async Task<HttpResponseMessage> SendWithRedirectsAsync(HttpClient client, HttpRequestMessage request, CancellationToken ct)
+        => await SendWithRedirectsAsync(client, request, IsAllowedProductPage, ct);
+
+    internal static async Task<HttpResponseMessage> SendWithRedirectsAsync(HttpClient client, HttpRequestMessage request, Func<Uri, bool> authorize, CancellationToken ct)
     {
-        if (request.Method != HttpMethod.Get || !IsAllowedProductPage(request.RequestUri)) throw new InvalidDataException("CellphoneS request is not approved.");
+        if (request.Method != HttpMethod.Get || request.RequestUri is null || !authorize(request.RequestUri)) throw new InvalidDataException("CellphoneS request is not approved.");
         var uri = request.RequestUri!;
         for (var redirects = 0; ; redirects++)
         {
@@ -65,7 +64,7 @@ public static class CellphoneSRequestGuard
             var destination = location.IsAbsoluteUri ? location : new Uri(uri, location);
             var status = (int)response.StatusCode;
             response.Dispose();
-            if (!IsAllowedProductPage(destination)) throw new SourceRedirectDeniedException(status);
+            if (!authorize(destination)) throw new SourceRedirectDeniedException(status);
             uri = destination;
         }
     }

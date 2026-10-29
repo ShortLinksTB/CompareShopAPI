@@ -17,6 +17,14 @@ public sealed class CellphoneSProductParserTests
     private static readonly Fixture SourceFixture = JsonSerializer.Deserialize<Fixture>(
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "cellphones-macbook-neo-2026-10-29.json")),
         new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+    private static readonly Worker.CellphoneSListingProvenance ApprovedProvenance = CreateProvenance(SourceFixture.ProductUrl);
+
+    private static Worker.CellphoneSListingProvenance CreateProvenance(params string[] hrefs)
+    {
+        var html = string.Join(string.Empty, hrefs.Select(href => $"<div class='product-info'><a href='{href}'></a></div>"));
+        Assert.True(Worker.CellphoneSListingProvenance.TryCreate(new Uri("https://cellphones.com.vn/laptop/mac.html"), html, out var provenance));
+        return provenance!;
+    }
 
     [Fact]
     public void Captured_source_fixture_resolves_the_matching_published_variant_id()
@@ -26,11 +34,21 @@ public sealed class CellphoneSProductParserTests
         var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
             variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
 
-        var sourceId = Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+        var sourceId = Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, new Uri(SourceFixture.ProductUrl),
             Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(SourceFixture.CategoryProduct.CurrentPriceText), variants);
 
         Assert.Equal("125876", sourceId);
         Assert.NotEqual(SourceFixture.PublishedProductJsonLdSku, sourceId);
+    }
+
+    [Fact]
+    public void Product_identity_requires_listing_provenance()
+    {
+        var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
+            variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
+
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(null, new Uri(SourceFixture.ProductUrl),
+            18_790_000, variants));
     }
 
     [Fact]
@@ -69,13 +87,19 @@ public sealed class CellphoneSProductParserTests
         var cards = CollectionLocator(productPage);
         var variants = CollectionLocator(activeVariant);
         var gotoCount = 0;
-        var response = CreateProxy<IResponse>((method, _) => method == "get_Status" ? 200 : throw new NotSupportedException(method));
+        var response = CreateProxy<IResponse>((method, _) => method switch
+        {
+            "get_Status" => 200,
+            "get_Url" => "https://cellphones.com.vn/laptop/mac.html",
+            "BodyAsync" => Task.FromResult(System.Text.Encoding.UTF8.GetBytes($"<div class='product-info'><a href='{SourceFixture.ProductUrl}'></a></div>")),
+            _ => throw new NotSupportedException(method)
+        });
         var page = CreateProxy<IPage>((method, args) => method switch
         {
             "SetDefaultNavigationTimeout" or "SetDefaultTimeout" => null,
             "RouteAsync" => Task.CompletedTask,
             "GotoAsync" => GotoResponse(response, ref gotoCount),
-            "get_Url" => gotoCount < 2 ? SourceFixture.CategoryUrl : SourceFixture.ProductUrl,
+            "get_Url" => gotoCount < 2 ? "https://cellphones.com.vn/laptop/mac.html" : SourceFixture.ProductUrl,
             "Locator" => (string)args![0]! switch
             {
                 "body" => TextLocator("Mac catalog"),
@@ -119,14 +143,14 @@ public sealed class CellphoneSProductParserTests
         var active = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
             variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
 
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(expectedUrl, 18_790_000,
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, expectedUrl, 18_790_000,
             active.Select(row => row with { Id = row.IsActive ? null : row.Id }).ToArray()));
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(expectedUrl, 18_790_000,
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, expectedUrl, 18_790_000,
             active.Select(row => row with { Href = row.IsActive ? row.Href!.Replace("125876", "125877", StringComparison.Ordinal) : row.Href }).ToArray()));
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(expectedUrl, 18_790_000,
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, expectedUrl, 18_790_000,
             active.Select(row => row with { IsActive = true }).ToArray()));
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(expectedUrl, 18_990_000, active));
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(expectedUrl, 18_790_000,
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, expectedUrl, 18_990_000, active));
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, expectedUrl, 18_790_000,
             active.Select(row => row with { Id = "125876" }).ToArray()));
     }
 
@@ -137,7 +161,7 @@ public sealed class CellphoneSProductParserTests
             variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
         var listingUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125875");
 
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(listingUrl, 18_790_000, variants));
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, listingUrl, 18_790_000, variants));
     }
 
     [Fact]
@@ -147,7 +171,7 @@ public sealed class CellphoneSProductParserTests
             variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
         var finalUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125875");
 
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, new Uri(SourceFixture.ProductUrl),
             18_790_000, variants, finalUrl));
     }
 
@@ -159,7 +183,7 @@ public sealed class CellphoneSProductParserTests
         var listingUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125875");
         var finalUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125876");
 
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(listingUrl,
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, listingUrl,
             18_790_000, variants, finalUrl));
     }
 
@@ -171,9 +195,9 @@ public sealed class CellphoneSProductParserTests
         var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
             variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
 
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl + query),
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, new Uri(SourceFixture.ProductUrl + query),
             18_790_000, variants));
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, new Uri(SourceFixture.ProductUrl),
             18_790_000, variants, new Uri(SourceFixture.ProductUrl + query)));
     }
 
@@ -185,7 +209,7 @@ public sealed class CellphoneSProductParserTests
         var expectedUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125876");
         var finalUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125876");
 
-        Assert.Equal("125876", Worker.CellphoneSProductIdentity.Resolve(expectedUrl, 18_790_000, variants, finalUrl));
+        Assert.Equal("125876", Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, expectedUrl, 18_790_000, variants, finalUrl));
     }
 
     [Fact]
@@ -195,7 +219,7 @@ public sealed class CellphoneSProductParserTests
             variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
         variants[3] = variants[3] with { Href = variants[3].Href + "&product_id=125876" };
 
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, new Uri(SourceFixture.ProductUrl),
             18_790_000, variants));
     }
 
@@ -206,7 +230,7 @@ public sealed class CellphoneSProductParserTests
             variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
         variants[3] = variants[3] with { Href = variants[3].Href!.Replace("125876", "125875", StringComparison.Ordinal) + "&product_id=125876" };
 
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, new Uri(SourceFixture.ProductUrl),
             18_790_000, variants));
     }
 
@@ -216,7 +240,7 @@ public sealed class CellphoneSProductParserTests
     public void Variant_identity_cannot_escape_the_approved_product_url(string href)
     {
         var variants = new[] { new Worker.CellphoneSProductVariant("125876", href, 18_790_000, true) };
-        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl), 18_790_000, variants));
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(ApprovedProvenance, new Uri(SourceFixture.ProductUrl), 18_790_000, variants));
         Assert.False(Worker.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://bhxcdn.vn/macbook.jpg")));
     }
 

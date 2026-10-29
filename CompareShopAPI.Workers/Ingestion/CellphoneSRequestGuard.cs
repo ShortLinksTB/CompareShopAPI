@@ -19,7 +19,10 @@ public static class CellphoneSRequestGuard
             return (path.StartsWith("/images/", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/media/", StringComparison.OrdinalIgnoreCase)) &&
                 new[] { ".avif", ".gif", ".jpeg", ".jpg", ".png", ".webp" }.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
         if (path == "/robots.txt" || path == "/laptop/mac.html") return true;
-        return System.Text.RegularExpressions.Regex.IsMatch(path, @"^/(?:(?:apple-)?macbook-[a-z0-9-]+|mac-mini-[a-z0-9-]+)\.html$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (string.Equals(uri.IdnHost, "cellphones.com.vn", StringComparison.OrdinalIgnoreCase) &&
+            System.Text.RegularExpressions.Regex.IsMatch(path, @"^/mac-mini-[a-z0-9]+(?:-[a-z0-9]+)*\.html$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            return true;
+        return System.Text.RegularExpressions.Regex.IsMatch(path, @"^/(?:apple-)?macbook-[a-z0-9-]+\.html$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
     internal static string SafeUrlForDiagnostics(string? value, Uri? baseUri = null)

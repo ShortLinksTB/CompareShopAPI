@@ -46,6 +46,7 @@ public sealed class CellphoneSIngestionTests
         Assert.DoesNotContain("session-secret", safe);
         Assert.DoesNotContain("private", safe);
         Assert.DoesNotContain("auth-secret", safe);
+        Assert.Equal("[invalid-uri]", WorkerIngestion.CellphoneSRequestGuard.SafePathForDiagnostics("%%%"));
     }
 
     [Fact]

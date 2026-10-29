@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<coverage line-rate="0.92" branch-rate="0.7165" version="1.9" timestamp="1793273979" lines-covered="5935" lines-valid="6451" branches-covered="1413" branches-valid="1972">
+<coverage line-rate="0.9196" branch-rate="0.718" version="1.9" timestamp="1793279817" lines-covered="5955" lines-valid="6475" branches-covered="1436" branches-valid="2000">
   <sources>
-    <source>/home/thaibao/multica_workspaces_desktop-api.multica.ai/andy-s-shor-09d127316844/sl-1120-5cff3227675a/workdir/CompareShopAPI/</source>
+    <source>/home/thaibao/multica_workspaces_desktop-api.multica.ai/andy-s-shor-09d127316844/sl-1116-e7ff0214d594/workdir/CompareShopAPI/</source>
   </sources>
   <packages>
     <package name="CompareShopAPI.Application" line-rate="0.9786" branch-rate="0.746" complexity="534">
@@ -6528,7 +6528,7 @@
             <line number="119" hits="34" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__XmlComment" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="1" complexity="10">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__XmlComment" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="1" complexity="10">
           <methods>
             <method name="get_Summary" signature="()" line-rate="0" branch-rate="1" complexity="1">
               <lines>
@@ -6575,7 +6575,7 @@
                 <line number="55" hits="0" branch="False" />
               </lines>
             </method>
-            <method name=".ctor" signature="(System.String,System.String,System.String,System.String,System.String,System.Boolean,System.Collections.Generic.List`1&lt;System.String&gt;,System.Collections.Generic.List`1&lt;Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__XmlParameterComment&gt;,System.Collections.Generic.List`1&lt;Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__XmlResponseComment&gt;)" line-rate="0" branch-rate="1" complexity="1">
+            <method name=".ctor" signature="(System.String,System.String,System.String,System.String,System.String,System.Boolean,System.Collections.Generic.List`1&lt;System.String&gt;,System.Collections.Generic.List`1&lt;Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__XmlParameterComment&gt;,System.Collections.Generic.List`1&lt;Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__XmlResponseComment&gt;)" line-rate="0" branch-rate="1" complexity="1">
               <lines>
                 <line number="46" hits="0" branch="False" />
               </lines>
@@ -6594,7 +6594,7 @@
             <line number="46" hits="0" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__XmlParameterComment" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="1" complexity="1">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__XmlParameterComment" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="1" complexity="1">
           <methods>
             <method name="get_Name" signature="()" line-rate="0" branch-rate="1" complexity="1">
               <lines>
@@ -6606,7 +6606,7 @@
             <line number="58" hits="0" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__XmlResponseComment" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="1" complexity="1">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__XmlResponseComment" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="1" complexity="1">
           <methods>
             <method name="get_Code" signature="()" line-rate="0" branch-rate="1" complexity="1">
               <lines>
@@ -6618,7 +6618,7 @@
             <line number="61" hits="0" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__XmlCommentCache" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="1" branch-rate="1" complexity="3">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__XmlCommentCache" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="1" branch-rate="1" complexity="3">
           <methods>
             <method name="get_Cache" signature="()" line-rate="1" branch-rate="1" complexity="2">
               <lines>
@@ -6650,7 +6650,7 @@
             <line number="75" hits="1" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__DocumentationCommentIdHelper" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0.6579999999999999" branch-rate="0.6175999999999999" complexity="68">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__DocumentationCommentIdHelper" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0.6579999999999999" branch-rate="0.6175999999999999" complexity="68">
           <methods>
             <method name="CreateDocumentationId" signature="(System.Type)" line-rate="0.6666" branch-rate="0.5" complexity="2">
               <lines>
@@ -7250,7 +7250,7 @@
             <line number="338" hits="307" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__XmlCommentOperationTransformer" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0.1063" branch-rate="0.09179999999999999" complexity="98">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__XmlCommentOperationTransformer" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0.1063" branch-rate="0.09179999999999999" complexity="98">
           <methods>
             <method name="TransformAsync" signature="(Microsoft.OpenApi.OpenApiOperation,Microsoft.AspNetCore.OpenApi.OpenApiOperationTransformerContext,System.Threading.CancellationToken)" line-rate="0.11810000000000001" branch-rate="0.0978" complexity="92">
               <lines>
@@ -7866,7 +7866,7 @@
             <line number="503" hits="0" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__XmlCommentSchemaTransformer" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0.1739" branch-rate="0.1764" complexity="34">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__XmlCommentSchemaTransformer" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0.1739" branch-rate="0.1764" complexity="34">
           <methods>
             <method name="TransformAsync" signature="(Microsoft.OpenApi.OpenApiSchema,Microsoft.AspNetCore.OpenApi.OpenApiSchemaTransformerContext,System.Threading.CancellationToken)" line-rate="0.1739" branch-rate="0.1764" complexity="34">
               <lines>
@@ -8062,7 +8062,7 @@
             <line number="561" hits="167" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__JsonNodeExtensions" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="0" complexity="2">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__JsonNodeExtensions" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="0" complexity="2">
           <methods>
             <method name="Parse" signature="(System.String)" line-rate="0" branch-rate="0" complexity="2">
               <lines>
@@ -8108,7 +8108,7 @@
             <line number="590" hits="0" branch="False" />
           </lines>
         </class>
-        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__GeneratedServiceCollectionExtensions" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="1" branch-rate="1" complexity="1">
+        <class name="Microsoft.AspNetCore.OpenApi.Generated.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__GeneratedServiceCollectionExtensions" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="1" branch-rate="1" complexity="1">
           <methods>
             <method name="AddOpenApi" signature="(Microsoft.Extensions.DependencyInjection.IServiceCollection)" line-rate="1" branch-rate="1" complexity="1">
               <lines>
@@ -8132,7 +8132,7 @@
             <line number="604" hits="34" branch="False" />
           </lines>
         </class>
-        <class name="System.Runtime.CompilerServices.&lt;OpenApiXmlCommentSupport_generated&gt;F8D0D47430239D364A1A556EB07513AAF5A2559BD1288C2033F158D402D3C9852__InterceptsLocationAttribute" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="1" complexity="1">
+        <class name="System.Runtime.CompilerServices.&lt;OpenApiXmlCommentSupport_generated&gt;FB2E1FAE60C360A7D2793EB0C57270A2AC81ABCB747651DBE42A4BB4271CA8C0E__InterceptsLocationAttribute" filename="CompareShopAPI.Api/obj/Debug/net10.0/Microsoft.AspNetCore.OpenApi.SourceGenerators/Microsoft.AspNetCore.OpenApi.SourceGenerators.XmlCommentGenerator/OpenApiXmlCommentSupport.generated.cs" line-rate="0" branch-rate="1" complexity="1">
           <methods>
             <method name=".ctor" signature="(System.Int32,System.String)" line-rate="0" branch-rate="1" complexity="1">
               <lines>
@@ -20326,7 +20326,7 @@
         </class>
       </classes>
     </package>
-    <package name="CompareShopAPI.Workers" line-rate="0.8495999999999999" branch-rate="0.7412000000000001" complexity="507">
+    <package name="CompareShopAPI.Workers" line-rate="0.8491" branch-rate="0.7458" complexity="536">
       <classes>
         <class name="Program/&lt;&lt;Main&gt;$&gt;d__0" filename="CompareShopAPI.Workers/Program.cs" line-rate="0" branch-rate="0" complexity="2">
           <methods>
@@ -21920,11 +21920,11 @@
           <methods>
             <method name="InvalidData" signature="(CompareShopAPI.Workers.Ingestion.CatalogReadFailure)" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="24" hits="11" branch="False" />
-                <line number="25" hits="11" branch="False" />
-                <line number="26" hits="11" branch="False" />
-                <line number="27" hits="11" branch="False" />
-                <line number="28" hits="11" branch="False" />
+                <line number="24" hits="16" branch="False" />
+                <line number="25" hits="16" branch="False" />
+                <line number="26" hits="16" branch="False" />
+                <line number="27" hits="16" branch="False" />
+                <line number="28" hits="16" branch="False" />
               </lines>
             </method>
             <method name="FormatStack" signature="(System.Exception)" line-rate="1" branch-rate="0.5" complexity="4">
@@ -21954,11 +21954,11 @@
             </method>
           </methods>
           <lines>
-            <line number="24" hits="11" branch="False" />
-            <line number="25" hits="11" branch="False" />
-            <line number="26" hits="11" branch="False" />
-            <line number="27" hits="11" branch="False" />
-            <line number="28" hits="11" branch="False" />
+            <line number="24" hits="16" branch="False" />
+            <line number="25" hits="16" branch="False" />
+            <line number="26" hits="16" branch="False" />
+            <line number="27" hits="16" branch="False" />
+            <line number="28" hits="16" branch="False" />
             <line number="47" hits="20" branch="False" />
             <line number="48" hits="20" branch="False" />
             <line number="49" hits="150" branch="False" />
@@ -22096,23 +22096,23 @@
             </method>
             <method name="ParsePrice" signature="(System.String)" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="165" hits="13" branch="False" />
+                <line number="165" hits="37" branch="False" />
               </lines>
             </method>
             <method name="ParsePriceOrNull" signature="(System.String)" line-rate="1" branch-rate="0.75" complexity="4">
               <lines>
-                <line number="167" hits="14" branch="False" />
-                <line number="168" hits="14" branch="True" condition-coverage="50% (1/2)">
+                <line number="167" hits="38" branch="False" />
+                <line number="168" hits="38" branch="True" condition-coverage="50% (1/2)">
                   <conditions>
                     <condition number="3" type="jump" coverage="50%" />
                   </conditions>
                 </line>
-                <line number="169" hits="14" branch="True" condition-coverage="100% (2/2)">
+                <line number="169" hits="38" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="41" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="170" hits="14" branch="False" />
+                <line number="170" hits="38" branch="False" />
               </lines>
             </method>
             <method name="ParseSpecifications" signature="(System.String)" line-rate="1" branch-rate="1" complexity="8">
@@ -22215,19 +22215,19 @@
               </conditions>
             </line>
             <line number="163" hits="35" branch="False" />
-            <line number="165" hits="13" branch="False" />
-            <line number="167" hits="14" branch="False" />
-            <line number="168" hits="14" branch="True" condition-coverage="50% (1/2)">
+            <line number="165" hits="37" branch="False" />
+            <line number="167" hits="38" branch="False" />
+            <line number="168" hits="38" branch="True" condition-coverage="50% (1/2)">
               <conditions>
                 <condition number="3" type="jump" coverage="50%" />
               </conditions>
             </line>
-            <line number="169" hits="14" branch="True" condition-coverage="100% (2/2)">
+            <line number="169" hits="38" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="41" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="170" hits="14" branch="False" />
+            <line number="170" hits="38" branch="False" />
             <line number="173" hits="2" branch="False" />
             <line number="174" hits="2" branch="False" />
             <line number="175" hits="2" branch="False" />
@@ -22520,7 +22520,7 @@
                 <line number="105" hits="1" branch="False" />
                 <line number="106" hits="5" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
-                    <condition number="5353" type="jump" coverage="100%" />
+                    <condition number="5359" type="jump" coverage="100%" />
                   </conditions>
                 </line>
                 <line number="107" hits="1" branch="False" />
@@ -22557,7 +22557,7 @@
                 <line number="126" hits="1" branch="False" />
                 <line number="127" hits="1" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
-                    <condition number="5803" type="jump" coverage="100%" />
+                    <condition number="5809" type="jump" coverage="100%" />
                   </conditions>
                 </line>
                 <line number="128" hits="1" branch="False" />
@@ -22685,7 +22685,7 @@
             <line number="105" hits="1" branch="False" />
             <line number="106" hits="5" branch="True" condition-coverage="100% (2/2)">
               <conditions>
-                <condition number="5353" type="jump" coverage="100%" />
+                <condition number="5359" type="jump" coverage="100%" />
               </conditions>
             </line>
             <line number="107" hits="1" branch="False" />
@@ -22722,7 +22722,7 @@
             <line number="126" hits="1" branch="False" />
             <line number="127" hits="1" branch="True" condition-coverage="100% (2/2)">
               <conditions>
-                <condition number="5803" type="jump" coverage="100%" />
+                <condition number="5809" type="jump" coverage="100%" />
               </conditions>
             </line>
             <line number="128" hits="1" branch="False" />
@@ -22786,161 +22786,283 @@
           <methods>
             <method name="get_Id" signature="()" line-rate="1" branch-rate="1" complexity="1">
               <lines>
-                <line number="202" hits="197" branch="False" />
+                <line number="202" hits="338" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="202" hits="197" branch="False" />
+            <line number="202" hits="338" branch="False" />
           </lines>
         </class>
-        <class name="CompareShopAPI.Workers.Ingestion.CellphoneSProductIdentity" filename="CompareShopAPI.Workers/Ingestion/CellphoneSPlaywrightCatalogReader.cs" line-rate="0.9285" branch-rate="0.9" complexity="30">
+        <class name="CompareShopAPI.Workers.Ingestion.CellphoneSProductIdentity" filename="CompareShopAPI.Workers/Ingestion/CellphoneSPlaywrightCatalogReader.cs" line-rate="0.8845999999999999" branch-rate="0.862" complexity="59">
           <methods>
-            <method name="Resolve" signature="(System.Uri,System.Int32,System.Collections.Generic.IReadOnlyList`1&lt;CompareShopAPI.Workers.Ingestion.CellphoneSProductVariant&gt;)" line-rate="1" branch-rate="1" complexity="24">
+            <method name="Resolve" signature="(System.Uri,System.Int32,System.Collections.Generic.IReadOnlyList`1&lt;CompareShopAPI.Workers.Ingestion.CellphoneSProductVariant&gt;,System.Uri)" line-rate="0.9642000000000001" branch-rate="0.925" complexity="40">
               <lines>
-                <line number="207" hits="9" branch="False" />
-                <line number="208" hits="9" branch="False" />
-                <line number="209" hits="70" branch="True" condition-coverage="100% (2/2)">
+                <line number="207" hits="15" branch="False" />
+                <line number="208" hits="15" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
-                    <condition number="203" type="jump" coverage="100%" />
+                    <condition number="2" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="210" hits="24" branch="False" />
-                <line number="211" hits="24" branch="True" condition-coverage="100% (10/10)">
+                <line number="209" hits="15" branch="True" condition-coverage="50% (3/6)">
                   <conditions>
-                    <condition number="52" type="jump" coverage="100%" />
-                    <condition number="57" type="jump" coverage="100%" />
-                    <condition number="70" type="jump" coverage="100%" />
-                    <condition number="79" type="jump" coverage="100%" />
-                    <condition number="103" type="jump" coverage="100%" />
+                    <condition number="13" type="jump" coverage="50%" />
+                    <condition number="21" type="jump" coverage="50%" />
+                    <condition number="51" type="jump" coverage="50%" />
                   </conditions>
                 </line>
-                <line number="212" hits="24" branch="False" />
-                <line number="213" hits="1" branch="False" />
-                <line number="215" hits="23" branch="True" condition-coverage="100% (8/8)">
+                <line number="210" hits="15" branch="False" />
+                <line number="211" hits="15" branch="False" />
+                <line number="212" hits="0" branch="False" />
+                <line number="214" hits="15" branch="False" />
+                <line number="215" hits="13" branch="False" />
+                <line number="216" hits="13" branch="False" />
+                <line number="217" hits="113" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
-                    <condition number="126" type="jump" coverage="100%" />
-                    <condition number="135" type="jump" coverage="100%" />
-                    <condition number="156" type="jump" coverage="100%" />
-                    <condition number="187" type="jump" coverage="100%" />
+                    <condition number="286" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="216" hits="23" branch="False" />
-                <line number="217" hits="23" branch="False" />
-                <line number="218" hits="23" branch="False" />
-                <line number="219" hits="4" branch="False" />
-                <line number="220" hits="19" branch="False" />
-                <line number="222" hits="17" branch="False" />
-                <line number="223" hits="4" branch="True" condition-coverage="100% (4/4)">
+                <line number="218" hits="40" branch="False" />
+                <line number="219" hits="40" branch="True" condition-coverage="100% (10/10)">
                   <conditions>
-                    <condition number="268" type="jump" coverage="100%" />
-                    <condition number="291" type="jump" coverage="100%" />
+                    <condition number="129" type="jump" coverage="100%" />
+                    <condition number="134" type="jump" coverage="100%" />
+                    <condition number="148" type="jump" coverage="100%" />
+                    <condition number="158" type="jump" coverage="100%" />
+                    <condition number="183" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="224" hits="2" branch="False" />
-                <line number="225" hits="2" branch="False" />
-                <line number="226" hits="2" branch="False" />
+                <line number="220" hits="40" branch="False" />
+                <line number="221" hits="1" branch="False" />
+                <line number="223" hits="39" branch="True" condition-coverage="100% (8/8)">
+                  <conditions>
+                    <condition number="207" type="jump" coverage="100%" />
+                    <condition number="216" type="jump" coverage="100%" />
+                    <condition number="237" type="jump" coverage="100%" />
+                    <condition number="269" type="jump" coverage="100%" />
+                  </conditions>
+                </line>
+                <line number="224" hits="39" branch="False" />
+                <line number="225" hits="39" branch="False" />
+                <line number="226" hits="39" branch="False" />
+                <line number="227" hits="4" branch="False" />
+                <line number="228" hits="34" branch="False" />
+                <line number="230" hits="32" branch="False" />
+                <line number="231" hits="7" branch="True" condition-coverage="100% (4/4)">
+                  <conditions>
+                    <condition number="353" type="jump" coverage="100%" />
+                    <condition number="376" type="jump" coverage="100%" />
+                  </conditions>
+                </line>
+                <line number="232" hits="2" branch="False" />
+                <line number="233" hits="5" branch="True" condition-coverage="100% (8/8)">
+                  <conditions>
+                    <condition number="386" type="jump" coverage="100%" />
+                    <condition number="403" type="jump" coverage="100%" />
+                    <condition number="406" type="jump" coverage="100%" />
+                    <condition number="436" type="jump" coverage="100%" />
+                  </conditions>
+                </line>
+                <line number="234" hits="5" branch="False" />
+                <line number="235" hits="2" branch="False" />
+                <line number="236" hits="3" branch="False" />
+                <line number="237" hits="3" branch="False" />
               </lines>
             </method>
-            <method name="GetProductId" signature="(System.Uri)" line-rate="0.8" branch-rate="0.5" complexity="6">
+            <method name="GetUniqueProductId" signature="(System.Uri)" line-rate="0.7826000000000001" branch-rate="0.7222" complexity="18">
               <lines>
-                <line number="229" hits="21" branch="False" />
-                <line number="230" hits="84" branch="True" condition-coverage="50% (1/2)">
+                <line number="240" hits="65" branch="False" />
+                <line number="241" hits="65" branch="False" />
+                <line number="242" hits="286" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
-                    <condition number="110" type="jump" coverage="50%" />
+                    <condition number="288" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="231" hits="21" branch="False" />
-                <line number="232" hits="21" branch="False" />
-                <line number="233" hits="21" branch="True" condition-coverage="50% (1/2)">
+                <line number="243" hits="47" branch="False" />
+                <line number="244" hits="47" branch="False" />
+                <line number="245" hits="47" branch="True" condition-coverage="50% (1/2)">
                   <conditions>
-                    <condition number="50" type="jump" coverage="50%" />
+                    <condition number="51" type="jump" coverage="50%" />
                   </conditions>
                 </line>
-                <line number="234" hits="21" branch="True" condition-coverage="50% (1/2)">
+                <line number="246" hits="47" branch="True" condition-coverage="50% (1/2)">
                   <conditions>
                     <condition number="81" type="jump" coverage="50%" />
                   </conditions>
                 </line>
-                <line number="235" hits="21" branch="False" />
-                <line number="236" hits="0" branch="False" />
-                <line number="237" hits="0" branch="False" />
-                <line number="238" hits="21" branch="False" />
+                <line number="247" hits="0" branch="False" />
+                <line number="250" hits="141" branch="False" />
+                <line number="251" hits="0" branch="False" />
+                <line number="252" hits="47" branch="True" condition-coverage="100% (2/2)">
+                  <conditions>
+                    <condition number="142" type="jump" coverage="100%" />
+                  </conditions>
+                </line>
+                <line number="254" hits="47" branch="True" condition-coverage="100% (4/4)">
+                  <conditions>
+                    <condition number="150" type="jump" coverage="100%" />
+                    <condition number="164" type="jump" coverage="100%" />
+                  </conditions>
+                </line>
+                <line number="255" hits="3" branch="False" />
+                <line number="256" hits="44" branch="False" />
+                <line number="257" hits="44" branch="True" condition-coverage="50% (1/2)">
+                  <conditions>
+                    <condition number="199" type="jump" coverage="50%" />
+                  </conditions>
+                </line>
+                <line number="258" hits="0" branch="False" />
+                <line number="259" hits="132" branch="False" />
+                <line number="260" hits="0" branch="False" />
+                <line number="261" hits="44" branch="True" condition-coverage="50% (2/4)">
+                  <conditions>
+                    <condition number="253" type="jump" coverage="50%" />
+                    <condition number="270" type="jump" coverage="50%" />
+                  </conditions>
+                </line>
+                <line number="262" hits="0" branch="False" />
+                <line number="263" hits="44" branch="False" />
+                <line number="264" hits="62" branch="False" />
+                <line number="265" hits="62" branch="False" />
+              </lines>
+            </method>
+            <method name="HasValidEscapes" signature="(System.String)" line-rate="1" branch-rate="1" complexity="1">
+              <lines>
+                <line number="267" hits="91" branch="False" />
               </lines>
             </method>
           </methods>
           <lines>
-            <line number="207" hits="9" branch="False" />
-            <line number="208" hits="9" branch="False" />
-            <line number="209" hits="70" branch="True" condition-coverage="100% (2/2)">
+            <line number="207" hits="15" branch="False" />
+            <line number="208" hits="15" branch="True" condition-coverage="100% (2/2)">
               <conditions>
-                <condition number="203" type="jump" coverage="100%" />
+                <condition number="2" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="210" hits="24" branch="False" />
-            <line number="211" hits="24" branch="True" condition-coverage="100% (10/10)">
+            <line number="209" hits="15" branch="True" condition-coverage="50% (3/6)">
               <conditions>
-                <condition number="52" type="jump" coverage="100%" />
-                <condition number="57" type="jump" coverage="100%" />
-                <condition number="70" type="jump" coverage="100%" />
-                <condition number="79" type="jump" coverage="100%" />
-                <condition number="103" type="jump" coverage="100%" />
+                <condition number="13" type="jump" coverage="50%" />
+                <condition number="21" type="jump" coverage="50%" />
+                <condition number="51" type="jump" coverage="50%" />
               </conditions>
             </line>
-            <line number="212" hits="24" branch="False" />
-            <line number="213" hits="1" branch="False" />
-            <line number="215" hits="23" branch="True" condition-coverage="100% (8/8)">
+            <line number="210" hits="15" branch="False" />
+            <line number="211" hits="15" branch="False" />
+            <line number="212" hits="0" branch="False" />
+            <line number="214" hits="15" branch="False" />
+            <line number="215" hits="13" branch="False" />
+            <line number="216" hits="13" branch="False" />
+            <line number="217" hits="113" branch="True" condition-coverage="100% (2/2)">
               <conditions>
-                <condition number="126" type="jump" coverage="100%" />
-                <condition number="135" type="jump" coverage="100%" />
-                <condition number="156" type="jump" coverage="100%" />
-                <condition number="187" type="jump" coverage="100%" />
+                <condition number="286" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="216" hits="23" branch="False" />
-            <line number="217" hits="23" branch="False" />
-            <line number="218" hits="23" branch="False" />
-            <line number="219" hits="4" branch="False" />
-            <line number="220" hits="19" branch="False" />
-            <line number="222" hits="17" branch="False" />
-            <line number="223" hits="4" branch="True" condition-coverage="100% (4/4)">
+            <line number="218" hits="40" branch="False" />
+            <line number="219" hits="40" branch="True" condition-coverage="100% (10/10)">
               <conditions>
-                <condition number="268" type="jump" coverage="100%" />
-                <condition number="291" type="jump" coverage="100%" />
+                <condition number="129" type="jump" coverage="100%" />
+                <condition number="134" type="jump" coverage="100%" />
+                <condition number="148" type="jump" coverage="100%" />
+                <condition number="158" type="jump" coverage="100%" />
+                <condition number="183" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="224" hits="2" branch="False" />
-            <line number="225" hits="2" branch="False" />
-            <line number="226" hits="2" branch="False" />
-            <line number="229" hits="21" branch="False" />
-            <line number="230" hits="84" branch="True" condition-coverage="50% (1/2)">
+            <line number="220" hits="40" branch="False" />
+            <line number="221" hits="1" branch="False" />
+            <line number="223" hits="39" branch="True" condition-coverage="100% (8/8)">
               <conditions>
-                <condition number="110" type="jump" coverage="50%" />
+                <condition number="207" type="jump" coverage="100%" />
+                <condition number="216" type="jump" coverage="100%" />
+                <condition number="237" type="jump" coverage="100%" />
+                <condition number="269" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="231" hits="21" branch="False" />
-            <line number="232" hits="21" branch="False" />
-            <line number="233" hits="21" branch="True" condition-coverage="50% (1/2)">
+            <line number="224" hits="39" branch="False" />
+            <line number="225" hits="39" branch="False" />
+            <line number="226" hits="39" branch="False" />
+            <line number="227" hits="4" branch="False" />
+            <line number="228" hits="34" branch="False" />
+            <line number="230" hits="32" branch="False" />
+            <line number="231" hits="7" branch="True" condition-coverage="100% (4/4)">
               <conditions>
-                <condition number="50" type="jump" coverage="50%" />
+                <condition number="353" type="jump" coverage="100%" />
+                <condition number="376" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="234" hits="21" branch="True" condition-coverage="50% (1/2)">
+            <line number="232" hits="2" branch="False" />
+            <line number="233" hits="5" branch="True" condition-coverage="100% (8/8)">
+              <conditions>
+                <condition number="386" type="jump" coverage="100%" />
+                <condition number="403" type="jump" coverage="100%" />
+                <condition number="406" type="jump" coverage="100%" />
+                <condition number="436" type="jump" coverage="100%" />
+              </conditions>
+            </line>
+            <line number="234" hits="5" branch="False" />
+            <line number="235" hits="2" branch="False" />
+            <line number="236" hits="3" branch="False" />
+            <line number="237" hits="3" branch="False" />
+            <line number="240" hits="65" branch="False" />
+            <line number="241" hits="65" branch="False" />
+            <line number="242" hits="286" branch="True" condition-coverage="100% (2/2)">
+              <conditions>
+                <condition number="288" type="jump" coverage="100%" />
+              </conditions>
+            </line>
+            <line number="243" hits="47" branch="False" />
+            <line number="244" hits="47" branch="False" />
+            <line number="245" hits="47" branch="True" condition-coverage="50% (1/2)">
+              <conditions>
+                <condition number="51" type="jump" coverage="50%" />
+              </conditions>
+            </line>
+            <line number="246" hits="47" branch="True" condition-coverage="50% (1/2)">
               <conditions>
                 <condition number="81" type="jump" coverage="50%" />
               </conditions>
             </line>
-            <line number="235" hits="21" branch="False" />
-            <line number="236" hits="0" branch="False" />
-            <line number="237" hits="0" branch="False" />
-            <line number="238" hits="21" branch="False" />
+            <line number="247" hits="0" branch="False" />
+            <line number="250" hits="141" branch="False" />
+            <line number="251" hits="0" branch="False" />
+            <line number="252" hits="47" branch="True" condition-coverage="100% (2/2)">
+              <conditions>
+                <condition number="142" type="jump" coverage="100%" />
+              </conditions>
+            </line>
+            <line number="254" hits="47" branch="True" condition-coverage="100% (4/4)">
+              <conditions>
+                <condition number="150" type="jump" coverage="100%" />
+                <condition number="164" type="jump" coverage="100%" />
+              </conditions>
+            </line>
+            <line number="255" hits="3" branch="False" />
+            <line number="256" hits="44" branch="False" />
+            <line number="257" hits="44" branch="True" condition-coverage="50% (1/2)">
+              <conditions>
+                <condition number="199" type="jump" coverage="50%" />
+              </conditions>
+            </line>
+            <line number="258" hits="0" branch="False" />
+            <line number="259" hits="132" branch="False" />
+            <line number="260" hits="0" branch="False" />
+            <line number="261" hits="44" branch="True" condition-coverage="50% (2/4)">
+              <conditions>
+                <condition number="253" type="jump" coverage="50%" />
+                <condition number="270" type="jump" coverage="50%" />
+              </conditions>
+            </line>
+            <line number="262" hits="0" branch="False" />
+            <line number="263" hits="44" branch="False" />
+            <line number="264" hits="62" branch="False" />
+            <line number="265" hits="62" branch="False" />
+            <line number="267" hits="91" branch="False" />
           </lines>
         </class>
         <class name="CompareShopAPI.Workers.Ingestion.CellphoneSRequestGuard" filename="CompareShopAPI.Workers/Ingestion/CellphoneSRequestGuard.cs" line-rate="1" branch-rate="1" complexity="35">
           <methods>
             <method name="IsAllowed" signature="(System.Uri)" line-rate="1" branch-rate="1" complexity="12">
               <lines>
-                <line number="11" hits="55" branch="True" condition-coverage="100% (12/12)">
+                <line number="11" hits="101" branch="True" condition-coverage="100% (12/12)">
                   <conditions>
                     <condition number="1" type="jump" coverage="100%" />
                     <condition number="9" type="jump" coverage="100%" />
@@ -22950,19 +23072,19 @@
                     <condition number="59" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="12" hits="55" branch="False" />
+                <line number="12" hits="101" branch="False" />
               </lines>
             </method>
             <method name="IsAllowedProductPage" signature="(System.Uri)" line-rate="1" branch-rate="1" complexity="18">
               <lines>
-                <line number="15" hits="48" branch="False" />
-                <line number="16" hits="52" branch="True" condition-coverage="100% (2/2)">
+                <line number="15" hits="94" branch="False" />
+                <line number="16" hits="98" branch="True" condition-coverage="100% (2/2)">
                   <conditions>
                     <condition number="12" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="17" hits="44" branch="False" />
-                <line number="18" hits="44" branch="True" condition-coverage="100% (6/6)">
+                <line number="17" hits="90" branch="False" />
+                <line number="18" hits="90" branch="True" condition-coverage="100% (6/6)">
                   <conditions>
                     <condition number="46" type="jump" coverage="100%" />
                     <condition number="59" type="jump" coverage="100%" />
@@ -22977,14 +23099,14 @@
                   </conditions>
                 </line>
                 <line number="20" hits="4" branch="False" />
-                <line number="21" hits="52" branch="True" condition-coverage="100% (4/4)">
+                <line number="21" hits="98" branch="True" condition-coverage="100% (4/4)">
                   <conditions>
                     <condition number="214" type="jump" coverage="100%" />
                     <condition number="234" type="jump" coverage="100%" />
                   </conditions>
                 </line>
-                <line number="22" hits="28" branch="False" />
-                <line number="23" hits="48" branch="False" />
+                <line number="22" hits="74" branch="False" />
+                <line number="23" hits="94" branch="False" />
               </lines>
             </method>
             <method name="IsRedirect" signature="(System.Net.HttpStatusCode)" line-rate="1" branch-rate="1" complexity="4">
@@ -23005,7 +23127,7 @@
             </method>
           </methods>
           <lines>
-            <line number="11" hits="55" branch="True" condition-coverage="100% (12/12)">
+            <line number="11" hits="101" branch="True" condition-coverage="100% (12/12)">
               <conditions>
                 <condition number="1" type="jump" coverage="100%" />
                 <condition number="9" type="jump" coverage="100%" />
@@ -23015,15 +23137,15 @@
                 <condition number="59" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="12" hits="55" branch="False" />
-            <line number="15" hits="48" branch="False" />
-            <line number="16" hits="52" branch="True" condition-coverage="100% (2/2)">
+            <line number="12" hits="101" branch="False" />
+            <line number="15" hits="94" branch="False" />
+            <line number="16" hits="98" branch="True" condition-coverage="100% (2/2)">
               <conditions>
                 <condition number="12" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="17" hits="44" branch="False" />
-            <line number="18" hits="44" branch="True" condition-coverage="100% (6/6)">
+            <line number="17" hits="90" branch="False" />
+            <line number="18" hits="90" branch="True" condition-coverage="100% (6/6)">
               <conditions>
                 <condition number="46" type="jump" coverage="100%" />
                 <condition number="59" type="jump" coverage="100%" />
@@ -23038,14 +23160,14 @@
               </conditions>
             </line>
             <line number="20" hits="4" branch="False" />
-            <line number="21" hits="52" branch="True" condition-coverage="100% (4/4)">
+            <line number="21" hits="98" branch="True" condition-coverage="100% (4/4)">
               <conditions>
                 <condition number="214" type="jump" coverage="100%" />
                 <condition number="234" type="jump" coverage="100%" />
               </conditions>
             </line>
-            <line number="22" hits="28" branch="False" />
-            <line number="23" hits="48" branch="False" />
+            <line number="22" hits="74" branch="False" />
+            <line number="23" hits="94" branch="False" />
             <line number="47" hits="9" branch="True" condition-coverage="100% (4/4)">
               <conditions>
                 <condition number="8" type="jump" coverage="100%" />

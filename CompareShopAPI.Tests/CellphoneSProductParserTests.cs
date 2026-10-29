@@ -130,6 +130,61 @@ public sealed class CellphoneSProductParserTests
             active.Select(row => row with { Id = "125876" }).ToArray()));
     }
 
+    [Fact]
+    public void Listing_query_id_must_match_active_variant_even_when_price_matches()
+    {
+        var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
+            variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
+        var listingUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125875");
+
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(listingUrl, 18_790_000, variants));
+    }
+
+    [Fact]
+    public void Final_detail_query_id_must_match_active_variant()
+    {
+        var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
+            variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
+        var finalUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125875");
+
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+            18_790_000, variants, finalUrl));
+    }
+
+    [Theory]
+    [InlineData("?product_id=125876&product_id=125876")]
+    [InlineData("?product_id=125876&product_id=125875")]
+    public void Duplicate_listing_product_ids_are_rejected(string query)
+    {
+        var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
+            variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
+
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl + query),
+            18_790_000, variants));
+    }
+
+    [Fact]
+    public void Matching_explicit_listing_and_final_ids_resolve_active_variant()
+    {
+        var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
+            variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
+        var expectedUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125876");
+        var finalUrl = new Uri(SourceFixture.ProductUrl + "?product_id=125876");
+
+        Assert.Equal("125876", Worker.CellphoneSProductIdentity.Resolve(expectedUrl, 18_790_000, variants, finalUrl));
+    }
+
+    [Fact]
+    public void Duplicate_variant_product_ids_are_rejected()
+    {
+        var variants = SourceFixture.DetailVariants.Select(variant => new Worker.CellphoneSProductVariant(
+            variant.Id, variant.Href, Worker.CellphoneSPlaywrightCatalogReader.ParsePrice(variant.PriceText), variant.IsActive)).ToArray();
+        variants[3] = variants[3] with { Href = variants[3].Href + "&product_id=125876" };
+
+        Assert.Throws<InvalidDataException>(() => Worker.CellphoneSProductIdentity.Resolve(new Uri(SourceFixture.ProductUrl),
+            18_790_000, variants));
+    }
+
     [Theory]
     [InlineData("https://evil.example/macbook-neo-13-a18-pro-6-cpu-5-gpu-8gb-256gb.html?product_id=125876")]
     [InlineData("/macbook-air-m4-13-inch.html?product_id=125876")]

@@ -120,14 +120,14 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
 
             context.Stage = CatalogReadStage.ProductFields;
-            var sku = await ReadPublishedProductIdAsync(page, product.Url, product.PriceVnd);
+            var sku = await ReadPublishedProductIdAsync(page, product.Url, detailUri, product.PriceVnd);
             rows.Add(new ScrapedOffer(sku, product.Name, "Apple", product.PriceVnd, product.Url.ToString(), product.ImageUrl,
                 product.OriginalPriceVnd, product.Specifications, product.StockStatus));
         }
         return rows;
     }
 
-    private static async Task<string> ReadPublishedProductIdAsync(IPage page, Uri expectedUrl, int listingPrice)
+    private static async Task<string> ReadPublishedProductIdAsync(IPage page, Uri expectedUrl, Uri detailUrl, int listingPrice)
     {
         var variants = page.Locator("li.item-variant[data-product-id]");
         var count = await variants.CountAsync();
@@ -146,7 +146,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             rows.Add(new CellphoneSProductVariant(id, href, price, active));
         }
 
-        return CellphoneSProductIdentity.Resolve(expectedUrl, listingPrice, rows);
+        return CellphoneSProductIdentity.Resolve(expectedUrl, listingPrice, rows, detailUrl);
     }
 
     private static HttpClient CreateRobotsClient(string proxyAddress)
@@ -203,8 +203,16 @@ internal sealed record CellphoneSProductVariant(string? Id, string? Href, int Pr
 
 internal static class CellphoneSProductIdentity
 {
-    internal static string Resolve(Uri expectedUrl, int listingPrice, IReadOnlyList<CellphoneSProductVariant> variants)
+    internal static string Resolve(Uri expectedUrl, int listingPrice, IReadOnlyList<CellphoneSProductVariant> variants, Uri? finalUrl = null)
     {
+        finalUrl ??= expectedUrl;
+        if (!CellphoneSRequestGuard.IsAllowedProductPage(expectedUrl) ||
+            !CellphoneSRequestGuard.IsAllowedProductPage(finalUrl) ||
+            !string.Equals(finalUrl.AbsolutePath, expectedUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase))
+            throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
+
+        var listingId = GetUniqueProductId(expectedUrl);
+        var finalId = GetUniqueProductId(finalUrl);
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var variant in variants)
         {
@@ -215,25 +223,46 @@ internal static class CellphoneSProductIdentity
             if (!Uri.TryCreate(expectedUrl, variant.Href, out var variantUrl) ||
                 !CellphoneSRequestGuard.IsAllowedProductPage(variantUrl) ||
                 !string.Equals(variantUrl.AbsolutePath, expectedUrl.AbsolutePath, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(GetProductId(variantUrl), variant.Id, StringComparison.Ordinal))
+                !string.Equals(GetUniqueProductId(variantUrl), variant.Id, StringComparison.Ordinal))
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
         }
 
         var active = variants.Where(variant => variant.IsActive).ToArray();
         if (active.Length != 1 || active[0].PriceVnd != listingPrice)
             throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+        if ((listingId is not null && !string.Equals(listingId, active[0].Id, StringComparison.Ordinal)) ||
+            (finalId is not null && !string.Equals(finalId, active[0].Id, StringComparison.Ordinal)))
+            throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
         return active[0].Id!;
     }
 
-    private static string? GetProductId(Uri uri)
+    private static string? GetUniqueProductId(Uri uri)
     {
+        string? productId = null;
         foreach (var pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var separator = pair.IndexOf('=');
-            if (separator < 0) continue;
-            if (Uri.UnescapeDataString(pair[..separator]) == "product_id")
-                return Uri.UnescapeDataString(pair[(separator + 1)..]);
+            var encodedName = separator < 0 ? pair : pair[..separator];
+            if (!HasValidEscapes(encodedName))
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+
+            string name;
+            try { name = Uri.UnescapeDataString(encodedName.Replace('+', ' ')); }
+            catch (UriFormatException) { throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid); }
+            if (!string.Equals(name, "product_id", StringComparison.Ordinal)) continue;
+
+            if (productId is not null || separator < 0)
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+            var encodedValue = pair[(separator + 1)..];
+            if (!HasValidEscapes(encodedValue))
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+            try { productId = Uri.UnescapeDataString(encodedValue.Replace('+', ' ')); }
+            catch (UriFormatException) { throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid); }
+            if (!int.TryParse(productId, NumberStyles.None, CultureInfo.InvariantCulture, out var numericId) || numericId <= 0)
+                throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
         }
-        return null;
+        return productId;
     }
+
+    private static bool HasValidEscapes(string value) => !Regex.IsMatch(value, "%(?![0-9a-fA-F]{2})", RegexOptions.CultureInvariant);
 }

@@ -34,16 +34,19 @@ public sealed class CellphoneSIngestionTests
     }
 
     [Fact]
-    public void Diagnostic_url_redacts_credentials_tracking_query_and_fragment_but_keeps_numeric_product_id()
+    public void Diagnostic_url_retains_path_and_redacts_credentials_all_query_values_and_fragment()
     {
         var safe = WorkerIngestion.CellphoneSRequestGuard.SafeUrlForDiagnostics(
             "https://user:password@cellphones.com.vn/macbook-neo.html?product_id=125876&token=session-secret&utm_source=private#auth-secret");
 
-        Assert.Equal("https://cellphones.com.vn/macbook-neo.html?product_id=125876", safe);
+        Assert.Equal("https://cellphones.com.vn/macbook-neo.html", safe);
+        Assert.Equal("/macbook-neo.html", WorkerIngestion.CellphoneSRequestGuard.SafePathForDiagnostics(
+            "https://user:password@cellphones.com.vn/macbook-neo.html?product_id=125876&token=session-secret&utm_source=private#auth-secret"));
         Assert.DoesNotContain("password", safe);
         Assert.DoesNotContain("session-secret", safe);
         Assert.DoesNotContain("private", safe);
         Assert.DoesNotContain("auth-secret", safe);
+        Assert.Equal("[invalid-uri]", WorkerIngestion.CellphoneSRequestGuard.SafePathForDiagnostics("%%%"));
     }
 
     [Fact]

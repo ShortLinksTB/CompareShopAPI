@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Net;
 using CompareShopAPI.Application.Ingestion;
 
@@ -34,24 +33,16 @@ public static class CellphoneSRequestGuard
         }
         else if (baseUri is null || !Uri.TryCreate(baseUri, value, out uri)) return "[invalid-uri]";
 
-        string? productId = null;
-        var productIds = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries)
-            .Select(pair =>
-            {
-                var separator = pair.IndexOf('=');
-                var key = Uri.UnescapeDataString(separator < 0 ? pair : pair[..separator].Replace('+', ' '));
-                if (!string.Equals(key, "product_id", StringComparison.Ordinal)) return null;
-                var rawValue = separator < 0 ? string.Empty : pair[(separator + 1)..].Replace('+', ' ');
-                return Uri.UnescapeDataString(rawValue);
-            })
-            .Where(id => id is not null)
-            .ToArray();
-        if (productIds.Length == 1 && int.TryParse(productIds[0], NumberStyles.None, CultureInfo.InvariantCulture, out var parsedId) && parsedId > 0)
-            productId = productIds[0];
-
         var safe = new UriBuilder(uri) { UserName = string.Empty, Password = string.Empty, Fragment = string.Empty };
-        safe.Query = productId is null ? string.Empty : $"product_id={Uri.EscapeDataString(productId)}";
-        return safe.Uri.GetLeftPart(UriPartial.Path) + safe.Query;
+        safe.Query = string.Empty;
+        return safe.Uri.GetLeftPart(UriPartial.Path);
+    }
+
+    internal static string SafePathForDiagnostics(string? value, Uri? baseUri = null)
+    {
+        var safeUrl = SafeUrlForDiagnostics(value, baseUri);
+        if (!Uri.TryCreate(safeUrl, UriKind.Absolute, out var uri)) return safeUrl;
+        return uri.AbsolutePath;
     }
 
     public static async Task<HttpResponseMessage> SendWithRedirectsAsync(HttpClient client, HttpRequestMessage request, CancellationToken ct)

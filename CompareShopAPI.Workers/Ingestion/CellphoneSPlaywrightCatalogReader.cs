@@ -155,10 +155,12 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
 
     internal void LogDeniedProductUrl(CatalogReadContext context, string? cardHref, string? finalUri)
     {
-        logger.LogWarning("CellphoneS product URL denied. Source={Source}; JobId={JobId}; Stage={Stage}; CardHref={CardHref}; FinalRequestUri={FinalRequestUri}",
+        logger.LogWarning("CellphoneS product URL denied. Source={Source}; JobId={JobId}; Stage={Stage}; CardHref={CardHref}; CardHrefPath={CardHrefPath}; FinalRequestUri={FinalRequestUri}; FinalRequestPath={FinalRequestPath}",
             context.Source, context.JobId, context.Stage,
             CellphoneSRequestGuard.SafeUrlForDiagnostics(cardHref, CategoryUri),
-            finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafeUrlForDiagnostics(finalUri, CategoryUri));
+            CellphoneSRequestGuard.SafePathForDiagnostics(cardHref, CategoryUri),
+            finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafeUrlForDiagnostics(finalUri, CategoryUri),
+            finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafePathForDiagnostics(finalUri, CategoryUri));
     }
 
     private static async Task<string> ReadPublishedProductIdAsync(IPage page, Uri expectedUrl, Uri detailUrl, int listingPrice)

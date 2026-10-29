@@ -99,8 +99,10 @@ public sealed class CatalogReadDiagnosticsTests
         Assert.Contains("Source=cellphones", entry.Text);
         Assert.Contains("JobId=31", entry.Text);
         Assert.Contains("Stage=ProductFields", entry.Text);
-        Assert.Contains("CardHref=https://www.cellphones.com.vn/macbook-neo.html?product_id=125876", entry.Text);
-        Assert.Contains("FinalRequestUri=https://www.cellphones.com.vn/macbook-pro.html?product_id=125876", entry.Text);
+        Assert.Contains("CardHref=https://www.cellphones.com.vn/macbook-neo.html", entry.Text);
+        Assert.Contains("CardHrefPath=/macbook-neo.html", entry.Text);
+        Assert.Contains("FinalRequestUri=https://www.cellphones.com.vn/macbook-pro.html", entry.Text);
+        Assert.Contains("FinalRequestPath=/macbook-pro.html", entry.Text);
         Assert.DoesNotContain("card-secret", entry.Text);
         Assert.DoesNotContain("redirect-secret", entry.Text);
         Assert.DoesNotContain("private", entry.Text);
@@ -138,8 +140,10 @@ public sealed class CatalogReadDiagnosticsTests
         Assert.Equal(0, continues);
         var entry = Assert.Single(logger.Entries);
         Assert.Contains("JobId=32", entry.Text);
-        Assert.Contains("CardHref=https://www.cellphones.com.vn/macbook-neo.html?product_id=125876", entry.Text);
-        Assert.Contains("FinalRequestUri=https://evil.test/macbook-neo.html?product_id=125876", entry.Text);
+        Assert.Contains("CardHref=https://www.cellphones.com.vn/macbook-neo.html", entry.Text);
+        Assert.Contains("CardHrefPath=/macbook-neo.html", entry.Text);
+        Assert.Contains("FinalRequestUri=https://evil.test/macbook-neo.html", entry.Text);
+        Assert.Contains("FinalRequestPath=/macbook-neo.html", entry.Text);
         Assert.DoesNotContain("secret", entry.Text);
 
         requestUrl = "https://www.cellphones.com.vn/macbook-neo.html?product_id=125876";

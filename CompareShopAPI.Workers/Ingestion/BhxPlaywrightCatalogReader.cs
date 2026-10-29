@@ -13,6 +13,7 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
     private static readonly Uri CategoryUri = new("https://www.bachhoaxanh.com/bia");
 
     private readonly Func<HttpClient> robotsClientFactory;
+    private readonly Func<Task<IPlaywright>> playwrightFactory;
     private readonly ILogger<BhxPlaywrightCatalogReader> logger;
 
     public BhxPlaywrightCatalogReader() : this(() => BhxRequestGuard.CreateHttpClient(TimeSpan.FromSeconds(8)), NullLogger<BhxPlaywrightCatalogReader>.Instance) { }
@@ -23,10 +24,11 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
     internal BhxPlaywrightCatalogReader(Func<HttpClient> robotsClientFactory)
         : this(robotsClientFactory, NullLogger<BhxPlaywrightCatalogReader>.Instance) { }
 
-    internal BhxPlaywrightCatalogReader(Func<HttpClient> robotsClientFactory, ILogger<BhxPlaywrightCatalogReader> logger)
+    internal BhxPlaywrightCatalogReader(Func<HttpClient> robotsClientFactory, ILogger<BhxPlaywrightCatalogReader> logger, Func<Task<IPlaywright>>? playwrightFactory = null)
     {
         this.robotsClientFactory = robotsClientFactory;
         this.logger = logger;
+        this.playwrightFactory = playwrightFactory ?? Playwright.CreateAsync;
     }
 
     public bool Supports(string sourceKey) => sourceKey == DataSource.BhxKey;
@@ -37,11 +39,23 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
         return ReadValidatedBiaAsync(ct);
     }
 
-    public Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) =>
-        CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedBiaCoreAsync(ct));
-
-    private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaCoreAsync(CancellationToken ct)
+    public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct)
     {
+        if (!Supports(sourceKey) || categoryPath != "/bia") throw new InvalidDataException("BHX source category is not supported.");
+        return ReadWithContextAsync(jobId, ct);
+    }
+
+    public Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => ReadWithContextAsync(null, ct);
+
+    private Task<IReadOnlyList<ScrapedOffer>> ReadWithContextAsync(int? jobId, CancellationToken ct)
+    {
+        var context = new CatalogReadContext(DataSource.BhxKey, jobId);
+        return CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedBiaCoreAsync(context, ct), context);
+    }
+
+    private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaCoreAsync(CatalogReadContext context, CancellationToken ct)
+    {
+        context.Stage = CatalogReadStage.Robots;
         using var robotsClient = robotsClientFactory();
         using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(CategoryUri, "/robots.txt"));
         robotsRequest.Headers.UserAgent.ParseAdd("CompareShopPriceMonitor/1.0 (+https://giamha.online)");
@@ -59,7 +73,8 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
             }))
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
         }
-        using var playwright = await Playwright.CreateAsync();
+        context.Stage = CatalogReadStage.BrowserLaunch;
+        using var playwright = await playwrightFactory();
         await using var egressProxy = await BhxForwardProxy.StartAsync(ct);
         await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(egressProxy.Server));
         var page = await browser.NewPageAsync(new BrowserNewPageOptions { AcceptDownloads = false });
@@ -75,14 +90,18 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
                 finally { requestGate.Release(); }
             }
         });
+        context.Stage = CatalogReadStage.Navigation;
         var navigationResponse = await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
+        context.Stage = CatalogReadStage.AccessCheck;
         EnsureAccessible(navigationResponse?.Status, page.Url, null);
         var pageText = (await page.Locator("body").InnerTextAsync()).ToLowerInvariant();
         EnsureAccessible(null, page.Url, pageText);
+        context.Stage = CatalogReadStage.ProductCount;
         var cards = page.Locator("[data-product-code]");
         var count = await cards.CountAsync();
         if (count is < 1 or > 500) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductCountInvalid);
         var result = new List<ScrapedOffer>();
+        context.Stage = CatalogReadStage.ProductFields;
         for (var i = 0; i < count; i++)
         {
             ct.ThrowIfCancellationRequested();

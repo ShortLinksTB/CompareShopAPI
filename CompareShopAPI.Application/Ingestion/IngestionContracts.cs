@@ -6,6 +6,7 @@ namespace CompareShopAPI.Application.Ingestion;
 public interface ISourceCatalogReader
 {
     bool Supports(string sourceKey) => true;
+    Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct) => ReadAsync(sourceKey, categoryPath, ct);
     Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct) => ReadValidatedBiaAsync(ct);
     Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => throw new NotSupportedException("Source reader requires a source-aware request.");
 }
@@ -61,7 +62,7 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISource
                 var sourceKey = dataSource.Key;
                 var reader = readers.SingleOrDefault(candidate => candidate.Supports(sourceKey));
                 if (reader is null || !DataSource.IsSupportedCategory(sourceKey, dataSource.CategoryPath)) throw new InvalidDataException("No reader supports this source category.");
-                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, execution.Token);
+                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, job.Id, execution.Token);
                 if (rows.Count == 0 || rows.Any(row => !row.IsValid)) throw new InvalidDataException("Source returned no validated products.");
                 var result = await jobs.Import(dataSource.Id, rows, true, execution.Token);
                 await history.RecordForChangedMinimums(execution.Token);

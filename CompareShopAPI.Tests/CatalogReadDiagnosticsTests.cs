@@ -1,5 +1,7 @@
 extern alias Workers;
 using System.Net;
+using System.Reflection;
+using Microsoft.Playwright;
 using CompareShopAPI.Application.Ingestion;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -57,6 +59,133 @@ public sealed class CatalogReadDiagnosticsTests
         Assert.Empty(logger.Entries);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Job_and_source_are_logged_at_the_failing_robots_stage(bool bhx)
+    {
+        var failure = new TimeoutException("proxy-password token=private");
+        var logger = new Capture<Worker.BhxPlaywrightCatalogReader>();
+        var cellLogger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
+        ISourceCatalogReader reader = bhx
+            ? new Worker.BhxPlaywrightCatalogReader(() => throw failure, logger)
+            : new Worker.CellphoneSPlaywrightCatalogReader(_ => throw failure, cellLogger);
+        Assert.Same(failure, await Assert.ThrowsAsync<TimeoutException>(() =>
+            reader.ReadAsync(bhx ? "bhx" : "cellphones", bhx ? "/bia" : "/laptop/mac.html", 28, default)));
+        var entry = Assert.Single(bhx ? logger.Entries : cellLogger.Entries);
+        Assert.Contains("Source=" + (bhx ? "bhx" : "cellphones"), entry.Text);
+        Assert.Contains("JobId=28", entry.Text);
+        Assert.Contains("Stage=Robots", entry.Text);
+        Assert.DoesNotContain("private", entry.Text);
+        Assert.DoesNotContain("proxy-password", entry.Text);
+        Assert.Null(entry.Exception);
+    }
+
+    [Fact]
+    public async Task Concurrent_failures_keep_their_own_context()
+    {
+        var stageValue = (int)Worker.CatalogReadStage.Navigation;
+        var logger = new Capture<object>();
+        async Task Fail(string source, int jobId)
+        {
+            var context = new Worker.CatalogReadContext(source, jobId);
+            await Assert.ThrowsAsync<TimeoutException>(() => Worker.CatalogReadDiagnostics.ReadAsync<int>(logger, async () =>
+            {
+                context.Stage = (Worker.CatalogReadStage)stageValue;
+                await Task.Yield();
+                throw new TimeoutException("secret");
+            }, context));
+        }
+        await Task.WhenAll(Fail("bhx", 27), Fail("cellphones", 28));
+        Assert.Equal(2, logger.Entries.Count);
+        Assert.Contains(logger.Entries, entry => entry.Text.Contains("Source=bhx; JobId=27; Stage=" + (Worker.CatalogReadStage)stageValue));
+        Assert.Contains(logger.Entries, entry => entry.Text.Contains("Source=cellphones; JobId=28; Stage=" + (Worker.CatalogReadStage)stageValue));
+        Assert.All(logger.Entries, entry => Assert.DoesNotContain("secret", entry.Text));
+    }
+
+    [Theory]
+    [InlineData(true, "BrowserLaunch")]
+    [InlineData(false, "BrowserLaunch")]
+    [InlineData(true, "Navigation")]
+    [InlineData(false, "Navigation")]
+    [InlineData(true, "AccessCheck")]
+    [InlineData(false, "AccessCheck")]
+    [InlineData(true, "ProductCount")]
+    [InlineData(false, "ProductCount")]
+    [InlineData(true, "ProductFields")]
+    [InlineData(false, "ProductFields")]
+    public async Task Reader_reports_the_actual_failed_browser_stage(bool bhx, string stage)
+    {
+        var failure = new TimeoutException("untrusted token=private");
+        var locator = Stub.Create<ILocator>((method, args) => method switch
+        {
+            "get_First" or "Nth" or "Locator" => null,
+            "CountAsync" => Task.FromResult(1),
+            "InnerTextAsync" when stage == "AccessCheck" => throw failure,
+            "InnerTextAsync" => Task.FromResult("safe catalog body"),
+            "GetAttributeAsync" => throw failure,
+            _ => throw new NotSupportedException(method)
+        });
+        // Locator properties return the same bounded fixture; no browser/network is used.
+        ((Stub)(object)locator).Self = locator;
+        var response = Stub.Create<IResponse>((method, _) => method == "get_Status" ? 200 : throw new NotSupportedException(method));
+        var page = Stub.Create<IPage>((method, args) => method switch
+        {
+            "SetDefaultNavigationTimeout" or "SetDefaultTimeout" => null,
+            "RouteAsync" => Task.CompletedTask,
+            "GotoAsync" when stage == "Navigation" => throw failure,
+            "GotoAsync" => Task.FromResult<IResponse?>(response),
+            "get_Url" => bhx ? "https://www.bachhoaxanh.com/bia" : "https://www.cellphones.com.vn/laptop/mac.html",
+            "Locator" when stage == "ProductCount" && (string)args![0]! != "body" => throw failure,
+            "Locator" => locator,
+            _ => throw new NotSupportedException(method)
+        });
+        var browser = Stub.Create<IBrowser>((method, _) => method switch
+        {
+            "NewPageAsync" => Task.FromResult(page),
+            "DisposeAsync" => ValueTask.CompletedTask,
+            _ => throw new NotSupportedException(method)
+        });
+        var browserType = Stub.Create<IBrowserType>((method, _) => method == "LaunchAsync" ? Task.FromResult(browser) : throw new NotSupportedException(method));
+        var playwright = Stub.Create<IPlaywright>((method, _) => method switch
+        {
+            "get_Chromium" => browserType,
+            "Dispose" => null,
+            _ => throw new NotSupportedException(method)
+        });
+        Task<IPlaywright> CreateBrowser() => stage == "BrowserLaunch" ? throw failure : Task.FromResult(playwright);
+        using var client = new HttpClient(new RobotsHandler("User-agent: *\nAllow: /"));
+        var logger = new Capture<Worker.BhxPlaywrightCatalogReader>();
+        var cellLogger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
+        ISourceCatalogReader reader = bhx
+            ? new Worker.BhxPlaywrightCatalogReader(() => client, logger, CreateBrowser)
+            : new Worker.CellphoneSPlaywrightCatalogReader(_ => client, cellLogger, CreateBrowser);
+        Assert.Same(failure, await Assert.ThrowsAsync<TimeoutException>(() => reader.ReadAsync(
+            bhx ? "bhx" : "cellphones", bhx ? "/bia" : "/laptop/mac.html", 29, default)));
+        var entry = Assert.Single(bhx ? logger.Entries : cellLogger.Entries);
+        Assert.Contains("Stage=" + stage, entry.Text);
+        Assert.Contains("JobId=29", entry.Text);
+        Assert.DoesNotContain("private", entry.Text);
+        Assert.Null(entry.Exception);
+    }
+
+    public class Stub : DispatchProxy
+    {
+        private Func<string, object?[]?, object?> handler = null!;
+        public object? Self { get; set; }
+        public static T Create<T>(Func<string, object?[]?, object?> handler) where T : class
+        {
+            var proxy = Create<T, Stub>();
+            ((Stub)(object)proxy).handler = handler;
+            return proxy;
+        }
+        protected override object? Invoke(MethodInfo? method, object?[]? args)
+        {
+            if (Self is not null && method!.Name is "get_First" or "Nth" or "Locator") return Self;
+            return handler(method!.Name, args);
+        }
+    }
+
     [Fact]
     public void Production_DI_resolves_both_readers_with_logging()
     {
@@ -80,6 +209,10 @@ public sealed class CatalogReadDiagnosticsTests
         public bool IsEnabled(LogLevel level) => true;
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
-            Entries.Add((level, formatter(state, exception), exception));
+            Add(level, formatter(state, exception), exception);
+        private void Add(LogLevel level, string text, Exception? exception)
+        {
+            lock (Entries) Entries.Add((level, text, exception));
+        }
     }
 }

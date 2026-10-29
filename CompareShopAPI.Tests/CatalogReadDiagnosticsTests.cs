@@ -287,6 +287,69 @@ public sealed class CatalogReadDiagnosticsTests
         var entry = Assert.Single(bhx ? logger.Entries : cellLogger.Entries);
         Assert.Contains("Stage=" + stage, entry.Text);
         Assert.Contains("JobId=29", entry.Text);
+        if (!bhx && stage == "ProductFields")
+        {
+            Assert.Contains("Operation=listing.card.href", entry.Text);
+            Assert.Contains("WaitCondition=a[href]", entry.Text);
+            Assert.Contains("WaitTimeoutMs=8000", entry.Text);
+        }
+        Assert.DoesNotContain("private", entry.Text);
+        Assert.Null(entry.Exception);
+    }
+
+    [Fact]
+    public async Task Cellphones_detail_variant_timeout_logs_exact_wait_condition_and_timeout()
+    {
+        var timeout = new System.TimeoutException("untrusted token=private");
+        var href = Stub.Create<ILocator>((method, _) => method switch
+        {
+            "get_First" => null,
+            "GetAttributeAsync" => throw timeout,
+            _ => throw new NotSupportedException(method)
+        });
+        ((Stub)(object)href).Self = href;
+        var variant = Stub.Create<ILocator>((method, args) => method switch
+        {
+            "GetAttributeAsync" => Task.FromResult<string?>((string)args![0]! switch
+            {
+                "data-product-id" => "125876",
+                "class" => "item-variant active",
+                _ => null
+            }),
+            "Locator" when (string)args![0]! == "a[href]" => href,
+            "Locator" => Stub.Create<ILocator>((innerMethod, _) => innerMethod switch
+            {
+                "InnerTextAsync" => Task.FromResult("18.790.000₫"),
+                _ => throw new NotSupportedException(innerMethod)
+            }),
+            _ => throw new NotSupportedException(method)
+        });
+        var variants = Stub.Create<ILocator>((method, args) => method switch
+        {
+            "CountAsync" => Task.FromResult(1),
+            "Nth" => variant,
+            _ => throw new NotSupportedException(method)
+        });
+        var page = Stub.Create<IPage>((method, args) => method switch
+        {
+            "Locator" when (string)args![0]! == "li.item-variant[data-product-id]" => variants,
+            _ => throw new NotSupportedException(method)
+        });
+        var expectedUrl = new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html");
+        var provenance = CreateProvenance(expectedUrl.ToString());
+        var logger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(), logger);
+        var context = new Worker.CatalogReadContext("cellphones", 38) { Stage = Worker.CatalogReadStage.ProductFields };
+
+        Assert.Same(timeout, await Assert.ThrowsAsync<System.TimeoutException>(() => Worker.CatalogReadDiagnostics.ReadAsync(
+            logger, () => reader.ReadPublishedProductIdAsync(context, page, provenance, expectedUrl, expectedUrl, 18_790_000), context)));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Contains("Operation=detail.variant.href", entry.Text);
+        Assert.Contains("WaitCondition=li.item-variant[data-product-id] a[href]", entry.Text);
+        Assert.Contains("WaitTimeoutMs=8000", entry.Text);
+        Assert.Contains("ExceptionType=System.TimeoutException", entry.Text);
+        Assert.Contains("Stage=ProductFields", entry.Text);
         Assert.DoesNotContain("private", entry.Text);
         Assert.Null(entry.Exception);
     }

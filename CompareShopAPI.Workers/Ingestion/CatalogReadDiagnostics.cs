@@ -14,6 +14,9 @@ internal sealed class CatalogReadContext(string source, int? jobId)
     internal string Source { get; } = source;
     internal int? JobId { get; } = jobId;
     internal CatalogReadStage Stage { get; set; }
+    internal string? Operation { get; set; }
+    internal string? WaitCondition { get; set; }
+    internal int? WaitTimeoutMs { get; set; }
 }
 
 internal static class CatalogReadDiagnostics
@@ -37,8 +40,9 @@ internal static class CatalogReadDiagnostics
             var reason = exception.Data[ReasonKey] is CatalogReadFailure code && Enum.IsDefined(code)
                 ? code.ToString() : "Unclassified";
             // Never pass the exception object: providers would serialize its message/inner exceptions.
-            logger.LogWarning("Catalog scrape failed. Reason={Reason}; ExceptionType={ExceptionType}; Stack={DiagnosticStack}; Source={Source}; JobId={JobId}; Stage={Stage}",
-                reason, exception.GetType().FullName, FormatStack(exception), context?.Source ?? "Unknown", context?.JobId, context?.Stage ?? CatalogReadStage.Starting);
+            logger.LogWarning("Catalog scrape failed. Reason={Reason}; ExceptionType={ExceptionType}; Stack={DiagnosticStack}; Source={Source}; JobId={JobId}; Stage={Stage}; Operation={Operation}; WaitCondition={WaitCondition}; WaitTimeoutMs={WaitTimeoutMs}",
+                reason, exception.GetType().FullName, FormatStack(exception), context?.Source ?? "Unknown", context?.JobId, context?.Stage ?? CatalogReadStage.Starting,
+                context?.Operation, context?.WaitCondition, context?.WaitTimeoutMs);
             throw;
         }
     }

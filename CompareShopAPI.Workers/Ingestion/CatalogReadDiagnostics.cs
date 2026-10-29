@@ -7,6 +7,15 @@ namespace CompareShopAPI.Workers.Ingestion;
 // Only compile-time reason codes and method frames may enter scrape diagnostics.
 internal enum CatalogReadFailure { RobotsPolicyDenied, ProductCountInvalid, ProductSchemaInvalid, ProductUrlDenied, EmptyCatalog }
 
+internal enum CatalogReadStage { Starting, Robots, BrowserLaunch, Navigation, AccessCheck, ProductCount, ProductFields }
+
+internal sealed class CatalogReadContext(string source, int? jobId)
+{
+    internal string Source { get; } = source;
+    internal int? JobId { get; } = jobId;
+    internal CatalogReadStage Stage { get; set; }
+}
+
 internal static class CatalogReadDiagnostics
 {
     private static readonly object ReasonKey = new();
@@ -18,7 +27,7 @@ internal static class CatalogReadDiagnostics
         return exception;
     }
 
-    internal static async Task<T> ReadAsync<T>(ILogger logger, Func<Task<T>> read)
+    internal static async Task<T> ReadAsync<T>(ILogger logger, Func<Task<T>> read, CatalogReadContext? context = null)
     {
         try { return await read(); }
         catch (SourceAccessBlockedException) { throw; }
@@ -28,8 +37,8 @@ internal static class CatalogReadDiagnostics
             var reason = exception.Data[ReasonKey] is CatalogReadFailure code && Enum.IsDefined(code)
                 ? code.ToString() : "Unclassified";
             // Never pass the exception object: providers would serialize its message/inner exceptions.
-            logger.LogWarning("Catalog scrape failed. Reason={Reason}; ExceptionType={ExceptionType}; Stack={DiagnosticStack}",
-                reason, exception.GetType().FullName, FormatStack(exception));
+            logger.LogWarning("Catalog scrape failed. Reason={Reason}; ExceptionType={ExceptionType}; Stack={DiagnosticStack}; Source={Source}; JobId={JobId}; Stage={Stage}",
+                reason, exception.GetType().FullName, FormatStack(exception), context?.Source ?? "Unknown", context?.JobId, context?.Stage ?? CatalogReadStage.Starting);
             throw;
         }
     }

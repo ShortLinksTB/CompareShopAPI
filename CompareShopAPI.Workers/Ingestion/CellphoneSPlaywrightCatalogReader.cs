@@ -15,28 +15,38 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     private const string UserAgent = "CompareShopPriceMonitor/1.0 (+https://giamha.online)";
     private readonly Func<string, HttpClient> robotsClientFactory;
 
+    private readonly Func<Task<IPlaywright>> playwrightFactory;
     private readonly ILogger<CellphoneSPlaywrightCatalogReader> logger;
 
     public CellphoneSPlaywrightCatalogReader() : this(CreateRobotsClient, NullLogger<CellphoneSPlaywrightCatalogReader>.Instance) { }
     public CellphoneSPlaywrightCatalogReader(ILogger<CellphoneSPlaywrightCatalogReader> logger) : this(CreateRobotsClient, logger) { }
     internal CellphoneSPlaywrightCatalogReader(Func<string, HttpClient> robotsClientFactory)
         : this(robotsClientFactory, NullLogger<CellphoneSPlaywrightCatalogReader>.Instance) { }
-    internal CellphoneSPlaywrightCatalogReader(Func<string, HttpClient> robotsClientFactory, ILogger<CellphoneSPlaywrightCatalogReader> logger)
+    internal CellphoneSPlaywrightCatalogReader(Func<string, HttpClient> robotsClientFactory, ILogger<CellphoneSPlaywrightCatalogReader> logger, Func<Task<IPlaywright>>? playwrightFactory = null)
     {
         this.robotsClientFactory = robotsClientFactory;
         this.logger = logger;
+        this.playwrightFactory = playwrightFactory ?? Playwright.CreateAsync;
     }
 
     public bool Supports(string sourceKey) => sourceKey == DataSource.CellphoneSKey;
 
     public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct)
+        => ReadWithContextAsync(sourceKey, categoryPath, null, ct);
+
+    public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct)
+        => ReadWithContextAsync(sourceKey, categoryPath, jobId, ct);
+
+    private Task<IReadOnlyList<ScrapedOffer>> ReadWithContextAsync(string sourceKey, string categoryPath, int? jobId, CancellationToken ct)
     {
         if (!Supports(sourceKey) || categoryPath != "/laptop/mac.html") throw new InvalidDataException("CellphoneS category is not supported.");
-        return CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedCoreAsync(ct));
+        var context = new CatalogReadContext(DataSource.CellphoneSKey, jobId);
+        return CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedCoreAsync(context, ct), context);
     }
 
-    private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedCoreAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedCoreAsync(CatalogReadContext context, CancellationToken ct)
     {
+        context.Stage = CatalogReadStage.Robots;
         await using var proxy = await BhxForwardProxy.StartAsync(CellphoneSRequestGuard.AllowedHosts, ct);
         using var robotsClient = robotsClientFactory(proxy.Server);
         using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(CategoryUri, "/robots.txt"));
@@ -46,7 +56,8 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         var robotsText = await robots.Content.ReadAsStringAsync(ct);
         if (IsDisallowed(robotsText, "/laptop/mac.html")) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
 
-        using var playwright = await Playwright.CreateAsync();
+        context.Stage = CatalogReadStage.BrowserLaunch;
+        using var playwright = await playwrightFactory();
         await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(proxy.Server));
         var page = await browser.NewPageAsync(new BrowserNewPageOptions { AcceptDownloads = false, UserAgent = UserAgent });
         page.SetDefaultNavigationTimeout(20_000); page.SetDefaultTimeout(8_000);
@@ -58,12 +69,16 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             try { await Task.Delay(TimeSpan.FromMilliseconds(250), ct); await route.ContinueAsync(); }
             finally { gate.Release(); }
         });
+        context.Stage = CatalogReadStage.Navigation;
         var response = await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
+        context.Stage = CatalogReadStage.AccessCheck;
         BhxPlaywrightCatalogReader.EnsureAccessible(response?.Status, page.Url, (await page.Locator("body").InnerTextAsync()).ToLowerInvariant());
+        context.Stage = CatalogReadStage.ProductCount;
         var cards = page.Locator(".product-info");
         var count = await cards.CountAsync();
         if (count is < 1 or > 300) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductCountInvalid);
         var rows = new List<ScrapedOffer>(count);
+        context.Stage = CatalogReadStage.ProductFields;
         for (var i = 0; i < count; i++)
         {
             ct.ThrowIfCancellationRequested();

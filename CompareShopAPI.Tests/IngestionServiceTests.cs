@@ -38,6 +38,7 @@ public sealed class IngestionServiceTests
         Assert.Equal(1, jobs.Seen);
         Assert.Equal(1, jobs.Imported);
         Assert.Equal(1, jobs.Pending);
+        Assert.Equal(jobs.Claimed!.Id, reader.JobId);
         Assert.True(history.Called);
         Assert.True(jobs.FullSnapshot);
     }
@@ -148,6 +149,12 @@ public sealed class IngestionServiceTests
     private sealed class FakeReader : ISourceCatalogReader
     {
         public IReadOnlyList<ScrapedOffer> Rows { get; init; } = [];
+        public int? JobId { get; private set; }
+        public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct)
+        {
+            JobId = jobId;
+            return ReadValidatedBiaAsync(ct);
+        }
         public Exception? Failure { get; set; }
         public Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => Failure is null ? Task.FromResult(Rows) : Task.FromException<IReadOnlyList<ScrapedOffer>>(Failure);
     }

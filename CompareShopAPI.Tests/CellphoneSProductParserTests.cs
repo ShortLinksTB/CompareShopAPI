@@ -7,6 +7,7 @@ using System.Text.Json;
 using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Domain.Ingestion;
 using Microsoft.Playwright;
+using Microsoft.Extensions.Logging;
 using Worker = Workers::CompareShopAPI.Workers.Ingestion;
 using Xunit;
 
@@ -18,6 +19,56 @@ public sealed class CellphoneSProductParserTests
         File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "cellphones-macbook-neo-2026-10-29.json")),
         new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
     private static readonly Worker.CellphoneSListingProvenance ApprovedProvenance = CreateProvenance(SourceFixture.ProductUrl);
+
+    [Fact]
+    public async Task Product_field_timeout_logs_the_exact_operation_and_is_rethrown()
+    {
+        var logger = new RecordingLogger<Worker.CellphoneSPlaywrightCatalogReader>();
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(new RobotsHandler()), logger);
+        var context = new Worker.CatalogReadContext(DataSource.CellphoneSKey, 38) { Stage = Worker.CatalogReadStage.ProductFields };
+        var timeout = new TimeoutException("Timeout 8000ms exceeded while waiting for locator");
+
+        var thrown = await Assert.ThrowsAsync<TimeoutException>(() => reader.ReadProductFieldAsync<string?>(
+            context, "detail.variant[2].product-id", "li.item-variant[data-product-id]", () => Task.FromException<string?>(timeout)));
+
+        Assert.Same(timeout, thrown);
+        var log = Assert.Single(logger.Messages);
+        Assert.Contains("Operation=detail.variant[2].product-id", log);
+        Assert.Contains("Selector=li.item-variant[data-product-id]", log);
+        Assert.Contains("ActionTimeoutMs=8000", log);
+        Assert.Contains("ExceptionType=System.TimeoutException", log);
+        Assert.DoesNotContain("Timeout 8000ms", log);
+    }
+
+    [Fact]
+    public async Task Optional_product_field_timeout_logs_its_selector_and_remains_optional()
+    {
+        var logger = new RecordingLogger<Worker.CellphoneSPlaywrightCatalogReader>();
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(new RobotsHandler()), logger);
+        var context = new Worker.CatalogReadContext(DataSource.CellphoneSKey, 38) { Stage = Worker.CatalogReadStage.ProductFields };
+        var locator = CreateLocator((method, _) => method == "InnerTextAsync"
+            ? Task.FromException<string>(new TimeoutException("Timeout 1000ms exceeded"))
+            : throw new NotSupportedException(method));
+
+        Assert.Null(await reader.OptionalProductTextAsync(context, "detail.variant[1].price", ".item-variant-price", locator));
+
+        var log = Assert.Single(logger.Messages);
+        Assert.Contains("Operation=detail.variant[1].price", log);
+        Assert.Contains("Selector=.item-variant-price", log);
+        Assert.Contains("ActionTimeoutMs=1000", log);
+    }
+
+    [Fact]
+    public async Task Optional_product_field_playwright_failure_remains_optional()
+    {
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => new HttpClient(new RobotsHandler()));
+        var context = new Worker.CatalogReadContext(DataSource.CellphoneSKey, 38) { Stage = Worker.CatalogReadStage.ProductFields };
+        var locator = CreateLocator((method, _) => method == "InnerTextAsync"
+            ? Task.FromException<string>(new PlaywrightException("Optional field is unavailable"))
+            : throw new NotSupportedException(method));
+
+        Assert.Null(await reader.OptionalProductTextAsync(context, "detail.variant[1].price", ".item-variant-price", locator));
+    }
 
     private static Worker.CellphoneSListingProvenance CreateProvenance(params string[] hrefs)
     {
@@ -304,6 +355,15 @@ public sealed class CellphoneSProductParserTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("User-agent: *\nAllow: /\n") });
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
     }
 
     private sealed record Fixture(

@@ -13,6 +13,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
 {
     private static readonly Uri CategoryUri = CellphoneSListingProvenance.ApprovedListing;
     private const string UserAgent = "CompareShopPriceMonitor/1.0 (+https://giamha.online)";
+    private const float ProductFieldActionTimeoutMs = 8_000;
     private readonly Func<string, HttpClient> robotsClientFactory;
 
     private readonly Func<Task<IPlaywright>> playwrightFactory;
@@ -60,7 +61,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         using var playwright = await playwrightFactory();
         await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(proxy.Server));
         var page = await browser.NewPageAsync(new BrowserNewPageOptions { AcceptDownloads = false, UserAgent = UserAgent });
-        page.SetDefaultNavigationTimeout(20_000); page.SetDefaultTimeout(8_000);
+        page.SetDefaultNavigationTimeout(20_000); page.SetDefaultTimeout(ProductFieldActionTimeoutMs);
         using var gate = new SemaphoreSlim(1, 1);
         string? activeCardHref = null;
         CellphoneSListingProvenance? provenance = null;
@@ -84,9 +85,9 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             ct.ThrowIfCancellationRequested();
             var card = cards.Nth(i);
             var anchor = card.Locator("a[href]").First;
-            var href = await anchor.GetAttributeAsync("href");
-            var name = (await card.Locator(".product__name").First.InnerTextAsync()).Trim();
-            var price = ParsePrice(await card.Locator(".product__price--show").First.InnerTextAsync());
+            var href = await ReadProductFieldAsync(context, $"listing.card[{i}].href", "a[href]", () => anchor.GetAttributeAsync("href"));
+            var name = (await ReadProductFieldAsync(context, $"listing.card[{i}].name", ".product__name", () => card.Locator(".product__name").First.InnerTextAsync())).Trim();
+            var price = ParsePrice(await ReadProductFieldAsync(context, $"listing.card[{i}].price", ".product__price--show", () => card.Locator(".product__price--show").First.InnerTextAsync()));
             if (string.IsNullOrWhiteSpace(href) || string.IsNullOrWhiteSpace(name) || price <= 0)
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
             var url = new Uri(CategoryUri, href);
@@ -95,13 +96,15 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
                 LogDeniedProductUrl(context, href, null);
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
             }
-            var image = await card.Locator("img").First.GetAttributeAsync("src") ?? await card.Locator("img").First.GetAttributeAsync("data-src");
+            var imageLocator = card.Locator("img").First;
+            var image = await ReadProductFieldAsync(context, $"listing.card[{i}].image.src", "img[src]", () => imageLocator.GetAttributeAsync("src"))
+                ?? await ReadProductFieldAsync(context, $"listing.card[{i}].image.data-src", "img[data-src]", () => imageLocator.GetAttributeAsync("data-src"));
             var imageUrl = image is null ? null : new Uri(CategoryUri, image).ToString();
             if (imageUrl is not null && !CellphoneSRequestGuard.IsAllowed(new Uri(imageUrl))) imageUrl = null;
-            var original = ParsePriceOrNull(await OptionalTextAsync(card.Locator(".product__price--through").First));
-            var text = (await card.InnerTextAsync()).ToLowerInvariant();
+            var original = ParsePriceOrNull(await OptionalProductTextAsync(context, $"listing.card[{i}].original-price", ".product__price--through", card.Locator(".product__price--through").First));
+            var text = (await ReadProductFieldAsync(context, $"listing.card[{i}].text", ".product-info", () => card.InnerTextAsync())).ToLowerInvariant();
             var stock = text.Contains("sắp về hàng") || text.Contains("sắp về") ? "coming_soon" : text.Contains("hết hàng") ? "out_of_stock" : text.Contains("còn hàng") ? "in_stock" : "unknown";
-            var specs = ParseSpecifications(await card.InnerTextAsync());
+            var specs = ParseSpecifications(await ReadProductFieldAsync(context, $"listing.card[{i}].specifications", ".product-info", () => card.InnerTextAsync()));
             categoryProducts.Add(new CellphoneSCategoryProduct(name, price, url, imageUrl, original, specs, stock));
             await Task.Delay(500, ct);
         }
@@ -123,7 +126,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
 
             context.Stage = CatalogReadStage.ProductFields;
-            var sku = await ReadPublishedProductIdAsync(page, approvedListing, product.Url, detailUri, product.PriceVnd);
+            var sku = await ReadPublishedProductIdAsync(context, page, approvedListing, product.Url, detailUri, product.PriceVnd);
             rows.Add(new ScrapedOffer(sku, product.Name, "Apple", product.PriceVnd, product.Url.ToString(), product.ImageUrl,
                 product.OriginalPriceVnd, product.Specifications, product.StockStatus));
         }
@@ -172,26 +175,51 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafePathForDiagnostics(finalUri, CategoryUri));
     }
 
-    private static async Task<string> ReadPublishedProductIdAsync(IPage page, CellphoneSListingProvenance provenance, Uri expectedUrl, Uri detailUrl, int listingPrice)
+    private async Task<string> ReadPublishedProductIdAsync(CatalogReadContext context, IPage page, CellphoneSListingProvenance provenance, Uri expectedUrl, Uri detailUrl, int listingPrice)
     {
         var variants = page.Locator("li.item-variant[data-product-id]");
-        var count = await variants.CountAsync();
+        var count = await ReadProductFieldAsync(context, "detail.variants.count", "li.item-variant[data-product-id]", () => variants.CountAsync());
         if (count is < 1 or > 100) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
 
         var rows = new List<CellphoneSProductVariant>(count);
         for (var i = 0; i < count; i++)
         {
             var variant = variants.Nth(i);
-            var id = await variant.GetAttributeAsync("data-product-id");
-            var active = ((await variant.GetAttributeAsync("class")) ?? string.Empty)
+            var id = await ReadProductFieldAsync(context, $"detail.variant[{i}].product-id", "li.item-variant[data-product-id]", () => variant.GetAttributeAsync("data-product-id"));
+            var active = ((await ReadProductFieldAsync(context, $"detail.variant[{i}].class", "li.item-variant[data-product-id]", () => variant.GetAttributeAsync("class"))) ?? string.Empty)
                 .Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains("active", StringComparer.Ordinal);
-            var href = await variant.Locator("a[href]").First.GetAttributeAsync("href");
-            var priceText = await OptionalTextAsync(variant.Locator(".item-variant-price").First);
+            var href = await ReadProductFieldAsync(context, $"detail.variant[{i}].href", "li.item-variant[data-product-id] a[href]", () => variant.Locator("a[href]").First.GetAttributeAsync("href"));
+            var priceText = await OptionalProductTextAsync(context, $"detail.variant[{i}].price", ".item-variant-price", variant.Locator(".item-variant-price").First);
             var price = ParsePrice(priceText);
             rows.Add(new CellphoneSProductVariant(id, href, price, active));
         }
 
         return CellphoneSProductIdentity.Resolve(provenance, expectedUrl, listingPrice, rows, detailUrl);
+    }
+
+    internal async Task<T> ReadProductFieldAsync<T>(CatalogReadContext context, string operation, string selector, Func<Task<T>> read)
+    {
+        try { return await read(); }
+        catch (TimeoutException ex)
+        {
+            logger.LogWarning(
+                "CellphoneS Playwright product field timed out. Source={Source}; JobId={JobId}; Stage={Stage}; Operation={Operation}; Selector={Selector}; ActionTimeoutMs={ActionTimeoutMs}; ExceptionType={ExceptionType}",
+                context.Source, context.JobId, context.Stage, operation, selector, ProductFieldActionTimeoutMs, ex.GetType().FullName);
+            throw;
+        }
+    }
+
+    internal async Task<string?> OptionalProductTextAsync(CatalogReadContext context, string operation, string selector, ILocator locator)
+    {
+        try { return await locator.InnerTextAsync(new() { Timeout = 1_000 }); }
+        catch (TimeoutException ex)
+        {
+            logger.LogDebug(
+                "CellphoneS optional product field was not available before its wait timed out. Source={Source}; JobId={JobId}; Stage={Stage}; Operation={Operation}; Selector={Selector}; ActionTimeoutMs=1000; ExceptionType={ExceptionType}",
+                context.Source, context.JobId, context.Stage, operation, selector, ex.GetType().FullName);
+            return null;
+        }
+        catch (PlaywrightException) { return null; }
     }
 
     private static HttpClient CreateRobotsClient(string proxyAddress)
@@ -228,11 +256,6 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         return specs;
     }
 
-    private static async Task<string?> OptionalTextAsync(ILocator locator)
-    {
-        try { return await locator.InnerTextAsync(new() { Timeout = 1000 }); }
-        catch (PlaywrightException) { return null; }
-    }
 }
 
 internal sealed record CellphoneSCategoryProduct(

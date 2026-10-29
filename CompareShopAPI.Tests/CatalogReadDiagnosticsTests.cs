@@ -284,11 +284,20 @@ public sealed class CatalogReadDiagnosticsTests
             : new Worker.CellphoneSPlaywrightCatalogReader(_ => client, cellLogger, CreateBrowser);
         Assert.Same(failure, await Assert.ThrowsAsync<TimeoutException>(() => reader.ReadAsync(
             bhx ? "bhx" : "cellphones", bhx ? "/bia" : "/laptop/mac.html", 29, default)));
-        var entry = Assert.Single(bhx ? logger.Entries : cellLogger.Entries);
+        var entries = bhx ? logger.Entries : cellLogger.Entries;
+        var entry = Assert.Single(entries, item => item.Text.StartsWith("Catalog scrape failed.", StringComparison.Ordinal));
         Assert.Contains("Stage=" + stage, entry.Text);
         Assert.Contains("JobId=29", entry.Text);
         Assert.DoesNotContain("private", entry.Text);
         Assert.Null(entry.Exception);
+        if (!bhx && stage == "ProductFields")
+        {
+            var fieldTimeout = Assert.Single(entries, item => item.Text.StartsWith("CellphoneS Playwright product field timed out.", StringComparison.Ordinal));
+            Assert.Contains("Operation=listing.card[0].href", fieldTimeout.Text);
+            Assert.Contains("ActionTimeoutMs=8000", fieldTimeout.Text);
+            Assert.DoesNotContain("private", fieldTimeout.Text);
+            Assert.Null(fieldTimeout.Exception);
+        }
     }
 
     public class Stub : DispatchProxy

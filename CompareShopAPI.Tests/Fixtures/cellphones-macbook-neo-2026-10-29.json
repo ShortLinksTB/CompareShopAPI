@@ -1,0 +1,22 @@
+{
+  "capturedDateUtc": "2026-10-29",
+  "categoryUrl": "https://www.cellphones.com.vn/laptop/mac.html",
+  "productUrl": "https://cellphones.com.vn/macbook-neo-13-a18-pro-6-cpu-5-gpu-8gb-256gb.html",
+  "robotsAllowedCategory": true,
+  "robotsAllowedProductPath": true,
+  "capturePolicy": "CellphoneSRequestGuard and the existing BhxForwardProxy; only exact approved CellphoneS hosts; 250 ms serialized request gate",
+  "categoryProduct": {
+    "name": "MacBook Neo 13 inch A18 Pro 2026 6CPU 5GPU 8GB 256GB | Chính hãng Apple Việt Nam",
+    "currentPriceText": "18.790.000đ",
+    "originalPriceText": "19.490.000đ",
+    "productHref": "https://cellphones.com.vn/macbook-neo-13-a18-pro-6-cpu-5-gpu-8gb-256gb.html"
+  },
+  "detailVariants": [
+    { "id": "125875", "isActive": false, "href": "/macbook-neo-13-a18-pro-6-cpu-5-gpu-8gb-256gb.html?product_id=125875", "title": "Bạc", "priceText": "19.290.000₫" },
+    { "id": "125878", "isActive": false, "href": "/macbook-neo-13-a18-pro-6-cpu-5-gpu-8gb-256gb.html?product_id=125878", "title": "Hồng Phớt", "priceText": "19.390.000₫" },
+    { "id": "125877", "isActive": false, "href": "/macbook-neo-13-a18-pro-6-cpu-5-gpu-8gb-256gb.html?product_id=125877", "title": "Xanh Indigo", "priceText": "18.990.000₫" },
+    { "id": "125876", "isActive": true, "href": "/macbook-neo-13-a18-pro-6-cpu-5-gpu-8gb-256gb.html?product_id=125876", "title": "Vàng Citrus", "priceText": "18.790.000₫" }
+  ],
+  "publishedProductJsonLdSku": "macbook-neo-13-a18-pro-6-cpu-5-gpu-8gb-256gb",
+  "note": "The category card has no data-product-id/data-sku. The slug-like JSON-LD sku is deliberately not used; the numeric source-published active variant ID is validated against the matching price and product_id link."
+}

@@ -1,0 +1,21 @@
+{
+  "capturedDateUtc": "2026-10-29",
+  "robotsUrl": "https://www.bachhoaxanh.com/robots.txt",
+  "robotsStatus": 200,
+  "robotsDisallowsBia": false,
+  "categoryUrl": "https://www.bachhoaxanh.com/bia",
+  "categoryStatus": 200,
+  "responseBytes": 102851,
+  "responseSha256": "b61cc30ca1cca032bbadd7d9149a56b22108f3b9de069805e77b79145c74119f",
+  "requestedHosts": ["www.bachhoaxanh.com"],
+  "referencedButNotRequestedHost": "bhxcdn.vn",
+  "observedProductFieldCounts": {
+    "data-product-code": 0,
+    "data-product-id": 0,
+    "productCode": 0,
+    "productId": 0,
+    "sku": 0,
+    "product_name": 0
+  },
+  "finding": "The permitted same-host response contains references to bhxcdn.vn but no product data consumed by the current parser. No request was sent to the unapproved host; no source product fixture can be produced from this response."
+}

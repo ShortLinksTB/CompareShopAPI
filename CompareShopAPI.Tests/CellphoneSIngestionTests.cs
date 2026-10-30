@@ -22,6 +22,31 @@ public sealed class CellphoneSIngestionTests
     }
 
     [Theory]
+    [InlineData("cellphones", "/laptop/mac.html")]
+    [InlineData("cellphones-asus", "/laptop/asus.html")]
+    [InlineData("cellphones-lenovo", "/laptop/lenovo.html")]
+    [InlineData("cellphones-dell", "/laptop/dell.html")]
+    [InlineData("cellphones-hp", "/laptop/hp.html")]
+    [InlineData("cellphones-acer", "/laptop/acer.html")]
+    public void Only_the_six_approved_source_path_pairs_are_supported(string key, string path)
+    {
+        Assert.True(new WorkerIngestion.CellphoneSPlaywrightCatalogReader().Supports(key));
+        Assert.True(DataSource.IsSupportedCategory(key, path));
+        Assert.Throws<ArgumentException>(() => new DataSource(key, key, path == "/laptop/mac.html" ? "/laptop/asus.html" : "/laptop/mac.html", null, DateTime.UtcNow));
+    }
+
+    [Theory]
+    [InlineData("cellphones", "/laptop/asus.html")]
+    [InlineData("cellphones-asus", "/laptop/mac.html")]
+    [InlineData("cellphones-unknown", "/laptop/unknown.html")]
+    [InlineData("cellphones-dell", "/laptop/dell.html/extra")]
+    public void Every_other_source_path_pair_is_rejected(string key, string path)
+    {
+        Assert.False(DataSource.IsSupportedCategory(key, path));
+        Assert.Throws<ArgumentException>(() => new DataSource(key, key, path, null, DateTime.UtcNow));
+    }
+
+    [Theory]
     [InlineData("https://www.cellphones.com.vn/laptop/mac.html", true)]
     [InlineData("https://cellphones.com.vn/macbook-air-m4-13-inch.html", true)]
     [InlineData("http://www.cellphones.com.vn/laptop/mac.html", false)]
@@ -65,6 +90,11 @@ public sealed class CellphoneSIngestionTests
     public async Task Product_path_is_limited_and_redirect_targets_are_revalidated()
     {
         Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/laptop/mac.html")));
+        foreach (var path in new[] { "asus", "lenovo", "dell", "hp", "acer" })
+            Assert.True(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri($"https://cellphones.com.vn/laptop/{path}.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/laptop/windows.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("http://cellphones.com.vn/laptop/asus.html")));
+        Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn:444/laptop/asus.html")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://www.cellphones.com.vn/laptop/mac.html")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/macbook-air-m4-13-inch.html")));
         Assert.False(WorkerIngestion.CellphoneSRequestGuard.IsAllowedProductPage(new Uri("https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html")));
@@ -172,6 +202,36 @@ public sealed class CellphoneSIngestionTests
         Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsDisallowed("User-agent: *\nDisallow: /laptop/", "/laptop/mac.html"));
         Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsDisallowed("User-agent: *\nDisallow: /admin", "/laptop/mac.html"));
         Assert.NotEmpty(WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications("Apple M5 10-core GPU 16GB 512GB"));
+    }
+
+    [Theory]
+    [InlineData("cellphones", "Apple M5 16GB 512GB 13.6 inch", "Apple", "chip")]
+    [InlineData("cellphones-asus", "Intel Core Ultra 7 155H 16GB 512GB 15.6 inch", "Asus", "processor")]
+    [InlineData("cellphones-lenovo", "AMD Ryzen 7 8845HS 32GB 1TB 14 inch", "Lenovo", "processor")]
+    [InlineData("cellphones-dell", "Intel Core i7-13620H 16GB 512GB 15.6 inch", "Dell", "processor")]
+    [InlineData("cellphones-hp", "Snapdragon X Plus 16GB 512GB 14 inch", "HP", "processor")]
+    [InlineData("cellphones-acer", "Intel Core i5-1235U 8GB 256GB 14 inch", "Acer", "processor")]
+    public void Category_metadata_is_source_specific_and_required_specs_fail_closed(string key, string text, string brand, string processorKey)
+    {
+        var specs = WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications(text, key);
+        Assert.Equal(brand, DataSource.CellphoneSBrands[key]);
+        Assert.True(specs.ContainsKey(processorKey));
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(specs, key));
+        var productName = key switch
+        {
+            "cellphones" => "Apple MacBook",
+            "cellphones-asus" => "Asus Vivobook",
+            "cellphones-lenovo" => "Lenovo ThinkPad",
+            "cellphones-dell" => "Dell XPS",
+            "cellphones-hp" => "HP Pavilion",
+            _ => "Acer Aspire"
+        };
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid(productName, specs, key));
+        Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid("Apple MacBook", specs, key == "cellphones" ? "cellphones-asus" : key));
+        Assert.Throws<InvalidDataException>(() => WorkerIngestion.CellphoneSPlaywrightCatalogReader.ValidateCategoryProduct("wrong brand", specs, key));
+        Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(
+            specs.Where(pair => pair.Key != "storage").ToDictionary(pair => pair.Key, pair => pair.Value), key));
+        if (key != DataSource.CellphoneSKey) Assert.DoesNotContain("Apple", string.Join(" ", specs.Values));
     }
 
     [Fact]

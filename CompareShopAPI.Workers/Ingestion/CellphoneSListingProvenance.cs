@@ -1,11 +1,16 @@
 using System.Net;
 using System.Text.RegularExpressions;
+using CompareShopAPI.Domain.Ingestion;
 
 namespace CompareShopAPI.Workers.Ingestion;
 
 internal sealed class CellphoneSListingProvenance
 {
     internal static readonly Uri ApprovedListing = new("https://cellphones.com.vn/laptop/mac.html");
+    internal static Uri ListingForPath(string categoryPath) =>
+        DataSource.CellphoneSCategories.Values.Contains(categoryPath, StringComparer.Ordinal)
+            ? new Uri($"https://cellphones.com.vn{categoryPath}")
+            : throw new InvalidDataException("CellphoneS category path is not approved.");
     private static readonly Regex TagPattern = new("<!--.*?-->|<(?<close>/)?(?<name>[a-zA-Z][a-zA-Z0-9:-]*)\\b(?<attrs>[^>]*)>", RegexOptions.Singleline | RegexOptions.CultureInvariant);
     private static readonly Regex RawTextElementPattern = new("<(script|style)\\b[^>]*>.*?</\\1\\s*>", RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex AttributePattern = new("(?<name>[a-zA-Z_:][a-zA-Z0-9:._-]*)\\s*=\\s*(?:\"(?<double>[^\"]*)\"|'(?<single>[^']*)'|(?<plain>[^\\s>]+))", RegexOptions.CultureInvariant);
@@ -20,7 +25,7 @@ internal sealed class CellphoneSListingProvenance
         provenance = null;
         if (!IsExactListing(responseUri) || string.IsNullOrEmpty(responseBody)) return false;
         var hrefs = ExtractProductCardHrefs(responseBody)
-            .Select(href => Uri.TryCreate(ApprovedListing, WebUtility.HtmlDecode(href.Trim()), out var resolved) ? Canonicalize(resolved) : null)
+            .Select(href => Uri.TryCreate(responseUri, WebUtility.HtmlDecode(href.Trim()), out var resolved) ? Canonicalize(resolved) : null)
             .Where(value => value is not null)
             .Cast<string>()
             .ToHashSet(StringComparer.Ordinal);
@@ -35,7 +40,7 @@ internal sealed class CellphoneSListingProvenance
     internal static bool IsExactListing(Uri? uri) => uri is { IsAbsoluteUri: true, Port: 443, UserInfo.Length: 0, Query.Length: 0, Fragment.Length: 0 } &&
         string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.Ordinal) &&
         string.Equals(uri.IdnHost, ApprovedListing.IdnHost, StringComparison.Ordinal) &&
-        string.Equals(uri.AbsolutePath, ApprovedListing.AbsolutePath, StringComparison.Ordinal);
+        DataSource.CellphoneSCategories.Values.Contains(uri.AbsolutePath, StringComparer.Ordinal);
 
     internal static string Canonicalize(Uri uri) => $"https://{uri.IdnHost.ToLowerInvariant()}{uri.AbsolutePath}";
 

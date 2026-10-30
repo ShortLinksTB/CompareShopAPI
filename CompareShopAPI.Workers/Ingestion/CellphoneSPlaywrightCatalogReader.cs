@@ -11,7 +11,6 @@ namespace CompareShopAPI.Workers.Ingestion;
 
 public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
 {
-    private static readonly Uri CategoryUri = CellphoneSListingProvenance.ApprovedListing;
     private const string UserAgent = "CompareShopPriceMonitor/1.0 (+https://giamha.online)";
     private const float ProductFieldActionTimeoutMs = 8_000;
     private readonly Func<string, HttpClient> robotsClientFactory;
@@ -30,7 +29,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         this.playwrightFactory = playwrightFactory ?? Playwright.CreateAsync;
     }
 
-    public bool Supports(string sourceKey) => sourceKey == DataSource.CellphoneSKey;
+    public bool Supports(string sourceKey) => DataSource.CellphoneSCategories.ContainsKey(sourceKey);
 
     public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct)
         => ReadWithContextAsync(sourceKey, categoryPath, null, ct);
@@ -40,22 +39,23 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
 
     private Task<IReadOnlyList<ScrapedOffer>> ReadWithContextAsync(string sourceKey, string categoryPath, int? jobId, CancellationToken ct)
     {
-        if (!Supports(sourceKey) || categoryPath != "/laptop/mac.html") throw new InvalidDataException("CellphoneS category is not supported.");
-        var context = new CatalogReadContext(DataSource.CellphoneSKey, jobId);
-        return CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedCoreAsync(context, ct), context);
+        if (!Supports(sourceKey) || !DataSource.IsSupportedCategory(sourceKey, categoryPath)) throw new InvalidDataException("CellphoneS category is not supported.");
+        var context = new CatalogReadContext(sourceKey, jobId);
+        return CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedCoreAsync(context, sourceKey, categoryPath, ct), context);
     }
 
-    private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedCoreAsync(CatalogReadContext context, CancellationToken ct)
+    private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedCoreAsync(CatalogReadContext context, string sourceKey, string categoryPath, CancellationToken ct)
     {
+        var categoryUri = CellphoneSListingProvenance.ListingForPath(categoryPath);
         context.Stage = CatalogReadStage.Robots;
         await using var proxy = await BhxForwardProxy.StartAsync(CellphoneSRequestGuard.AllowedHosts, ct);
         using var robotsClient = robotsClientFactory(proxy.Server);
-        using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(CategoryUri, "/robots.txt"));
+        using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(categoryUri, "/robots.txt"));
         robotsRequest.Headers.UserAgent.ParseAdd(UserAgent);
         using var robots = await CellphoneSRequestGuard.SendWithRedirectsAsync(robotsClient, robotsRequest, ct);
         if (!robots.IsSuccessStatusCode) throw new SourceAccessBlockedException();
         var robotsText = await robots.Content.ReadAsStringAsync(ct);
-        if (IsDisallowed(robotsText, "/laptop/mac.html")) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
+        if (IsDisallowed(robotsText, categoryPath)) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
 
         context.Stage = CatalogReadStage.BrowserLaunch;
         using var playwright = await playwrightFactory();
@@ -67,7 +67,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         CellphoneSListingProvenance? provenance = null;
         await page.RouteAsync("**/*", route => HandleRouteAsync(route, context, activeCardHref, () => provenance, gate, ct));
         context.Stage = CatalogReadStage.Navigation;
-        var response = await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
+        var response = await page.GotoAsync(categoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
         context.Stage = CatalogReadStage.AccessCheck;
         if (response is null || !CellphoneSListingProvenance.TryCreate(new Uri(response.Url), System.Text.Encoding.UTF8.GetString(await response.BodyAsync()), out var extractedProvenance))
             throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
@@ -90,7 +90,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             var price = ParsePrice(await ReadProductFieldAsync(context, $"listing.card[{i}].price", ".product__price--show", () => card.Locator(".product__price--show").First.InnerTextAsync()));
             if (string.IsNullOrWhiteSpace(href) || string.IsNullOrWhiteSpace(name) || price <= 0)
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
-            var url = new Uri(CategoryUri, href);
+            var url = new Uri(categoryUri, href);
             if (!approvedListing.Contains(url))
             {
                 LogDeniedProductUrl(context, href, null);
@@ -99,12 +99,13 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             var imageLocator = card.Locator("img").First;
             var image = await ReadProductFieldAsync(context, $"listing.card[{i}].image.src", "img[src]", () => imageLocator.GetAttributeAsync("src"))
                 ?? await ReadProductFieldAsync(context, $"listing.card[{i}].image.data-src", "img[data-src]", () => imageLocator.GetAttributeAsync("data-src"));
-            var imageUrl = image is null ? null : new Uri(CategoryUri, image).ToString();
+            var imageUrl = image is null ? null : new Uri(categoryUri, image).ToString();
             if (imageUrl is not null && !CellphoneSRequestGuard.IsAllowed(new Uri(imageUrl))) imageUrl = null;
             var original = ParsePriceOrNull(await OptionalProductTextAsync(context, $"listing.card[{i}].original-price", ".product__price--through", card.Locator(".product__price--through").First));
             var text = (await ReadProductFieldAsync(context, $"listing.card[{i}].text", ".product-info", () => card.InnerTextAsync())).ToLowerInvariant();
             var stock = text.Contains("sắp về hàng") || text.Contains("sắp về") ? "coming_soon" : text.Contains("hết hàng") ? "out_of_stock" : text.Contains("còn hàng") ? "in_stock" : "unknown";
-            var specs = ParseSpecifications(await ReadProductFieldAsync(context, $"listing.card[{i}].specifications", ".product-info", () => card.InnerTextAsync()));
+            var specs = ParseSpecifications(await ReadProductFieldAsync(context, $"listing.card[{i}].specifications", ".product-info", () => card.InnerTextAsync()), sourceKey);
+            ValidateCategoryProduct(name, specs, sourceKey);
             categoryProducts.Add(new CellphoneSCategoryProduct(name, price, url, imageUrl, original, specs, stock));
             await Task.Delay(500, ct);
         }
@@ -127,8 +128,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
 
             context.Stage = CatalogReadStage.ProductFields;
             var sku = await ReadPublishedProductIdAsync(context, page, approvedListing, product.Url, detailUri, product.PriceVnd);
-            rows.Add(new ScrapedOffer(sku, product.Name, "Apple", product.PriceVnd, product.Url.ToString(), product.ImageUrl,
-                product.OriginalPriceVnd, product.Specifications, product.StockStatus));
+            rows.Add(CreateOffer(product, sku, sourceKey));
         }
         return rows;
     }
@@ -169,10 +169,10 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     {
         logger.LogWarning("CellphoneS product URL denied. Source={Source}; JobId={JobId}; Stage={Stage}; CardHref={CardHref}; CardHrefPath={CardHrefPath}; FinalRequestUri={FinalRequestUri}; FinalRequestPath={FinalRequestPath}",
             context.Source, context.JobId, context.Stage,
-            CellphoneSRequestGuard.SafeUrlForDiagnostics(cardHref, CategoryUri),
-            CellphoneSRequestGuard.SafePathForDiagnostics(cardHref, CategoryUri),
-            finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafeUrlForDiagnostics(finalUri, CategoryUri),
-            finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafePathForDiagnostics(finalUri, CategoryUri));
+            CellphoneSRequestGuard.SafeUrlForDiagnostics(cardHref, CellphoneSListingProvenance.ApprovedListing),
+            CellphoneSRequestGuard.SafePathForDiagnostics(cardHref, CellphoneSListingProvenance.ApprovedListing),
+            finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafeUrlForDiagnostics(finalUri, CellphoneSListingProvenance.ApprovedListing),
+            finalUri is null ? "[not-observed]" : CellphoneSRequestGuard.SafePathForDiagnostics(finalUri, CellphoneSListingProvenance.ApprovedListing));
     }
 
     private async Task<string> ReadPublishedProductIdAsync(CatalogReadContext context, IPage page, CellphoneSListingProvenance provenance, Uri expectedUrl, Uri detailUrl, int listingPrice)
@@ -242,19 +242,49 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         return int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : null;
     }
 
-    internal static IReadOnlyDictionary<string, string> ParseSpecifications(string text)
+    internal static IReadOnlyDictionary<string, string> ParseSpecifications(string text, string sourceKey = DataSource.CellphoneSKey)
     {
         var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var chip = Regex.Match(text, @"Apple\s+M\d+(?:\s+(?:Pro|Max))?", RegexOptions.IgnoreCase);
+        var apple = sourceKey == DataSource.CellphoneSKey;
+        var processorPattern = apple
+            ? @"(?:Apple\s+)?(?:M\d+(?:\s+(?:Pro|Max|Ultra))?|A\d{2}(?:\s+Pro)?)"
+            : @"(?:Intel\s+)?Core\s+Ultra\s+[3579](?:\s?\d{3,5}[A-Z]{0,2})?|(?:Intel\s+)?Core\s+i[3579]\s?-?\s?\d{4,5}[A-Z]{0,2}|AMD\s+Ryzen\s+[3579]\s+\d{4,5}[A-Z]{0,2}|Snapdragon\s+X(?:\s+(?:Plus|Elite))?";
+        var processor = Regex.Match(text, processorPattern, RegexOptions.IgnoreCase);
         var memory = Regex.Match(text, @"\b(?:8|16|18|24|32|36|48|64|96|128)\s?GB\b", RegexOptions.IgnoreCase);
-        var storage = Regex.Match(text, @"\b(?:256|512)\s?GB\b|\b[1248]\s?TB\b", RegexOptions.IgnoreCase);
-        var screen = Regex.Match(text, @"\b\d{1,2}(?:\.\d)?\s?inch\b", RegexOptions.IgnoreCase);
-        if (chip.Success) specs["chip"] = chip.Value;
+        var storage = Regex.Match(text, @"\b(?:128|256|512|1024|2048)\s?GB\b|\b[1248]\s?TB\b", RegexOptions.IgnoreCase);
+        var screen = Regex.Match(text, @"\b\d{1,2}(?:\.\d)?\s?(?:inch\b|[""”])", RegexOptions.IgnoreCase);
+        if (processor.Success) specs[apple ? "chip" : "processor"] = processor.Value.Trim();
         if (memory.Success) specs["memory"] = memory.Value;
         if (storage.Success) specs["storage"] = storage.Value;
         if (screen.Success) specs["screen"] = screen.Value;
         return specs;
     }
+
+    internal static bool HasRequiredSpecifications(IReadOnlyDictionary<string, string> specs, string sourceKey)
+    {
+        var processorKey = sourceKey == DataSource.CellphoneSKey ? "chip" : "processor";
+        return DataSource.CellphoneSBrands.ContainsKey(sourceKey) && specs.TryGetValue(processorKey, out var processor) &&
+            !string.IsNullOrWhiteSpace(processor) && specs.ContainsKey("memory") && specs.ContainsKey("storage") && specs.ContainsKey("screen");
+    }
+
+    internal static bool IsCategoryProductValid(string name, IReadOnlyDictionary<string, string> specs, string sourceKey)
+    {
+        if (!DataSource.CellphoneSBrands.TryGetValue(sourceKey, out var expectedBrand) || !HasRequiredSpecifications(specs, sourceKey)) return false;
+        var brandMatches = sourceKey == DataSource.CellphoneSKey
+            ? name.Contains("Apple", StringComparison.OrdinalIgnoreCase) || name.Contains("MacBook", StringComparison.OrdinalIgnoreCase)
+            : name.Contains(expectedBrand, StringComparison.OrdinalIgnoreCase);
+        return brandMatches;
+    }
+
+    internal static void ValidateCategoryProduct(string name, IReadOnlyDictionary<string, string> specs, string sourceKey)
+    {
+        if (!IsCategoryProductValid(name, specs, sourceKey))
+            throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductSchemaInvalid);
+    }
+
+    internal static ScrapedOffer CreateOffer(CellphoneSCategoryProduct product, string sku, string sourceKey) =>
+        new(sku, product.Name, DataSource.CellphoneSBrands[sourceKey], product.PriceVnd, product.Url.ToString(), product.ImageUrl,
+            product.OriginalPriceVnd, product.Specifications, product.StockStatus);
 
 }
 

@@ -20,6 +20,31 @@ public sealed class CellphoneSProductParserTests
         new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
     private static readonly Worker.CellphoneSListingProvenance ApprovedProvenance = CreateProvenance(SourceFixture.ProductUrl);
 
+    [Theory]
+    [InlineData("cellphones", "Apple")]
+    [InlineData("cellphones-asus", "Asus")]
+    [InlineData("cellphones-lenovo", "Lenovo")]
+    [InlineData("cellphones-dell", "Dell")]
+    [InlineData("cellphones-hp", "HP")]
+    [InlineData("cellphones-acer", "Acer")]
+    public void Shared_reader_builds_category_metadata_without_leaking_Apple_brand(string sourceKey, string expectedBrand)
+    {
+        var product = new Worker.CellphoneSCategoryProduct(
+            "Laptop product", 1000, new Uri("https://cellphones.com.vn/laptop-product.html"),
+            "https://cdn.cellphones.com.vn/images/laptop.jpg", 1200,
+            new Dictionary<string, string> { ["memory"] = "16GB", ["storage"] = "512GB", ["screen"] = "15.6 inch" }, "in_stock");
+
+        var offer = Worker.CellphoneSPlaywrightCatalogReader.CreateOffer(product, "published-sku", sourceKey);
+
+        Assert.Equal(expectedBrand, offer.Brand);
+        Assert.Equal("published-sku", offer.ExternalSku);
+        Assert.Equal(1000, offer.PriceVnd);
+        Assert.Equal(1200, offer.OriginalPriceVnd);
+        Assert.Equal("in_stock", offer.StockStatus);
+        Assert.Contains("16GB", offer.SpecificationsJson);
+        Assert.True(offer.IsValid);
+    }
+
     [Fact]
     public async Task Product_field_timeout_logs_the_exact_operation_and_is_rethrown()
     {
@@ -105,6 +130,8 @@ public sealed class CellphoneSProductParserTests
     [Fact]
     public async Task Reader_uses_published_category_prices_and_detail_variant_identity()
     {
+        var fixtureSpecs = Worker.CellphoneSPlaywrightCatalogReader.ParseSpecifications(SourceFixture.CategoryProduct.Name, DataSource.CellphoneSKey);
+        Assert.True(Worker.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid(SourceFixture.CategoryProduct.Name, fixtureSpecs, DataSource.CellphoneSKey), string.Join(";", fixtureSpecs.Select(x => $"{x.Key}={x.Value}")));
         var productPage = CreateLocator((method, args) => method switch
         {
             "Locator" => (string)args![0]! switch

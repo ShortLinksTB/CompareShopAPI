@@ -96,7 +96,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
                 LogDeniedProductUrl(context, href, null);
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
             }
-            if (IsOutOfScopeMacDesktopProduct(name, sourceKey)) continue;
+            if (IsOutOfScopeMacDesktopProduct(name, sourceKey, url, approvedListing)) continue;
             var imageLocator = card.Locator("img").First;
             var image = await ReadProductFieldAsync(context, $"listing.card[{i}].image.src", "img[src]", () => imageLocator.GetAttributeAsync("src"))
                 ?? await ReadProductFieldAsync(context, $"listing.card[{i}].image.data-src", "img[data-src]", () => imageLocator.GetAttributeAsync("data-src"));
@@ -272,14 +272,16 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         return specs.TryGetValue("chip", out var chip) && !string.IsNullOrWhiteSpace(chip);
     }
 
-    internal static bool IsOutOfScopeMacDesktopProduct(string name, string sourceKey) =>
-        sourceKey == DataSource.CellphoneSKey && Regex.IsMatch(name, @"\bMac\s*mini\b", RegexOptions.IgnoreCase);
+    internal static bool IsOutOfScopeMacDesktopProduct(
+        string name, string sourceKey, Uri productUrl, CellphoneSListingProvenance provenance) =>
+        sourceKey == DataSource.CellphoneSKey && provenance.Contains(productUrl) &&
+        Regex.IsMatch(name, @"\bMac\s*mini\b", RegexOptions.IgnoreCase);
 
     internal static bool IsCategoryProductValid(string name, IReadOnlyDictionary<string, string> specs, string sourceKey)
     {
         if (!DataSource.CellphoneSBrands.TryGetValue(sourceKey, out var expectedBrand) || !HasRequiredSpecifications(specs, sourceKey)) return false;
         var brandMatches = sourceKey == DataSource.CellphoneSKey
-            ? name.Contains("MacBook", StringComparison.OrdinalIgnoreCase)
+            ? Regex.IsMatch(name, @"\bMacBook\b", RegexOptions.IgnoreCase)
             : name.Contains(expectedBrand, StringComparison.OrdinalIgnoreCase);
         return brandMatches;
     }

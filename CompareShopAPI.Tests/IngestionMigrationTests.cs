@@ -70,6 +70,59 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
     }
 
     [Fact]
+    public async Task Expired_lease_is_reclaimed_even_when_source_cadence_is_not_due()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopExpiredLease_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var now = new DateTime(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc);
+        var expiredAt = now.AddMinutes(SyncJob.LeaseDurationMinutes + 1);
+        try
+        {
+            int sourceId;
+            int expiredJobId;
+            await using (var setup = new CompareShopDbContext(options))
+            {
+                await setup.Database.EnsureCreatedAsync();
+                var source = new DataSource("cellphones", "CellphoneS", "/laptop/mac.html", null, now);
+                source.Complete(now);
+                setup.DataSources.Add(source);
+                await setup.SaveChangesAsync();
+                sourceId = source.Id;
+
+                var expiredJob = new SyncJob(sourceId, now);
+                Assert.True(expiredJob.Start(now, "expired-lease", now.AddMinutes(SyncJob.LeaseDurationMinutes)));
+                setup.SyncJobs.Add(expiredJob);
+                await setup.SaveChangesAsync();
+                expiredJobId = expiredJob.Id;
+            }
+
+            await using (var activePoll = new CompareShopDbContext(options))
+                Assert.Null(await new EfSyncJobStore(activePoll).TryClaim(sourceId, now.AddMinutes(10), CancellationToken.None));
+
+            await using (var poll = new CompareShopDbContext(options))
+                Assert.Contains(await new EfSyncJobStore(poll).DueSources(expiredAt, CancellationToken.None), source => source.Id == sourceId);
+
+            SyncJob reclaimed;
+            await using (var recoveryPoll = new CompareShopDbContext(options))
+                reclaimed = (await new EfSyncJobStore(recoveryPoll).TryClaim(sourceId, expiredAt, CancellationToken.None))!;
+
+            Assert.NotNull(reclaimed);
+            Assert.NotEqual(expiredJobId, reclaimed.Id);
+            Assert.Equal(SyncJobState.Running, reclaimed.State);
+            await using var verification = new CompareShopDbContext(options);
+            var expiredJobRow = await verification.SyncJobs.SingleAsync(job => job.Id == expiredJobId);
+            Assert.Equal(SyncJobState.Failed, expiredJobRow.State);
+            Assert.Equal("lease_expired", expiredJobRow.ErrorCode);
+            Assert.Equal(1, await verification.SyncJobs.CountAsync(job => job.DataSourceId == sourceId && job.State == SyncJobState.Running));
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task Migration_adds_only_ingestion_objects_and_seeds_bhx_without_requiring_shop_row()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopIngestion_{Guid.NewGuid():N}" }.ConnectionString;

@@ -40,8 +40,10 @@ public sealed class SourceRedirectDeniedException : Exception
     }
 }
 
-public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISourceCatalogReader> readers, IPriceHistoryRecorder history, TimeProvider clock)
+public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISourceCatalogReader> readers, IPriceHistoryRecorder history, TimeProvider clock, TimeSpan? executionTimeout = null)
 {
+    private readonly TimeSpan executionLimit = ResolveExecutionLimit(executionTimeout);
+
     public async Task RunDueSources(CancellationToken ct)
     {
         var now = clock.GetUtcNow().UtcDateTime;
@@ -54,21 +56,30 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISource
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0, "shop_unavailable", "Partner shop is missing or disabled.", ct);
                 continue;
             }
+            using var execution = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            execution.CancelAfter(executionLimit);
             try
             {
                 // Keep active work shorter than the persisted lease so an expired claim is always safe to reclaim.
-                using var execution = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                execution.CancelAfter(TimeSpan.FromMinutes(SyncJob.LeaseDurationMinutes - 10));
                 var sourceKey = dataSource.Key;
                 var reader = readers.SingleOrDefault(candidate => candidate.Supports(sourceKey));
                 if (reader is null || !DataSource.IsSupportedCategory(sourceKey, dataSource.CategoryPath)) throw new InvalidDataException("No reader supports this source category.");
-                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, job.Id, execution.Token);
+                // Some browser-driver operations do not accept a CancellationToken. WaitAsync
+                // keeps the job bounded even if one of those operations stops responding.
+                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, job.Id, execution.Token)
+                    .WaitAsync(execution.Token);
                 if (rows.Count == 0 || rows.Any(row => !row.IsValid)) throw new InvalidDataException("Source returned no validated products.");
                 var result = await jobs.Import(dataSource.Id, rows, true, execution.Token);
                 await history.RecordForChangedMinimums(execution.Token);
                 await jobs.Complete(dataSource.Id, job, result.Pending > 0 ? SyncJobState.Partial : SyncJobState.Success, clock.GetUtcNow().UtcDateTime, rows.Count, result.Imported, result.Pending, null, null, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (OperationCanceledException) when (execution.IsCancellationRequested)
+            {
+                System.Diagnostics.Trace.TraceWarning("Catalog source sync timed out; job {0} is recorded as failed.", job.Id);
+                await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
+                    "execution_timeout", "Catalog source exceeded its execution time limit.", ct);
+            }
             catch (SourceAccessBlockedException)
             {
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
@@ -85,6 +96,14 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISource
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0, "source_failure", "Catalog source could not be read or imported.", ct);
             }
         }
+    }
+
+    private static TimeSpan ResolveExecutionLimit(TimeSpan? configured)
+    {
+        var limit = configured ?? TimeSpan.FromMinutes(SyncJob.LeaseDurationMinutes - 10);
+        if (limit <= TimeSpan.Zero || limit > TimeSpan.FromMinutes(SyncJob.LeaseDurationMinutes - 10))
+            throw new ArgumentOutOfRangeException(nameof(configured), "Catalog execution timeout must be positive and shorter than the sync-job lease.");
+        return limit;
     }
 }
 

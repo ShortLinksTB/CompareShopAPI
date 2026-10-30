@@ -76,7 +76,7 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
         context.Stage = CatalogReadStage.BrowserLaunch;
         using var playwright = await playwrightFactory();
         await using var egressProxy = await BhxForwardProxy.StartAsync(ct);
-        await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(egressProxy.Server));
+        await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(egressProxy.Server)).WaitAsync(ct);
         var page = await browser.NewPageAsync(new BrowserNewPageOptions { AcceptDownloads = false });
         page.SetDefaultNavigationTimeout(20_000); page.SetDefaultTimeout(8_000);
         using var requestGate = new SemaphoreSlim(1, 1);

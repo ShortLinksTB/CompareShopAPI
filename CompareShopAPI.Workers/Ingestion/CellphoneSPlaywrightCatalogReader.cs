@@ -59,7 +59,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
 
         context.Stage = CatalogReadStage.BrowserLaunch;
         using var playwright = await playwrightFactory();
-        await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(proxy.Server));
+        await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(proxy.Server)).WaitAsync(ct);
         var page = await browser.NewPageAsync(new BrowserNewPageOptions { AcceptDownloads = false, UserAgent = UserAgent });
         page.SetDefaultNavigationTimeout(20_000); page.SetDefaultTimeout(ProductFieldActionTimeoutMs);
         using var gate = new SemaphoreSlim(1, 1);

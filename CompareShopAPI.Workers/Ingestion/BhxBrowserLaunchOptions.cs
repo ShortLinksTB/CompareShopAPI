@@ -5,6 +5,8 @@ namespace CompareShopAPI.Workers.Ingestion;
 
 public static class BhxBrowserLaunchOptions
 {
+    private const float BrowserLaunchTimeoutMs = 60_000;
+
     public static BrowserTypeLaunchOptions Create(string proxyServer)
     {
         if (!Uri.TryCreate(proxyServer, UriKind.Absolute, out var proxyUri) ||
@@ -16,6 +18,7 @@ public static class BhxBrowserLaunchOptions
         return new BrowserTypeLaunchOptions
         {
             Headless = true,
+            Timeout = BrowserLaunchTimeoutMs,
             Args =
             [
                 "--disable-dev-shm-usage",

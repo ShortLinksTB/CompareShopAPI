@@ -11,6 +11,14 @@ namespace CompareShopAPI.Tests;
 
 public sealed class BhxForwardProxyTests
 {
+    [Fact]
+    public void Browser_launch_has_an_explicit_startup_timeout()
+    {
+        var options = WorkerIngestion.BhxBrowserLaunchOptions.Create("http://127.0.0.1:1234");
+
+        Assert.Equal(60_000f, options.Timeout.GetValueOrDefault());
+    }
+
     [Theory]
     [InlineData("bachhoaxanh.com:443")]
     [InlineData("other.example:443")]

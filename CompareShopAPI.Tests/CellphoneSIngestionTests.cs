@@ -250,6 +250,22 @@ public sealed class CellphoneSIngestionTests
         Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(specs, DataSource.CellphoneSKey));
     }
 
+    [Theory]
+    [InlineData("Mac mini M4 2024 10CPU 10GPU 24GB 256GB")]
+    [InlineData("Apple Mac mini M6")]
+    public void Mac_listing_skips_desktop_cards_without_weakening_macbook_validation(string name)
+    {
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsOutOfScopeMacDesktopProduct(name, DataSource.CellphoneSKey));
+        Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsOutOfScopeMacDesktopProduct("Apple MacBook Air M4", DataSource.CellphoneSKey));
+        Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsOutOfScopeMacDesktopProduct(name, "cellphones-asus"));
+
+        var laptopSpecs = WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications("Apple M5 16GB 512GB 13.6 inch");
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid("Apple MacBook Air M5", laptopSpecs, DataSource.CellphoneSKey));
+        Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid("Apple Mac mini M6", laptopSpecs, DataSource.CellphoneSKey));
+        Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid(
+            "Apple MacBook Air M5", laptopSpecs.Where(pair => pair.Key != "screen").ToDictionary(pair => pair.Key, pair => pair.Value), DataSource.CellphoneSKey));
+    }
+
     [Fact]
     public void Scraped_offer_rejects_bad_price_url_and_stock()
     {

@@ -70,7 +70,7 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
     }
 
     [Fact]
-    public async Task Expired_lease_is_reclaimed_even_when_source_cadence_is_not_due()
+    public async Task Expired_lease_is_reclaimed_despite_source_cadence_and_retry_delay()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopExpiredLease_{Guid.NewGuid():N}" }.ConnectionString;
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
@@ -85,6 +85,7 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
                 await setup.Database.EnsureCreatedAsync();
                 var source = new DataSource("cellphones", "CellphoneS", "/laptop/mac.html", null, now);
                 source.Complete(now);
+                source.ScheduleFailureRetry(now);
                 setup.DataSources.Add(source);
                 await setup.SaveChangesAsync();
                 sourceId = source.Id;
@@ -110,10 +111,15 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             Assert.NotEqual(expiredJobId, reclaimed.Id);
             Assert.Equal(SyncJobState.Running, reclaimed.State);
             await using var verification = new CompareShopDbContext(options);
+            var sourceRow = await verification.DataSources.SingleAsync(source => source.Id == sourceId);
+            Assert.True(sourceRow.NextAttemptAtUtc > expiredAt);
             var expiredJobRow = await verification.SyncJobs.SingleAsync(job => job.Id == expiredJobId);
             Assert.Equal(SyncJobState.Failed, expiredJobRow.State);
             Assert.Equal("lease_expired", expiredJobRow.ErrorCode);
+            Assert.Equal(expiredAt, expiredJobRow.FinishedAtUtc);
+            Assert.Null(expiredJobRow.LeaseExpiresAtUtc);
             Assert.Equal(1, await verification.SyncJobs.CountAsync(job => job.DataSourceId == sourceId && job.State == SyncJobState.Running));
+            Assert.Equal(2, await verification.SyncJobs.CountAsync(job => job.DataSourceId == sourceId));
         }
         finally
         {

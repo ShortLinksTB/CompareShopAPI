@@ -96,11 +96,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
                 LogDeniedProductUrl(context, href, null);
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
             }
-            if (IsOutOfScopeMacDesktopProduct(name, sourceKey))
-            {
-                await Task.Delay(500, ct);
-                continue;
-            }
+            if (IsOutOfScopeMacDesktopProduct(name, sourceKey)) continue;
             var imageLocator = card.Locator("img").First;
             var image = await ReadProductFieldAsync(context, $"listing.card[{i}].image.src", "img[src]", () => imageLocator.GetAttributeAsync("src"))
                 ?? await ReadProductFieldAsync(context, $"listing.card[{i}].image.data-src", "img[data-src]", () => imageLocator.GetAttributeAsync("data-src"));

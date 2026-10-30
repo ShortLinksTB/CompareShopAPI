@@ -311,6 +311,80 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
         }
     }
 
+    [Fact]
+    public async Task Category_registration_is_additive_and_preserves_the_existing_mac_identity_and_relation()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopCellphoneSCategories_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            int macId;
+            int originalPartnerShopId;
+            const string originalPath = "/laptop/mac.html";
+            await using (var setup = new CompareShopDbContext(options))
+            {
+                await setup.Database.MigrateAsync("20261027150000_AddCellphoneSOfferData");
+                var cellphonesShopId = await setup.PartnerShops.Where(x => x.Slug == "cellphones").Select(x => x.Id).SingleAsync();
+                var otherShop = new PartnerShop { Slug = $"other-{Guid.NewGuid():N}", Name = "Other shop", WebsiteUrl = "https://other.example", IsActive = true };
+                setup.PartnerShops.Add(otherShop);
+                await setup.SaveChangesAsync();
+                var mac = await setup.DataSources.SingleAsync(x => x.Key == "cellphones");
+                macId = mac.Id;
+                originalPartnerShopId = otherShop.Id;
+                mac.AttachPartnerShop(originalPartnerShopId);
+                await setup.SaveChangesAsync();
+                Assert.NotEqual(cellphonesShopId, originalPartnerShopId);
+                Assert.Equal(originalPath, mac.CategoryPath);
+            }
+
+            await using (var migrate = new CompareShopDbContext(options))
+            {
+                await migrate.Database.MigrateAsync();
+                await migrate.Database.MigrateAsync();
+                var mac = await migrate.DataSources.SingleAsync(x => x.Key == "cellphones");
+                Assert.Equal(macId, mac.Id);
+                Assert.Equal(originalPartnerShopId, mac.PartnerShopId);
+                Assert.Equal(originalPath, mac.CategoryPath);
+
+                var cellphonesShopId = await migrate.PartnerShops.Where(x => x.Slug == "cellphones").Select(x => x.Id).SingleAsync();
+                var categories = await migrate.DataSources.Where(x => x.Key.StartsWith("cellphones-")).ToListAsync();
+                Assert.Equal(5, categories.Count);
+                Assert.All(categories, source => Assert.Equal(cellphonesShopId, source.PartnerShopId));
+                Assert.Equal(1, await migrate.DataSources.CountAsync(x => x.Key == "cellphones-asus"));
+                Assert.Equal("/laptop/acer.html", (await migrate.DataSources.SingleAsync(x => x.Key == "cellphones-acer")).CategoryPath);
+            }
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Category_registration_fails_safely_when_cellphones_shop_is_missing()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopCellphoneSShopGate_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            await using (var setup = new CompareShopDbContext(options))
+            {
+                await setup.Database.MigrateAsync("20261027150000_AddCellphoneSOfferData");
+                await setup.Database.ExecuteSqlRawAsync("UPDATE [PartnerShops] SET [Slug] = N'renamed-cellphones' WHERE [Slug] = N'cellphones'");
+
+                await Assert.ThrowsAsync<SqlException>(() => setup.Database.MigrateAsync());
+                Assert.Equal(0, await setup.DataSources.CountAsync(x => x.Key.StartsWith("cellphones-")));
+                Assert.Equal(1, await setup.DataSources.CountAsync(x => x.Key == "cellphones"));
+            }
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
     [Theory]
     [InlineData("ProductOffers")]
     [InlineData("SourceItemMappings")]

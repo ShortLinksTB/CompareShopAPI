@@ -7,6 +7,25 @@ public sealed class DataSource
 {
     public const string BhxKey = "bhx";
     public const string CellphoneSKey = "cellphones";
+    public const string CellphoneSAsusKey = "cellphones-asus";
+    public const string CellphoneSLenovoKey = "cellphones-lenovo";
+    public const string CellphoneSDellKey = "cellphones-dell";
+    public const string CellphoneSHpKey = "cellphones-hp";
+    public const string CellphoneSAcerKey = "cellphones-acer";
+    public static readonly IReadOnlyDictionary<string, string> CellphoneSCategories = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [CellphoneSKey] = "/laptop/mac.html",
+        [CellphoneSAsusKey] = "/laptop/asus.html",
+        [CellphoneSLenovoKey] = "/laptop/lenovo.html",
+        [CellphoneSDellKey] = "/laptop/dell.html",
+        [CellphoneSHpKey] = "/laptop/hp.html",
+        [CellphoneSAcerKey] = "/laptop/acer.html"
+    };
+    public static readonly IReadOnlyDictionary<string, string> CellphoneSBrands = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [CellphoneSKey] = "Apple", [CellphoneSAsusKey] = "Asus", [CellphoneSLenovoKey] = "Lenovo",
+        [CellphoneSDellKey] = "Dell", [CellphoneSHpKey] = "HP", [CellphoneSAcerKey] = "Acer"
+    };
     private DataSource() { }
     public DataSource(string key, string displayName, string categoryPath, int? partnerShopId, DateTime nowUtc)
     {
@@ -33,7 +52,7 @@ public sealed class DataSource
     public void MarkError() => State = DataSourceState.Error;
     public static bool IsSupportedCategory(string key, string categoryPath) =>
         (string.Equals(key, BhxKey, StringComparison.Ordinal) && categoryPath == "/bia") ||
-        (string.Equals(key, CellphoneSKey, StringComparison.Ordinal) && categoryPath == "/laptop/mac.html");
+        (CellphoneSCategories.TryGetValue(key, out var expectedPath) && categoryPath == expectedPath);
 }
 
 public sealed class SyncJob

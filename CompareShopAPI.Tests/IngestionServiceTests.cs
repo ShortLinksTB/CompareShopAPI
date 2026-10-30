@@ -74,6 +74,23 @@ public sealed class IngestionServiceTests
     }
 
     [Fact]
+    public async Task CoordinatorFailsAReaderThatDoesNotCompleteBeforeItsExecutionDeadline()
+    {
+        var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
+        var pendingRead = new TaskCompletionSource<IReadOnlyList<ScrapedOffer>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reader = new FakeReader { PendingRead = pendingRead.Task };
+        var coordinator = new IngestionCoordinator(jobs, [reader], new FakeHistory(), TimeProvider.System, TimeSpan.FromMilliseconds(10));
+
+        await coordinator.RunDueSources(CancellationToken.None);
+
+        Assert.Equal(SyncJobState.Failed, jobs.CompletedState);
+        Assert.Equal("execution_timeout", jobs.ErrorCode);
+        Assert.Equal("Catalog source exceeded its execution time limit.", jobs.ErrorSummary);
+        pendingRead.SetResult([]);
+        await pendingRead.Task;
+    }
+
+    [Fact]
     public async Task CoordinatorPausesSourceOnBlockedOrChallengedAccessWithSanitizedError()
     {
         var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
@@ -149,11 +166,12 @@ public sealed class IngestionServiceTests
     private sealed class FakeReader : ISourceCatalogReader
     {
         public IReadOnlyList<ScrapedOffer> Rows { get; init; } = [];
+        public Task<IReadOnlyList<ScrapedOffer>>? PendingRead { get; init; }
         public int? JobId { get; private set; }
         public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct)
         {
             JobId = jobId;
-            return ReadValidatedBiaAsync(ct);
+            return PendingRead ?? ReadValidatedBiaAsync(ct);
         }
         public Exception? Failure { get; set; }
         public Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => Failure is null ? Task.FromResult(Rows) : Task.FromException<IReadOnlyList<ScrapedOffer>>(Failure);

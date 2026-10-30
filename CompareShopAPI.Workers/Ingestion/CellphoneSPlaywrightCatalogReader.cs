@@ -263,10 +263,10 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     internal static bool HasRequiredSpecifications(IReadOnlyDictionary<string, string> specs, string sourceKey)
     {
         if (!DataSource.CellphoneSBrands.ContainsKey(sourceKey) ||
-            !specs.ContainsKey("memory") || !specs.ContainsKey("storage") || !specs.ContainsKey("screen"))
+            !specs.ContainsKey("memory") || !specs.ContainsKey("storage"))
             return false;
 
-        if (sourceKey != DataSource.CellphoneSKey) return true;
+        if (sourceKey != DataSource.CellphoneSKey) return specs.ContainsKey("screen");
 
         return specs.TryGetValue("chip", out var chip) && !string.IsNullOrWhiteSpace(chip);
     }
@@ -275,7 +275,8 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     {
         if (!DataSource.CellphoneSBrands.TryGetValue(sourceKey, out var expectedBrand) || !HasRequiredSpecifications(specs, sourceKey)) return false;
         var brandMatches = sourceKey == DataSource.CellphoneSKey
-            ? name.Contains("Apple", StringComparison.OrdinalIgnoreCase) || name.Contains("MacBook", StringComparison.OrdinalIgnoreCase)
+            ? name.Contains("Apple", StringComparison.OrdinalIgnoreCase) || name.Contains("MacBook", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("Mac mini", StringComparison.OrdinalIgnoreCase)
             : name.Contains(expectedBrand, StringComparison.OrdinalIgnoreCase);
         return brandMatches;
     }

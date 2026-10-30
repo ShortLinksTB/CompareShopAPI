@@ -232,6 +232,9 @@ public sealed class CellphoneSIngestionTests
         Assert.Throws<InvalidDataException>(() => WorkerIngestion.CellphoneSPlaywrightCatalogReader.ValidateCategoryProduct("wrong brand", specs, key));
         Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(
             specs.Where(pair => pair.Key != "storage").ToDictionary(pair => pair.Key, pair => pair.Value), key));
+        if (key != DataSource.CellphoneSKey)
+            Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(
+                specs.Where(pair => pair.Key != "screen").ToDictionary(pair => pair.Key, pair => pair.Value), key));
         if (key == DataSource.CellphoneSKey)
             Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(
                 specs.Where(pair => pair.Key != "chip").ToDictionary(pair => pair.Key, pair => pair.Value), key));
@@ -248,6 +251,18 @@ public sealed class CellphoneSIngestionTests
 
         Assert.Equal(expected, specs["screen"]);
         Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(specs, DataSource.CellphoneSKey));
+    }
+
+    [Fact]
+    public void Mac_mini_does_not_require_screen_but_macbook_screen_is_preserved()
+    {
+        var miniSpecs = WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications("Apple M4 24GB 256GB", DataSource.CellphoneSKey);
+        Assert.False(miniSpecs.ContainsKey("screen"));
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid("Mac mini M4", miniSpecs, DataSource.CellphoneSKey));
+
+        var macBookSpecs = WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications("Apple M5 16GB 512GB 13.6 inch", DataSource.CellphoneSKey);
+        Assert.Equal("13.6 inch", macBookSpecs["screen"]);
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid("Apple MacBook Pro", macBookSpecs, DataSource.CellphoneSKey));
     }
 
     [Fact]

@@ -206,16 +206,17 @@ public sealed class CellphoneSIngestionTests
 
     [Theory]
     [InlineData("cellphones", "Apple M5 16GB 512GB 13.6 inch", "Apple", "chip")]
-    [InlineData("cellphones-asus", "Intel Core Ultra 7 155H 16GB 512GB 15.6 inch", "Asus", "processor")]
-    [InlineData("cellphones-lenovo", "AMD Ryzen 7 8845HS 32GB 1TB 14 inch", "Lenovo", "processor")]
-    [InlineData("cellphones-dell", "Intel Core i7-13620H 16GB 512GB 15.6 inch", "Dell", "processor")]
-    [InlineData("cellphones-hp", "Snapdragon X Plus 16GB 512GB 14 inch", "HP", "processor")]
-    [InlineData("cellphones-acer", "Intel Core i5-1235U 8GB 256GB 14 inch", "Acer", "processor")]
+    [InlineData("cellphones-asus", "16GB 512GB 15.6 inches", "Asus", "processor")]
+    [InlineData("cellphones-lenovo", "32GB 1TB 14 inches", "Lenovo", "processor")]
+    [InlineData("cellphones-dell", "16GB 512GB 15.6 inches", "Dell", "processor")]
+    [InlineData("cellphones-hp", "16GB 512GB 14 inches", "HP", "processor")]
+    [InlineData("cellphones-acer", "8GB 256GB 14 inches", "Acer", "processor")]
     public void Category_metadata_is_source_specific_and_required_specs_fail_closed(string key, string text, string brand, string processorKey)
     {
         var specs = WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications(text, key);
         Assert.Equal(brand, DataSource.CellphoneSBrands[key]);
-        Assert.True(specs.ContainsKey(processorKey));
+        if (key == DataSource.CellphoneSKey) Assert.True(specs.ContainsKey(processorKey));
+        else Assert.False(specs.ContainsKey(processorKey));
         Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(specs, key));
         var productName = key switch
         {
@@ -231,7 +232,22 @@ public sealed class CellphoneSIngestionTests
         Assert.Throws<InvalidDataException>(() => WorkerIngestion.CellphoneSPlaywrightCatalogReader.ValidateCategoryProduct("wrong brand", specs, key));
         Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(
             specs.Where(pair => pair.Key != "storage").ToDictionary(pair => pair.Key, pair => pair.Value), key));
+        if (key == DataSource.CellphoneSKey)
+            Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(
+                specs.Where(pair => pair.Key != "chip").ToDictionary(pair => pair.Key, pair => pair.Value), key));
+        Assert.False(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(specs, "unknown-cellphones-category"));
         if (key != DataSource.CellphoneSKey) Assert.DoesNotContain("Apple", string.Join(" ", specs.Values));
+    }
+
+    [Theory]
+    [InlineData("14 inch", "14 inch")]
+    [InlineData("14 inches", "14 inches")]
+    public void Screen_parser_accepts_singular_and_plural_inch_units(string text, string expected)
+    {
+        var specs = WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications($"Apple M5 16GB 512GB {text}");
+
+        Assert.Equal(expected, specs["screen"]);
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(specs, DataSource.CellphoneSKey));
     }
 
     [Fact]

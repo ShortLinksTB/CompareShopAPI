@@ -252,7 +252,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         var processor = Regex.Match(text, processorPattern, RegexOptions.IgnoreCase);
         var memory = Regex.Match(text, @"\b(?:8|16|18|24|32|36|48|64|96|128)\s?GB\b", RegexOptions.IgnoreCase);
         var storage = Regex.Match(text, @"\b(?:128|256|512|1024|2048)\s?GB\b|\b[1248]\s?TB\b", RegexOptions.IgnoreCase);
-        var screen = Regex.Match(text, @"\b\d{1,2}(?:\.\d)?\s?(?:inch\b|[""”])", RegexOptions.IgnoreCase);
+        var screen = Regex.Match(text, @"\b\d{1,2}(?:\.\d)?\s?(?:inch(?:es)?\b|[""”])", RegexOptions.IgnoreCase);
         if (processor.Success) specs[apple ? "chip" : "processor"] = processor.Value.Trim();
         if (memory.Success) specs["memory"] = memory.Value;
         if (storage.Success) specs["storage"] = storage.Value;
@@ -262,9 +262,13 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
 
     internal static bool HasRequiredSpecifications(IReadOnlyDictionary<string, string> specs, string sourceKey)
     {
-        var processorKey = sourceKey == DataSource.CellphoneSKey ? "chip" : "processor";
-        return DataSource.CellphoneSBrands.ContainsKey(sourceKey) && specs.TryGetValue(processorKey, out var processor) &&
-            !string.IsNullOrWhiteSpace(processor) && specs.ContainsKey("memory") && specs.ContainsKey("storage") && specs.ContainsKey("screen");
+        if (!DataSource.CellphoneSBrands.ContainsKey(sourceKey) ||
+            !specs.ContainsKey("memory") || !specs.ContainsKey("storage") || !specs.ContainsKey("screen"))
+            return false;
+
+        if (sourceKey != DataSource.CellphoneSKey) return true;
+
+        return specs.TryGetValue("chip", out var chip) && !string.IsNullOrWhiteSpace(chip);
     }
 
     internal static bool IsCategoryProductValid(string name, IReadOnlyDictionary<string, string> specs, string sourceKey)

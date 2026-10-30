@@ -197,6 +197,93 @@ public sealed class CatalogReadDiagnosticsTests
         Task CountContinue() { continues++; return Task.CompletedTask; }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Mac_mini_card_is_skipped_only_after_listing_provenance_check(bool listingContainsCard)
+    {
+        var macMiniUrl = "https://cellphones.com.vn/mac-mini-m6-12cpu-12gpu-16gb-256gb-2026.html";
+        var listedUrl = listingContainsCard ? macMiniUrl : "https://cellphones.com.vn/macbook-neo.html";
+        var html = $"<div class='product-info'><a href='{listedUrl}'></a></div>";
+        var hrefLocator = Stub.Create<ILocator>((method, _) => method switch
+        {
+            "get_First" => null,
+            "GetAttributeAsync" => Task.FromResult<string?>(macMiniUrl),
+            _ => throw new NotSupportedException(method)
+        });
+        var nameLocator = Stub.Create<ILocator>((method, _) => method switch
+        {
+            "get_First" => null,
+            "InnerTextAsync" => Task.FromResult("Apple Mac mini M6"),
+            _ => throw new NotSupportedException(method)
+        });
+        var priceLocator = Stub.Create<ILocator>((method, _) => method switch
+        {
+            "get_First" => null,
+            "InnerTextAsync" => Task.FromResult("24.990.000₫"),
+            _ => throw new NotSupportedException(method)
+        });
+        ((Stub)(object)hrefLocator).Self = hrefLocator;
+        ((Stub)(object)nameLocator).Self = nameLocator;
+        ((Stub)(object)priceLocator).Self = priceLocator;
+        var cardLocator = Stub.Create<ILocator>((method, args) => method switch
+        {
+            "Locator" when (string)args![0]! == "a[href]" => hrefLocator,
+            "Locator" when (string)args![0]! == ".product__name" => nameLocator,
+            "Locator" when (string)args![0]! == ".product__price--show" => priceLocator,
+            _ => throw new NotSupportedException(method)
+        });
+        var cardsLocator = Stub.Create<ILocator>((method, _) => method switch
+        {
+            "CountAsync" => Task.FromResult(1),
+            "Nth" => cardLocator,
+            _ => throw new NotSupportedException(method)
+        });
+        var bodyLocator = Stub.Create<ILocator>((method, _) => method switch
+        {
+            "InnerTextAsync" => Task.FromResult("safe catalog body"),
+            _ => throw new NotSupportedException(method)
+        });
+        var response = Stub.Create<IResponse>((method, _) => method switch
+        {
+            "get_Status" => 200,
+            "get_Url" => "https://cellphones.com.vn/laptop/mac.html",
+            "BodyAsync" => Task.FromResult(System.Text.Encoding.UTF8.GetBytes(html)),
+            _ => throw new NotSupportedException(method)
+        });
+        var page = Stub.Create<IPage>((method, args) => method switch
+        {
+            "SetDefaultNavigationTimeout" or "SetDefaultTimeout" => null,
+            "RouteAsync" => Task.CompletedTask,
+            "GotoAsync" => Task.FromResult<IResponse?>(response),
+            "get_Url" => "https://cellphones.com.vn/laptop/mac.html",
+            "Locator" when (string)args![0]! == "body" => bodyLocator,
+            "Locator" => cardsLocator,
+            _ => throw new NotSupportedException(method)
+        });
+        var browser = Stub.Create<IBrowser>((method, _) => method switch
+        {
+            "NewPageAsync" => Task.FromResult(page),
+            "DisposeAsync" => ValueTask.CompletedTask,
+            _ => throw new NotSupportedException(method)
+        });
+        var browserType = Stub.Create<IBrowserType>((method, _) => method == "LaunchAsync" ? Task.FromResult(browser) : throw new NotSupportedException(method));
+        var playwright = Stub.Create<IPlaywright>((method, _) => method switch
+        {
+            "get_Chromium" => browserType,
+            "Dispose" => null,
+            _ => throw new NotSupportedException(method)
+        });
+        using var client = new HttpClient(new RobotsHandler("User-agent: *\nAllow: /"));
+        var logger = new Capture<Worker.CellphoneSPlaywrightCatalogReader>();
+        var reader = new Worker.CellphoneSPlaywrightCatalogReader(_ => client, logger, () => Task.FromResult(playwright));
+
+        if (listingContainsCard)
+            Assert.Empty(await reader.ReadAsync("cellphones", "/laptop/mac.html", default));
+        else
+            await Assert.ThrowsAsync<InvalidDataException>(() => reader.ReadAsync("cellphones", "/laptop/mac.html", default));
+    }
+
     [Fact]
     public async Task Concurrent_failures_keep_their_own_context()
     {

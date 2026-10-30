@@ -35,8 +35,9 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
         var job = await db.SyncJobs.Where(x => x.DataSourceId == sourceId && x.State == SyncJobState.Queued).OrderBy(x => x.QueuedAtUtc).FirstOrDefaultAsync(ct);
         if (job is null)
         {
-            if ((source.LastCompletedAtUtc is not null && nowUtc < source.LastCompletedAtUtc.Value.AddHours(source.IntervalHours))
-                || (source.NextAttemptAtUtc is not null && nowUtc < source.NextAttemptAtUtc.Value))
+            // Expired work is reclaimed immediately, regardless of normal cadence or retry backoff.
+            if (expiredJobs.Count == 0 && ((source.LastCompletedAtUtc is not null && nowUtc < source.LastCompletedAtUtc.Value.AddHours(source.IntervalHours))
+                || (source.NextAttemptAtUtc is not null && nowUtc < source.NextAttemptAtUtc.Value)))
             { await tx.CommitAsync(ct); return null; }
             job = new SyncJob(sourceId, nowUtc); db.SyncJobs.Add(job);
         }

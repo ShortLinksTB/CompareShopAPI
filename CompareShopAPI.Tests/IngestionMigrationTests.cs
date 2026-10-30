@@ -13,7 +13,7 @@ namespace CompareShopAPI.Tests;
 public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
 {
     [Fact]
-    public async Task Active_lease_blocks_overlap_and_expired_lease_is_failed_before_reclaim()
+    public async Task Active_lease_blocks_overlap_and_expired_lease_is_reclaimed_despite_source_cadence()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopLease_{Guid.NewGuid():N}" }.ConnectionString;
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
@@ -45,6 +45,14 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             }
 
             var expiredAt = now.AddMinutes(SyncJob.LeaseDurationMinutes + 1);
+            await using (var setup = new CompareShopDbContext(options))
+            {
+                var source = await setup.DataSources.SingleAsync(x => x.Id == sourceId);
+                source.Complete(now.AddMinutes(-5));
+                source.ScheduleFailureRetry(now);
+                await setup.SaveChangesAsync();
+            }
+
             await using (var poll = new CompareShopDbContext(options))
                 Assert.Contains(await new EfSyncJobStore(poll).DueSources(expiredAt, CancellationToken.None), source => source.Id == sourceId);
 
@@ -61,6 +69,7 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             Assert.Equal(expiredAt, abandoned.FinishedAtUtc);
             Assert.Null(abandoned.LeaseExpiresAtUtc);
             Assert.Equal(1, await verification.SyncJobs.CountAsync(job => job.DataSourceId == sourceId && job.State == SyncJobState.Running));
+            Assert.Equal(2, await verification.SyncJobs.CountAsync(job => job.DataSourceId == sourceId));
         }
         finally
         {

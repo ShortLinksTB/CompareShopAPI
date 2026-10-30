@@ -251,6 +251,24 @@ public sealed class CellphoneSIngestionTests
     }
 
     [Fact]
+    public void Apple_mac_mini_card_is_valid_without_screen_while_macbook_keeps_parsed_screen()
+    {
+        var macMiniSpecs = WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications(
+            "Apple Mac mini M4 2024 10CPU 10GPU 24GB 256GB");
+
+        Assert.DoesNotContain("screen", macMiniSpecs.Keys);
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(macMiniSpecs, DataSource.CellphoneSKey));
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid("Apple Mac mini M4 2024", macMiniSpecs, DataSource.CellphoneSKey));
+
+        var macBookSpecs = WorkerIngestion.CellphoneSPlaywrightCatalogReader.ParseSpecifications(
+            "Apple MacBook Pro M5 24GB 512GB 14 inches");
+
+        Assert.Equal("14 inches", macBookSpecs["screen"]);
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.HasRequiredSpecifications(macBookSpecs, DataSource.CellphoneSKey));
+        Assert.True(WorkerIngestion.CellphoneSPlaywrightCatalogReader.IsCategoryProductValid("Apple MacBook Pro M5", macBookSpecs, DataSource.CellphoneSKey));
+    }
+
+    [Fact]
     public void Scraped_offer_rejects_bad_price_url_and_stock()
     {
         Assert.True(new ScrapedOffer("sku", "MacBook", "Apple", 100, "https://cellphones.com.vn/p", StockStatus: "in_stock").IsValid);

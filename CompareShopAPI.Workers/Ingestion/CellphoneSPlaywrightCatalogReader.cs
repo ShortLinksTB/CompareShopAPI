@@ -263,10 +263,10 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     internal static bool HasRequiredSpecifications(IReadOnlyDictionary<string, string> specs, string sourceKey)
     {
         if (!DataSource.CellphoneSBrands.ContainsKey(sourceKey) ||
-            !specs.ContainsKey("memory") || !specs.ContainsKey("storage") || !specs.ContainsKey("screen"))
+            !specs.ContainsKey("memory") || !specs.ContainsKey("storage"))
             return false;
 
-        if (sourceKey != DataSource.CellphoneSKey) return true;
+        if (sourceKey != DataSource.CellphoneSKey) return specs.ContainsKey("screen");
 
         return specs.TryGetValue("chip", out var chip) && !string.IsNullOrWhiteSpace(chip);
     }

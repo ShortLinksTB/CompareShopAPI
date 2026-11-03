@@ -42,6 +42,11 @@ public static class AdminEndpoints
             try { return Results.Ok(await s.List(Subject(c), ct)); }
             catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
         });
+        admin.MapGet("/data-sources", async (HttpContext c, DataSourceAdminService s, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await s.List(Subject(c), ct)); }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+        });
         admin.MapPost("/sync-jobs/{id:int}/retry", async (HttpContext c, int id, IngestionAdminService s, CancellationToken ct) =>
         {
             try { return Results.Accepted(value: await s.Retry(Subject(c), id, ct)); }

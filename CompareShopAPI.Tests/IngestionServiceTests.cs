@@ -137,6 +137,30 @@ public sealed class IngestionServiceTests
         Assert.Equal(2, (await service.Retry("user", 1, CancellationToken.None)).Id);
     }
 
+    [Fact]
+    public async Task DataSourceAdminServiceRequiresReadPermissionAndReturnsProjectedSources()
+    {
+        var created = Now;
+        var lastCompleted = Now.AddDays(1);
+        var nextAttempt = Now.AddDays(2);
+        var expected = new DataSourceSummary(7, "bhx", "Bách Hóa Xanh", "/bia", null, DataSourceState.Active, 72, created, lastCompleted, nextAttempt);
+        var store = new FakeDataSources { Sources = [expected] };
+        var permissions = new FakePermissions { Allowed = true };
+        var service = new DataSourceAdminService(permissions, store);
+
+        var result = await service.List("admin", CancellationToken.None);
+
+        Assert.Equal("sync_jobs.read", permissions.LastPermission);
+        Assert.Equal(expected, Assert.Single(result));
+        Assert.Null(result[0].PartnerShopId);
+        permissions.Allowed = false;
+        await Assert.ThrowsAsync<IngestionForbiddenException>(() => service.List("admin", CancellationToken.None));
+        await Assert.ThrowsAsync<IngestionForbiddenException>(() => service.List(" ", CancellationToken.None));
+        permissions.Allowed = true;
+        store.Sources = [];
+        Assert.Empty(await service.List("admin", CancellationToken.None));
+    }
+
     private static DataSource Source() => new("bhx", "BHX", "/bia", null, Now);
 
     private sealed class FakeJobs : ISyncJobStore
@@ -163,6 +187,12 @@ public sealed class IngestionServiceTests
         public Task<SyncJobSummary?> QueueRetry(int jobId, CancellationToken ct) => Task.FromResult(Retry);
     }
 
+    private sealed class FakeDataSources : IDataSourceStore
+    {
+        public IReadOnlyList<DataSourceSummary> Sources { get; set; } = [];
+        public Task<IReadOnlyList<DataSourceSummary>> ListDataSources(CancellationToken ct) => Task.FromResult(Sources);
+    }
+
     private sealed class FakeReader : ISourceCatalogReader
     {
         public IReadOnlyList<ScrapedOffer> Rows { get; init; } = [];
@@ -187,6 +217,7 @@ public sealed class IngestionServiceTests
     private sealed class FakePermissions : IAdminPermissionReader
     {
         public bool Allowed { get; set; }
-        public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) => Task.FromResult(Allowed);
+        public string? LastPermission { get; private set; }
+        public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) { LastPermission = permission; return Task.FromResult(Allowed); }
     }
 }

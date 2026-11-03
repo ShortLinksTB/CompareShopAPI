@@ -57,10 +57,12 @@ builder.Services.AddScoped<IArticleProductLookup, UserCommerceArticleProductLook
 builder.Services.AddScoped<ArticleService>();
 builder.Services.AddHostedService<ArticlePublishingWorker>();
 builder.Services.AddScoped<ISyncJobStore, EfSyncJobStore>();
+builder.Services.AddScoped<IDataSourceStore, EfDataSourceStore>();
 builder.Services.AddScoped<IPriceHistoryRecorder, EfPriceHistoryRecorder>();
 builder.Services.AddScoped<IAdminPermissionReader>(services => services.GetRequiredService<IAdminData>() as IAdminPermissionReader
     ?? throw new InvalidOperationException("Admin permission reader is unavailable."));
 builder.Services.AddScoped<IngestionAdminService>();
+builder.Services.AddScoped<DataSourceAdminService>();
 builder.Services.AddScoped<AdminService>(services => new AdminService(
     services.GetRequiredService<IAdminData>(),
     services.GetRequiredService<IConfiguration>().GetSection("Admin:BootstrapSuperAdminSubjects").GetChildren()

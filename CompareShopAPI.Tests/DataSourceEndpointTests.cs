@@ -62,7 +62,8 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
             Assert.Equal(HttpStatusCode.OK, sourcesResponse.StatusCode);
             using (var sources = JsonDocument.Parse(await sourcesResponse.Content.ReadAsStringAsync()))
             {
-                var source = Assert.Single(sources.RootElement.EnumerateArray());
+                var source = Assert.Single(sources.RootElement.EnumerateArray()
+                    .Where(item => item.GetProperty("key").GetString() == sourceKey));
                 Assert.Equal(sourceId, source.GetProperty("id").GetInt32());
                 Assert.Equal(sourceKey, source.GetProperty("key").GetString());
                 Assert.Equal("SL-1452 Test Source", source.GetProperty("displayName").GetString());

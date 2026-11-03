@@ -20,6 +20,11 @@ public interface ISyncJobStore
     Task<IReadOnlyList<SyncJobSummary>> ListJobs(CancellationToken ct);
     Task<SyncJobSummary?> QueueRetry(int jobId, CancellationToken ct);
 }
+public interface IDataSourceStore
+{
+    Task<IReadOnlyList<DataSourceSummary>> ListDataSources(CancellationToken ct);
+}
+public sealed record DataSourceSummary(int Id, string Key, string DisplayName, string CategoryPath, int? PartnerShopId, DataSourceState State, int IntervalHours, DateTime CreatedAtUtc, DateTime? LastCompletedAtUtc, DateTime? NextAttemptAtUtc);
 public sealed record SyncJobSummary(int Id, int DataSourceId, string DataSource, SyncJobState State, DateTime QueuedAtUtc, DateTime? StartedAtUtc, DateTime? FinishedAtUtc, int SeenCount, int ImportedCount, int PendingCount, string? ErrorCode, string? ErrorSummary, int? RetryOfJobId);
 public interface IPriceHistoryRecorder { Task RecordForChangedMinimums(CancellationToken ct); }
 public sealed record ImportCounts(int Imported, int Pending);
@@ -118,6 +123,14 @@ public sealed class IngestionAdminService(IAdminPermissionReader permissions, IS
     {
         if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.execute", ct)) throw new IngestionForbiddenException();
         return await jobs.QueueRetry(id, ct) ?? throw new KeyNotFoundException("A failed or partial job was not found.");
+    }
+}
+public sealed class DataSourceAdminService(IAdminPermissionReader permissions, IDataSourceStore sources)
+{
+    public async Task<IReadOnlyList<DataSourceSummary>> List(string? subject, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.read", ct)) throw new IngestionForbiddenException();
+        return await sources.ListDataSources(ct);
     }
 }
 public sealed class IngestionForbiddenException : Exception { }

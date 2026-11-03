@@ -20,6 +20,7 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
         var operatorSubject = $"source-reader-{Guid.NewGuid():N}";
         var viewerSubject = $"source-viewer-{Guid.NewGuid():N}";
+        var sourceKey = $"sl-1452-test-{Guid.NewGuid():N}";
         var createdAt = new DateTime(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc);
         try
         {
@@ -28,12 +29,11 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
             await using (var db = new CompareShopDbContext(options))
             {
                 await db.Database.MigrateAsync();
-                var source = new DataSource("bhx", "Bách Hóa Xanh", "/bia", null, createdAt);
-                source.Complete(createdAt.AddHours(3));
-                source.ScheduleFailureRetry(createdAt.AddHours(4));
-                db.DataSources.Add(source);
-                await db.SaveChangesAsync();
-                sourceId = source.Id;
+                await db.Database.ExecuteSqlInterpolatedAsync($"""
+                    INSERT INTO [DataSources] ([Key], [DisplayName], [CategoryPath], [PartnerShopId], [State], [IntervalHours], [CreatedAtUtc], [LastCompletedAtUtc], [NextAttemptAtUtc])
+                    VALUES ({sourceKey}, N'SL-1452 Test Source', N'/test', NULL, N'Active', 72, {createdAt}, {createdAt.AddHours(3)}, {createdAt.AddHours(10)});
+                    """);
+                sourceId = await db.DataSources.Where(source => source.Key == sourceKey).Select(source => source.Id).SingleAsync();
                 var job = new SyncJob(sourceId, createdAt.AddHours(5));
                 db.SyncJobs.Add(job);
 
@@ -64,9 +64,9 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
             {
                 var source = Assert.Single(sources.RootElement.EnumerateArray());
                 Assert.Equal(sourceId, source.GetProperty("id").GetInt32());
-                Assert.Equal("bhx", source.GetProperty("key").GetString());
-                Assert.Equal("Bách Hóa Xanh", source.GetProperty("displayName").GetString());
-                Assert.Equal("/bia", source.GetProperty("categoryPath").GetString());
+                Assert.Equal(sourceKey, source.GetProperty("key").GetString());
+                Assert.Equal("SL-1452 Test Source", source.GetProperty("displayName").GetString());
+                Assert.Equal("/test", source.GetProperty("categoryPath").GetString());
                 Assert.Equal(JsonValueKind.Null, source.GetProperty("partnerShopId").ValueKind);
                 Assert.Equal((int)DataSourceState.Active, source.GetProperty("state").GetInt32());
                 Assert.Equal(72, source.GetProperty("intervalHours").GetInt32());
@@ -82,7 +82,7 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
                 var job = Assert.Single(jobs.RootElement.EnumerateArray());
                 Assert.Equal(jobId, job.GetProperty("id").GetInt32());
                 Assert.Equal(sourceId, job.GetProperty("dataSourceId").GetInt32());
-                Assert.Equal("Bách Hóa Xanh", job.GetProperty("dataSource").GetString());
+                Assert.Equal("SL-1452 Test Source", job.GetProperty("dataSource").GetString());
             }
 
             await using (var db = new CompareShopDbContext(options))

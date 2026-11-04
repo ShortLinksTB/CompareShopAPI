@@ -21,7 +21,7 @@ public static class AdminPermissions
 
 public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive);
 public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive);
-public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive);
+public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null);
 public sealed record AdminOffer(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc);
 public sealed record AdminMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku = null, int? DataSourceId = null)
 {
@@ -44,7 +44,7 @@ public sealed record PermissionsResponse(IReadOnlyList<string> Permissions);
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int TotalItems);
 public sealed record CategoryInput(string Slug, string Name, bool IsActive = true);
 public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true);
-public sealed record ProductInput(string Slug, string Name, string? Brand, string? Description, int CategoryId, bool IsActive = true);
+public sealed record ProductInput(string Slug, string Name, string? Brand, string? Description, int CategoryId, bool IsActive = true, string? ImageUrl = null);
 public sealed record OfferInput(int PriceVnd, string? Url, bool IsActive, bool IsOutlier);
 public sealed record SeoInput(string? Title, string? Description);
 public sealed record FeatureFlagInput(bool Enabled, string? Description);
@@ -67,7 +67,7 @@ public interface IAdminData
     Task<AdminShop?> Shop(int id, CancellationToken ct);
     Task<AdminShop> SaveShop(int? id, ShopInput input, CancellationToken ct);
     Task<bool> DeleteShop(int id, CancellationToken ct);
-    Task<Page<AdminProduct>> Products(int page, int pageSize, CancellationToken ct);
+    Task<Page<AdminProduct>> Products(int page, int pageSize, bool? isActive, CancellationToken ct);
     Task<AdminProduct?> Product(int id, CancellationToken ct);
     Task<AdminProduct> SaveProduct(int? id, ProductInput input, CancellationToken ct);
     Task<bool> DeleteProduct(int id, CancellationToken ct);
@@ -141,7 +141,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     public Task<AdminShop> UpdateShop(string? s, int id, ShopInput i, CancellationToken ct) => Write(s, AdminPermissions.ShopsUpdate, "update", "shop", id.ToString(), async t => { var before = await data.Shop(id, t); return before is null ? (null, null, null) : (await data.SaveShop(id, Validate(i), t), before, i); }, ct);
     public async Task DeleteShop(string? s, int id, CancellationToken ct) { var actor = await Authorize(s, AdminPermissions.ShopsDelete, ct); await data.ExecuteAudited<bool>(actor, "delete", "shop", id.ToString(), async t => { var old = await data.Shop(id, t); if (old is null || !await data.DeleteShop(id, t)) throw new KeyNotFoundException(); return (true, old, null); }, ct); }
 
-    public async Task<Page<AdminProduct>> Products(string? subject, int page, int size, CancellationToken ct) { await Authorize(subject, AdminPermissions.ProductsRead, ct); ValidatePage(page, size); return await data.Products(page, size, ct); }
+    public async Task<Page<AdminProduct>> Products(string? subject, int page, int size, bool? isActive, CancellationToken ct) { await Authorize(subject, AdminPermissions.ProductsRead, ct); ValidatePage(page, size); return await data.Products(page, size, isActive, ct); }
     public async Task<AdminProduct?> Product(string? subject, int id, CancellationToken ct) { await Authorize(subject, AdminPermissions.ProductsRead, ct); return await data.Product(id, ct); }
     public Task<AdminProduct> CreateProduct(string? s, ProductInput i, CancellationToken ct) => Write<AdminProduct>(s, AdminPermissions.ProductsCreate, "create", "product", null, async t => (await data.SaveProduct(null, Validate(i), t), null, i), ct);
     public Task<AdminProduct> UpdateProduct(string? s, int id, ProductInput i, CancellationToken ct) => Write(s, AdminPermissions.ProductsUpdate, "update", "product", id.ToString(), async t => { var before = await data.Product(id, t); return before is null ? (null, null, null) : (await data.SaveProduct(id, Validate(i), t), before, i); }, ct);
@@ -207,6 +207,11 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     private static void ValidatePage(int page, int size) { if (page < 1 || size is < 1 or > 100) throw new ArgumentException("Page must be positive and pageSize must be between 1 and 100."); }
     private static CategoryInput Validate(CategoryInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160) throw new ArgumentException("Invalid category."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
     private static ShopInput Validate(ShopInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160 || x.WebsiteUrl?.Length > 2048) throw new ArgumentException("Invalid shop."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
-    private static ProductInput Validate(ProductInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 300 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 200 || x.CategoryId <= 0 || x.Brand?.Length > 200) throw new ArgumentException("Invalid product."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
+    private static ProductInput Validate(ProductInput x)
+    {
+        var imageUrl = x.ImageUrl?.Trim();
+        if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 300 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 200 || x.CategoryId <= 0 || x.Brand?.Length > 200 || imageUrl?.Length > 2048 || imageUrl is not null && (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var imageUri) || imageUri.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(imageUri.Host))) throw new ArgumentException("Invalid product.");
+        return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim(), ImageUrl = imageUrl };
+    }
     private static OfferInput Validate(OfferInput x) { if (x.PriceVnd <= 0 || x.Url?.Length > 2048) throw new ArgumentException("Invalid offer."); return x; }
 }

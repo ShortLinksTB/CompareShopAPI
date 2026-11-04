@@ -124,7 +124,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         var (db, service) = await CreateService(); await using (db)
         {
             var subject = $"viewer-{Guid.NewGuid():N}"; await AddUser(db, subject, 4);
-            await service.Products(subject, 1, 20, default);
+            await service.Products(subject, 1, 20, null, default);
             await Assert.ThrowsAsync<AdminForbiddenException>(() => service.CreateProduct(subject, new("x", "X", null, null, 1), default));
             await Assert.ThrowsAsync<AdminForbiddenException>(() => service.SaveSettings(subject, new Dictionary<string, string> { ["offers_display_count"] = "5" }, default));
         }
@@ -135,8 +135,8 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
     {
         var (db, service) = await CreateService(); await using (db)
         {
-            await Assert.ThrowsAsync<AdminUnauthorizedException>(() => service.Products(null, 1, 20, default));
-            await Assert.ThrowsAsync<AdminForbiddenException>(() => service.Products("unknown-subject", 1, 20, default));
+            await Assert.ThrowsAsync<AdminUnauthorizedException>(() => service.Products(null, 1, 20, null, default));
+            await Assert.ThrowsAsync<AdminForbiddenException>(() => service.Products("unknown-subject", 1, 20, null, default));
         }
     }
 
@@ -242,14 +242,22 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             var service = new AdminService(new EfAdminData(db, TimeProvider.System));
 
             var category = await service.CreateCategory(subject, new("admin-category", "Admin Category"), default);
+            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProduct(subject, new("bad-image", "Bad Image", null, null, category.Id, true, "http://images.example.test/a.jpg"), default));
+            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProduct(subject, new("long-image", "Long Image", null, null, category.Id, true, "https://images.example.test/" + new string('x', 2048)), default));
             await service.UpdateCategory(subject, category.Id, new("admin-category-updated", "Updated Category", false), default);
             var disposableCategory = await service.CreateCategory(subject, new("delete-category", "Delete Category"), default);
             var shop = await service.CreateShop(subject, new("admin-shop", "Admin Shop", "https://shop.example"), default);
-            var product = await service.CreateProduct(subject, new("admin-product", "Admin Product", "Brand", "Description", category.Id), default);
+            var product = await service.CreateProduct(subject, new("admin-product", "Admin Product", "Brand", "Description", category.Id, true, "https://images.example.test/product.jpg"), default);
+            Assert.Equal("https://images.example.test/product.jpg", product.ImageUrl);
             var offer = new CompareShopAPI.Domain.Catalog.ProductOffer { ProductId = product.Id, PartnerShopId = shop.Id, PriceVnd = 100, Url = "https://shop.example/item", UpdatedAtUtc = DateTime.UtcNow, IsActive = false };
             db.ProductOffers.Add(offer); await db.SaveChangesAsync();
-            await service.UpdateProduct(subject, product.Id, new("admin-product", "Updated Product", "Brand", "Updated", category.Id, true), default);
-            Assert.NotNull(await service.Product(subject, product.Id, default)); Assert.Single((await service.Products(subject, 1, 20, default)).Items);
+            await service.UpdateProduct(subject, product.Id, new("admin-product", "Updated Product", "Brand", "Updated", category.Id, false, product.ImageUrl), default);
+            Assert.Equal(product.ImageUrl, (await service.Product(subject, product.Id, default))?.ImageUrl);
+            var inactiveProducts = await service.Products(subject, 1, 20, false, default);
+            var activeProducts = await service.Products(subject, 1, 20, true, default);
+            Assert.Contains(inactiveProducts.Items, x => x.Id == product.Id);
+            Assert.Equal(1, inactiveProducts.TotalItems);
+            Assert.DoesNotContain(activeProducts.Items, x => x.Id == product.Id);
             Assert.Contains((await service.Shops(subject, 1, 20, default)).Items, item => item.Slug == shop.Slug); Assert.NotNull(await service.Shop(subject, shop.Id, default));
             Assert.Single(await service.Offers(subject, default));
             await service.UpdateOffer(subject, offer.Id, new(200, "https://shop.example/item?access_token=do-not-log", false, true), default);

@@ -96,7 +96,12 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
     public async Task<bool> DeleteShop(int id, CancellationToken ct) { var rows = await db.PartnerShops.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 
-    public Task<Page<AdminProduct>> Products(int page, int size, CancellationToken ct) => PageOf(db.Products.AsNoTracking().OrderBy(x => x.Id).Select(ProductDto), page, size, ct);
+    public Task<Page<AdminProduct>> Products(int page, int size, bool? isActive, CancellationToken ct)
+    {
+        var query = db.Products.AsNoTracking();
+        if (isActive.HasValue) query = query.Where(x => x.IsActive == isActive.Value);
+        return PageOf(query.OrderBy(x => x.Id).Select(ProductDto), page, size, ct);
+    }
     public Task<AdminProduct?> Product(int id, CancellationToken ct) => db.Products.AsNoTracking().Where(x => x.Id == id).Select(ProductDto).SingleOrDefaultAsync(ct);
     public async Task<AdminProduct> SaveProduct(int? id, ProductInput input, CancellationToken ct)
     {
@@ -104,7 +109,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var item = id.HasValue ? await db.Products.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
         item ??= new Product { Slug = input.Slug, Name = input.Name };
-        item.Slug = input.Slug; item.Name = input.Name; item.Brand = input.Brand; item.Description = input.Description; item.CategoryId = input.CategoryId; item.IsActive = input.IsActive;
+        item.Slug = input.Slug; item.Name = input.Name; item.Brand = input.Brand; item.Description = input.Description; item.ImageUrl = input.ImageUrl; item.CategoryId = input.CategoryId; item.IsActive = input.IsActive;
         if (!id.HasValue) db.Products.Add(item);
         await db.SaveChangesAsync(ct); return ToDto(item);
     }
@@ -271,8 +276,8 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         }
     }
     private static System.Text.Json.JsonElement? Parse(string? value) { if (string.IsNullOrWhiteSpace(value)) return null; using var doc = JsonDocument.Parse(value); return doc.RootElement.Clone(); }
-    private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive);
-    private static readonly System.Linq.Expressions.Expression<Func<Product, AdminProduct>> ProductDto = x => new AdminProduct(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive);
+    private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl);
+    private static readonly System.Linq.Expressions.Expression<Func<Product, AdminProduct>> ProductDto = x => new AdminProduct(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl);
     private static readonly System.Linq.Expressions.Expression<Func<CompareShopAPI.Domain.Admin.ProductMatching, AdminMatching>> MatchingDto = x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId);
     private static int BoundSize(int size) => Math.Clamp(size, 1, 100);
     private static int Offset(int page, int size) => (int)Math.Min(int.MaxValue, ((long)Math.Max(1, page) - 1) * BoundSize(size));

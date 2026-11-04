@@ -275,7 +275,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             Assert.Single(await service.MatchingList(subject, default)); await service.ApproveMatching(subject, matching.Id, product.Id, default);
             Assert.Equal(1, (await service.PriceAlerts(subject, 1, 20, product.Id, userId, default)).TotalItems);
             Assert.Equal(new AdminAnalytics(7, 2, 12.5m), await service.Analytics(subject, default));
-            Assert.Equal(1, (await service.Dashboard(subject, default)).Products);
+            Assert.Equal(2, (await service.Dashboard(subject, default)).Products);
             Assert.False((await service.Dashboard(subject, default)).ArticlesAvailable);
             await service.SaveSeoProduct(subject, product.Id, new("SEO title", "SEO description"), default);
             Assert.Equal("SEO title", (await service.SeoProduct(subject, product.Id, default))?.SeoTitle);

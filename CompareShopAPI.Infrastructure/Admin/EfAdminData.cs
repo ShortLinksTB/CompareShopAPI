@@ -143,6 +143,12 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
 
     public async Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct) => await db.ProductMatchings.AsNoTracking().Where(x => x.ProductId == null && !x.IsApproved).OrderBy(x => x.CreatedAtUtc).Select(MatchingDto).ToListAsync(ct);
+    public async Task<IReadOnlyList<AdminAttachedMatching>> MatchingsForProduct(int productId, CancellationToken ct) => await db.ProductMatchings.AsNoTracking()
+        .Where(x => x.ProductId == productId)
+        .OrderBy(x => x.CreatedAtUtc)
+        .Select(x => new AdminAttachedMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId, x.DataSourceId.HasValue ? db.DataSources.Where(source => source.Id == x.DataSourceId.Value).Select(source => source.DisplayName).SingleOrDefault() : null))
+        .ToListAsync(ct);
+    public Task<CompareShopAPI.Domain.Admin.ProductMatching?> MatchingForUnlink(int id, CancellationToken ct) => db.ProductMatchings.SingleOrDefaultAsync(x => x.Id == id, ct);
     public async Task<IReadOnlyList<MatchingCandidateProduct>> MatchingCandidateProducts(IReadOnlyList<MatchingCandidateInput> pending, CancellationToken ct)
     {
         if (pending.Count == 0) return [];

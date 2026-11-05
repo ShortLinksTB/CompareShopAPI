@@ -281,7 +281,12 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", wishlistMutation)).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, operation = "add" }))).StatusCode);
             using var wishlist = System.Text.Json.JsonDocument.Parse(await (await client.GetAsync("/api/v1/wishlist")).Content.ReadAsStringAsync());
-            Assert.Single(wishlist.RootElement.GetProperty("items").EnumerateArray());
+            var wishlistItems = wishlist.RootElement.GetProperty("items").EnumerateArray().ToArray();
+            var wishlistItem = Assert.Single(wishlistItems);
+            Assert.Equal(sample.Id, wishlistItem.GetProperty("productId").GetInt32());
+            Assert.Equal("sample-product-01", wishlistItem.GetProperty("slug").GetString());
+            Assert.Equal("Sample Product 01", wishlistItem.GetProperty("name").GetString());
+            Assert.Equal("https://images.example.test/admin-product.jpg", wishlistItem.GetProperty("imageUrl").GetString());
 
             var createAlert = await client.PostAsync("/api/v1/price-alerts", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, targetPrice = 999_000 }));
             Assert.Equal(System.Net.HttpStatusCode.Created, createAlert.StatusCode);

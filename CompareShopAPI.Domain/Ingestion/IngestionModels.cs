@@ -119,7 +119,17 @@ public sealed class SourceItemMapping
     public int? ProductOfferId { get; private set; }
     public bool IsApproved => ProductId.HasValue;
     public void Approve(int productId) { if (ProductId.HasValue || productId <= 0) throw new InvalidOperationException("Mapping cannot be approved."); ProductId = productId; }
+    public void AssignProduct(int productId)
+    {
+        if (productId <= 0 || ProductId.HasValue && ProductId != productId) throw new InvalidOperationException("Source mapping belongs to a different product.");
+        ProductId = productId;
+    }
     public void UpdateSnapshot(string name, string? brand, ScrapedOffer? offer = null) { Name = name[..Math.Min(name.Length, 300)]; Brand = brand is null ? null : brand[..Math.Min(brand.Length, 200)]; if (offer is not null) { ImageUrl = offer.ImageUrl; OriginalPriceVnd = offer.OriginalPriceVnd; SpecificationsJson = offer.SpecificationsJson; StockStatus = offer.StockStatus; } }
+    public void UpdateImportedOfferDetails(string? imageUrl, int? originalPriceVnd)
+    {
+        ImageUrl = imageUrl;
+        OriginalPriceVnd = originalPriceVnd;
+    }
     public void SetOffer(int offerId) { if (offerId <= 0) throw new ArgumentOutOfRangeException(nameof(offerId)); ProductOfferId = offerId; }
 }
 

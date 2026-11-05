@@ -33,6 +33,19 @@ public static class AdminEndpoints
         admin.MapDelete("/shops/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => { await s.DeleteShop(Subject(c), id, ct); return Results.NoContent(); }));
 
         admin.MapGet("/offers", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.Offers(Subject(c), ct)));
+        admin.MapPost("/offers", async (HttpContext c, OfferImportInput input, AdminService s, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await s.ImportOffer(Subject(c), input, ct);
+                return Results.Json(result.Offer, statusCode: result.Created ? StatusCodes.Status201Created : StatusCodes.Status200OK);
+            }
+            catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
+            catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+            catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
+            catch (AdminOfferImportConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+            catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
+        });
         admin.MapPatch("/offers/{id:int}", (HttpContext c, int id, OfferInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateOffer(Subject(c), id, input, ct)));
         admin.MapPost("/offers/{id:int}/approve", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.ApproveOffer(Subject(c), id, ct)));
         admin.MapGet("/matching", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.MatchingList(Subject(c), ct)));

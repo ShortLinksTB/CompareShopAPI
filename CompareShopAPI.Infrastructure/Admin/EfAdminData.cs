@@ -5,6 +5,7 @@ using System.Data;
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Domain.Catalog;
+using CompareShopAPI.Domain.Ingestion;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
@@ -140,6 +141,74 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var item = await db.ProductOffers.SingleOrDefaultAsync(x => x.Id == id, ct); if (item is null) return null;
         item.IsActive = true; item.IsOutlier = false; item.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
         await db.SaveChangesAsync(ct); return new(item.Id, item.ProductId, item.PartnerShopId, item.PriceVnd, item.Url, item.IsActive, item.IsOutlier, item.UpdatedAtUtc);
+    }
+
+    public async Task<OfferImportResult> ImportOffer(string actor, OfferImportInput input, CancellationToken ct)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        var product = await db.Products.SingleOrDefaultAsync(x => x.Id == input.ProductId && x.IsActive, ct)
+            ?? throw new KeyNotFoundException("Active product not found.");
+        var shop = await db.PartnerShops.SingleOrDefaultAsync(x => x.Id == input.PartnerShopId && x.IsActive, ct)
+            ?? throw new KeyNotFoundException("Active partner shop not found.");
+        var source = await db.DataSources.SingleOrDefaultAsync(x => x.Id == input.DataSourceId && x.State == DataSourceState.Active, ct)
+            ?? throw new KeyNotFoundException("Active data source not found.");
+        if (DataSource.CellphoneSCategories.ContainsKey(source.Key) && source.PartnerShopId != shop.Id)
+            throw new ArgumentException("CellphoneS data source is not associated with the requested partner shop.");
+
+        var mapping = await db.SourceItemMappings
+            .FromSqlInterpolated($"SELECT * FROM [SourceItemMappings] WITH (UPDLOCK, HOLDLOCK) WHERE [DataSourceId] = {input.DataSourceId} AND [ExternalSku] = {input.ExternalSku}")
+            .SingleOrDefaultAsync(ct);
+        if (mapping?.ProductId is int mappedProductId && mappedProductId != product.Id)
+            throw new AdminOfferImportConflictException();
+
+        var created = mapping?.ProductOfferId is null;
+        ProductOffer offer;
+        object? before = null;
+        if (mapping is null)
+        {
+            mapping = new SourceItemMapping(source.Id, input.ExternalSku, product.Name, product.Brand);
+            mapping.AssignProduct(product.Id);
+            mapping.UpdateImportedOfferDetails(input.ImageUrl, input.OriginalPriceVnd);
+            db.SourceItemMappings.Add(mapping);
+            offer = new ProductOffer { ProductId = product.Id, PartnerShopId = shop.Id, PriceVnd = input.PriceVnd, OriginalPriceVnd = input.OriginalPriceVnd, Url = input.SourceUrl, ImageUrl = input.ImageUrl, UpdatedAtUtc = input.SourceScrapedAtUtc, IsActive = true };
+            db.ProductOffers.Add(offer);
+        }
+        else
+        {
+            before = new { mapping.Id, mapping.DataSourceId, mapping.ExternalSku, mapping.ProductId, mapping.ProductOfferId, mapping.Name, mapping.Brand, mapping.ImageUrl, mapping.OriginalPriceVnd };
+            mapping.AssignProduct(product.Id);
+            mapping.UpdateImportedOfferDetails(input.ImageUrl, input.OriginalPriceVnd);
+            if (mapping.ProductOfferId is int offerId)
+            {
+                offer = await db.ProductOffers.SingleOrDefaultAsync(x => x.Id == offerId, ct)
+                    ?? throw new InvalidOperationException("Source mapping references a missing offer.");
+                before = new { mapping = before, offer.Id, offer.ProductId, offer.PartnerShopId, offer.PriceVnd, offer.OriginalPriceVnd, offer.Url, offer.ImageUrl, offer.UpdatedAtUtc };
+                offer.ProductId = product.Id;
+                offer.PartnerShopId = shop.Id;
+                offer.PriceVnd = input.PriceVnd;
+                offer.OriginalPriceVnd = input.OriginalPriceVnd;
+                offer.Url = input.SourceUrl;
+                offer.ImageUrl = input.ImageUrl;
+                offer.UpdatedAtUtc = input.SourceScrapedAtUtc;
+                offer.IsActive = true;
+                offer.IsOutlier = false;
+            }
+            else
+            {
+                offer = new ProductOffer { ProductId = product.Id, PartnerShopId = shop.Id, PriceVnd = input.PriceVnd, OriginalPriceVnd = input.OriginalPriceVnd, Url = input.SourceUrl, ImageUrl = input.ImageUrl, UpdatedAtUtc = input.SourceScrapedAtUtc, IsActive = true };
+                db.ProductOffers.Add(offer);
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+        mapping.SetOffer(offer.Id);
+        await db.SaveChangesAsync(ct);
+        var dto = new ImportedOffer(offer.Id, offer.ProductId, offer.PartnerShopId, offer.PriceVnd, offer.OriginalPriceVnd, offer.Url!, offer.UpdatedAtUtc, offer.ImageUrl);
+        var after = new { offer = dto, mapping = new { mapping.DataSourceId, mapping.ExternalSku, mapping.ProductId, mapping.ProductOfferId, mapping.Name, mapping.Brand, mapping.ImageUrl } };
+        db.AdminAuditLogs.Add(new DomainAuditLog { ActorSubject = actor, Action = created ? "create" : "update", ResourceType = "offer_import", ResourceId = offer.Id.ToString(), CreatedAtUtc = clock.GetUtcNow().UtcDateTime, BeforeJson = Redact(before), AfterJson = Redact(after) });
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new(dto, created);
     }
 
     public async Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct) => await db.ProductMatchings.AsNoTracking().Where(x => x.ProductId == null && !x.IsApproved).OrderBy(x => x.CreatedAtUtc).Select(MatchingDto).ToListAsync(ct);

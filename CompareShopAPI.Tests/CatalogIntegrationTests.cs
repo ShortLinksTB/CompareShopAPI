@@ -280,8 +280,18 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             var wishlistMutation = System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, operation = "add" });
             Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", wishlistMutation)).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, operation = "add" }))).StatusCode);
+            var noImageProduct = await db.Products.SingleAsync(product => product.Id == noOffers.Id);
+            noImageProduct.ImageUrl = null;
+            await db.SaveChangesAsync();
+            Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", System.Net.Http.Json.JsonContent.Create(new { productId = noOffers.Id, operation = "add" }))).StatusCode);
             using var wishlist = System.Text.Json.JsonDocument.Parse(await (await client.GetAsync("/api/v1/wishlist")).Content.ReadAsStringAsync());
-            Assert.Single(wishlist.RootElement.GetProperty("items").EnumerateArray());
+            var wishlistItems = wishlist.RootElement.GetProperty("items");
+            Assert.Equal(new[] { sample.Id, noOffers.Id }, wishlistItems.EnumerateArray().Select(item => item.GetProperty("productId").GetInt32()));
+            Assert.Equal("sample-product-01", wishlistItems[0].GetProperty("slug").GetString());
+            Assert.Equal("Sample Product 01", wishlistItems[0].GetProperty("name").GetString());
+            Assert.Equal("https://images.example.test/admin-product.jpg", wishlistItems[0].GetProperty("imageUrl").GetString());
+            Assert.Equal("sample-product-10", wishlistItems[1].GetProperty("slug").GetString());
+            Assert.Equal(System.Text.Json.JsonValueKind.Null, wishlistItems[1].GetProperty("imageUrl").ValueKind);
 
             var createAlert = await client.PostAsync("/api/v1/price-alerts", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, targetPrice = 999_000 }));
             Assert.Equal(System.Net.HttpStatusCode.Created, createAlert.StatusCode);

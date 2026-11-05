@@ -94,7 +94,7 @@ public sealed class EfUserCommerceRepository(CompareShopDbContext db) : IUserCom
             (ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Product && ban.ProductId == x.ProductId
              || ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Brand && x.Product.Brand != null
                 && ban.NormalizedBrandName == x.Product.Brand.Trim().ToUpper()))).OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.ProductId)
-        .Select(x => new WishlistItemDto(x.ProductId, x.Product.Slug, x.Product.Name, x.CreatedAtUtc)).ToListAsync(ct);
+        .Select(x => new WishlistItemDto(x.ProductId, x.Product.Slug, x.Product.Name, x.Product.ImageUrl, x.CreatedAtUtc)).ToListAsync(ct);
 
     public async Task AddWishlist(int userId, int productId, DateTime nowUtc, CancellationToken ct)
     {

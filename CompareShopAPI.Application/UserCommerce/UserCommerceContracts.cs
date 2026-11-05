@@ -2,7 +2,7 @@ using CompareShopAPI.Domain.UserCommerce;
 
 namespace CompareShopAPI.Application.UserCommerce;
 
-public sealed record WishlistItemDto(int ProductId, string Slug, string Name, DateTime CreatedAtUtc);
+public sealed record WishlistItemDto(int ProductId, string Slug, string Name, string? ImageUrl, DateTime CreatedAtUtc);
 public sealed record PriceAlertDto(int Id, int ProductId, string Slug, string Name, int TargetPrice, bool IsActive, DateTime CreatedAtUtc);
 
 public interface IUserProvisioning

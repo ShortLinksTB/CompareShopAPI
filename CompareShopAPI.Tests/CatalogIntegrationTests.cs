@@ -56,6 +56,10 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
 
             var trackedOffer = await db.ProductOffers.OrderBy(x => x.Id).FirstAsync();
             var productOneId = await db.Products.Where(x => x.Slug == "sample-product-01").Select(x => x.Id).SingleAsync();
+            var productOne = await db.Products.SingleAsync(x => x.Id == productOneId);
+            productOne.ImageUrl = "https://images.example.test/admin-product.jpg";
+            var noOfferImageProduct = await db.Products.SingleAsync(x => x.Slug == "sample-product-10");
+            noOfferImageProduct.ImageUrl = "https://images.example.test/admin-no-offer.jpg";
             var representatives = await db.ProductOffers.Where(x => x.ProductId == productOneId).ToListAsync();
             foreach (var representative in representatives)
             {
@@ -118,6 +122,10 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Null((await queries.Offers(sample.Id, default))![0].Specifications);
             var noOffers = await queries.Product("sample-product-10", default);
             Assert.NotNull(noOffers); Assert.Equal(0, noOffers.OfferSummary.OfferCount); Assert.Null(noOffers.OfferSummary.MinPrice); Assert.Empty((await queries.Offers(noOffers.Id, default))!);
+            Assert.Equal("https://images.example.test/admin-no-offer.jpg", noOffers.ImageUrl);
+            var allProducts = await queries.Products(new ProductFilter(PageSize: 100), default);
+            Assert.Equal("https://images.example.test/admin-no-offer.jpg", allProducts.Items.Single(x => x.Slug == "sample-product-10").ImageUrl);
+            Assert.Equal("https://images.example.test/mac.jpg", allProducts.Items.Single(x => x.Slug == "sample-product-01").ImageUrl);
             Assert.Null(await queries.Product("inactive-sample-product", default)); Assert.Null(await queries.Product("missing", default));
             Assert.Null(await queries.Shop("missing", default)); Assert.Null(await queries.Shop("inactive-shop", default)); Assert.Null(await queries.Offers(int.MaxValue, default));
             Assert.NotNull(await queries.Shop("north-shop", default));

@@ -25,7 +25,7 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
         var skip = (long)(f.Page - 1) * f.PageSize;
         if (skip >= total) return new PageDto<ProductListDto>([], f.Page, f.PageSize, total, (int)Math.Ceiling(total / (double)f.PageSize));
         var rows = await products.OrderBy(p => p.Name).ThenBy(p => p.Id).Skip((int)skip).Take(f.PageSize)
-            .Select(p => new { p.Id, p.Slug, p.Name, p.Brand, Category = new CategoryDto(p.Category.Id, p.Category.Slug, p.Category.Name),
+            .Select(p => new { p.Id, p.Slug, p.Name, p.Brand, p.ImageUrl, Category = new CategoryDto(p.Category.Id, p.Category.Slug, p.Category.Name),
                 Summary = new OfferSummaryDto(VisibleOffers().Where(o => o.ProductId == p.Id).Select(o => (int?)o.PriceVnd).Min(), VisibleOffers().Where(o => o.ProductId == p.Id).Select(o => (int?)o.PriceVnd).Max(), VisibleOffers().Count(o => o.ProductId == p.Id)) }).ToListAsync(ct);
         var productIds = rows.Select(p => p.Id).ToArray();
         var representatives = await VisibleOffers().Where(o => productIds.Contains(o.ProductId)).OrderBy(o => o.PriceVnd).ThenBy(o => o.PartnerShopId).ThenBy(o => o.Id)
@@ -34,19 +34,19 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
         var items = rows.Select(p =>
         {
             representativeByProduct.TryGetValue(p.Id, out var offer);
-            return new ProductListDto(p.Id, p.Slug, p.Name, p.Brand, p.Category, p.Summary, offer?.ImageUrl, ParseSpecs(offer?.SpecificationsJson));
+            return new ProductListDto(p.Id, p.Slug, p.Name, p.Brand, p.Category, p.Summary, offer?.ImageUrl ?? p.ImageUrl, ParseSpecs(offer?.SpecificationsJson));
         }).ToList();
         return new PageDto<ProductListDto>(items, f.Page, f.PageSize, total, (int)Math.Ceiling(total / (double)f.PageSize));
     }
     public async Task<ProductDetailDto?> Product(string slug, CancellationToken ct)
     {
         var row = await ActiveProducts().Where(x => x.Slug == slug)
-            .Select(x => new { x.Id, x.Slug, x.Name, x.Brand, x.Description, Category = new CategoryDto(x.Category.Id, x.Category.Slug, x.Category.Name),
+            .Select(x => new { x.Id, x.Slug, x.Name, x.Brand, x.Description, x.ImageUrl, Category = new CategoryDto(x.Category.Id, x.Category.Slug, x.Category.Name),
                 Summary = new OfferSummaryDto(VisibleOffers().Where(o => o.ProductId == x.Id).Select(o => (int?)o.PriceVnd).Min(), VisibleOffers().Where(o => o.ProductId == x.Id).Select(o => (int?)o.PriceVnd).Max(), VisibleOffers().Count(o => o.ProductId == x.Id)),
                 Groups = x.SpecificationGroups.OrderBy(g => g.SortOrder).Select(g => new SpecificationGroupDto(g.Name, g.Items.OrderBy(i => i.SortOrder).Select(i => new SpecificationItemDto(i.Name, i.Value)).ToList())).ToList() }).FirstOrDefaultAsync(ct);
         if (row is null) return null;
         var representative = (await Offers(row.Id, ct))?.FirstOrDefault();
-        return new ProductDetailDto(row.Id, row.Slug, row.Name, row.Brand, row.Description, row.Category, row.Summary, row.Groups, representative?.ImageUrl, representative?.Specifications);
+        return new ProductDetailDto(row.Id, row.Slug, row.Name, row.Brand, row.Description, row.Category, row.Summary, row.Groups, representative?.ImageUrl ?? row.ImageUrl, representative?.Specifications);
     }
     public async Task<IReadOnlyList<OfferDto>?> Offers(int productId, CancellationToken ct)
     {

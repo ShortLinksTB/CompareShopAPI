@@ -11,7 +11,7 @@ public static class AdminPermissions
     public const string ProductsRead = "products.read", ProductsCreate = "products.create", ProductsUpdate = "products.update", ProductsDelete = "products.delete";
     public const string CategoriesRead = "categories.read", CategoriesCreate = "categories.create", CategoriesUpdate = "categories.update", CategoriesDelete = "categories.delete";
     public const string ShopsRead = "shops.read", ShopsCreate = "shops.create", ShopsUpdate = "shops.update", ShopsDelete = "shops.delete";
-    public const string OffersRead = "offers.read", OffersUpdate = "offers.update", OffersApprove = "offers.approve";
+    public const string OffersRead = "offers.read", OffersCreate = "offers.create", OffersUpdate = "offers.update", OffersApprove = "offers.approve";
     public const string MatchingRead = "matching.read", MatchingApprove = "matching.approve";
     public const string AuditRead = "audit_logs.read", DashboardRead = "dashboard.read", PriceAlertsReadAll = "price_alerts.read_all", AnalyticsRead = "analytics.read";
     public const string SeoRead = "seo.read", SeoUpdate = "seo.update", UsersManage = "users.manage", RolesManage = "roles.manage";
@@ -23,6 +23,9 @@ public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActi
 public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive);
 public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null);
 public sealed record AdminOffer(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc);
+public sealed record OfferImportInput(int ProductId, int PartnerShopId, int PriceVnd, int? OriginalPriceVnd, string SourceUrl, DateTime SourceScrapedAtUtc, string? ImageUrl, int DataSourceId, string ExternalSku);
+public sealed record ImportedOffer(int Id, int ProductId, int PartnerShopId, int PriceVnd, int? OriginalPriceVnd, string SourceUrl, DateTime SourceScrapedAtUtc, string? ImageUrl);
+public sealed record OfferImportResult(ImportedOffer Offer, bool Created);
 public sealed record AdminMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku = null, int? DataSourceId = null)
 {
     public IReadOnlyList<AdminMatchingCandidate> Candidates { get; init; } = [];
@@ -75,6 +78,7 @@ public interface IAdminData
     Task<IReadOnlyList<AdminOffer>> Offers(CancellationToken ct);
     Task<AdminOffer?> SaveOffer(int id, OfferInput input, CancellationToken ct);
     Task<AdminOffer?> ApproveOffer(int id, CancellationToken ct);
+    Task<OfferImportResult> ImportOffer(string actor, OfferImportInput input, CancellationToken ct);
     Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct);
     Task<IReadOnlyList<AdminAttachedMatching>> MatchingsForProduct(int productId, CancellationToken ct);
     Task<DomainProductMatching?> MatchingForUnlink(int id, CancellationToken ct);
@@ -104,6 +108,7 @@ public sealed class AdminForbiddenException() : Exception("The caller does not h
 public sealed class AdminUnauthorizedException() : Exception("A validated subject is required.");
 public sealed class AdminBootstrapCompletedException() : Exception("The first admin has already been provisioned.");
 public sealed class ProductDeleteConflictException() : Exception("The product has linked records and cannot be deleted.");
+public sealed class AdminOfferImportConflictException() : Exception("The source item is already mapped to another product.");
 
 public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstrapSubjects = null)
 {
@@ -152,6 +157,15 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     public async Task DeleteProduct(string? s, int id, CancellationToken ct) { var actor = await Authorize(s, AdminPermissions.ProductsDelete, ct); await data.ExecuteAudited<bool>(actor, "delete", "product", id.ToString(), async t => { var old = await data.Product(id, t); if (old is null || !await data.DeleteProduct(id, t)) throw new KeyNotFoundException(); return (true, old, null); }, ct); }
 
     public async Task<IReadOnlyList<AdminOffer>> Offers(string? s, CancellationToken ct) { await Authorize(s, AdminPermissions.OffersRead, ct); return await data.Offers(ct); }
+    public async Task<OfferImportResult> ImportOffer(string? subject, OfferImportInput input, CancellationToken ct)
+    {
+        var actor = await Authorize(subject, AdminPermissions.OffersCreate, ct);
+        if (input.ProductId <= 0 || input.PartnerShopId <= 0 || input.DataSourceId <= 0 || input.PriceVnd <= 0 || input.OriginalPriceVnd is <= 0 || input.OriginalPriceVnd is int original && original < input.PriceVnd ||
+            input.SourceScrapedAtUtc.Kind != DateTimeKind.Utc || string.IsNullOrWhiteSpace(input.ExternalSku) || input.ExternalSku.Length > 160 ||
+            !IsValidHttpsUrl(input.SourceUrl, 2048) || input.ImageUrl is not null && !IsValidHttpsUrl(input.ImageUrl, 2048))
+            throw new ArgumentException("Invalid offer import values.");
+        return await data.ImportOffer(actor, input with { ExternalSku = input.ExternalSku.Trim() }, ct);
+    }
     public Task<AdminOffer> UpdateOffer(string? s, int id, OfferInput input, CancellationToken ct) => Write(s, AdminPermissions.OffersUpdate, "update", "offer", id.ToString(), async t => { var before = (await data.Offers(t)).SingleOrDefault(x => x.Id == id); return before is null ? (null, null, null) : (await data.SaveOffer(id, Validate(input), t), before, input); }, ct);
     public Task<AdminOffer> ApproveOffer(string? s, int id, CancellationToken ct) => Write(s, AdminPermissions.OffersApprove, "approve", "offer", id.ToString(), async t => { var before = (await data.Offers(t)).SingleOrDefault(x => x.Id == id); return before is null ? (null, null, null) : (await data.ApproveOffer(id, t), before, new { isActive = true, isOutlier = false }); }, ct);
 
@@ -227,6 +241,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     }
 
     private static void ValidatePage(int page, int size) { if (page < 1 || size is < 1 or > 100) throw new ArgumentException("Page must be positive and pageSize must be between 1 and 100."); }
+    private static bool IsValidHttpsUrl(string value, int maxLength) => value.Length <= maxLength && Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrWhiteSpace(uri.UserInfo) && !value.Any(char.IsControl);
     private static CategoryInput Validate(CategoryInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160) throw new ArgumentException("Invalid category."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
     private static ShopInput Validate(ShopInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160 || x.WebsiteUrl?.Length > 2048) throw new ArgumentException("Invalid shop."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
     private static ProductInput Validate(ProductInput x)

@@ -17,6 +17,21 @@ namespace CompareShopAPI.Tests;
 public sealed class AdminOfferImportIntegrationTests(SqlServerTestFixture fixture)
 {
     [Fact]
+    public async Task Offers_create_permission_is_granted_only_to_operator_role()
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(fixture.ConnectionString).Options;
+        await using var db = new CompareShopDbContext(options);
+        await db.Database.MigrateAsync();
+
+        var permission = await db.AdminPermissions.SingleAsync(x => x.Key == "offers.create");
+        Assert.True(await db.AdminRolePermissions.AnyAsync(x => x.RoleId == 2 && x.PermissionId == permission.Id));
+        Assert.False(await db.AdminRolePermissions.AnyAsync(x => x.PermissionId == permission.Id && x.RoleId != 2));
+
+        await db.Database.MigrateAsync();
+        Assert.Equal(1, await db.AdminRolePermissions.CountAsync(x => x.PermissionId == permission.Id));
+    }
+
+    [Fact]
     public async Task Create_update_conflict_and_authorization_follow_import_contract()
     {
         var seeded = await Seed("CompareShopOfferImport");

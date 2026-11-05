@@ -100,6 +100,7 @@ public interface IAdminPermissionReader { Task<bool> HasPermission(string subjec
 public sealed class AdminForbiddenException() : Exception("The caller does not have permission for this operation.");
 public sealed class AdminUnauthorizedException() : Exception("A validated subject is required.");
 public sealed class AdminBootstrapCompletedException() : Exception("The first admin has already been provisioned.");
+public sealed class ProductDeleteConflictException() : Exception("The product has linked records and cannot be deleted.");
 
 public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstrapSubjects = null)
 {

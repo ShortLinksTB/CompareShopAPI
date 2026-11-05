@@ -20,19 +20,25 @@ public sealed class OperatorOfferPermissionMigrationTests(SqlServerTestFixture s
         try
         {
             await using (var db = new CompareShopDbContext(options))
+            {
+                await db.Database.MigrateAsync();
                 await db.Database.MigrateAsync();
 
-            await using var verify = new CompareShopDbContext(options);
-            var permissionId = await verify.AdminPermissions
-                .Where(permission => permission.Key == "offers.create")
-                .Select(permission => permission.Id)
-                .SingleAsync();
-            var grantedRoleIds = await verify.AdminRolePermissions
-                .Where(grant => grant.PermissionId == permissionId)
-                .Select(grant => grant.RoleId)
-                .ToListAsync();
+                var permissionId = await db.AdminPermissions
+                    .Where(permission => permission.Key == "offers.create")
+                    .Select(permission => permission.Id)
+                    .SingleAsync();
+                var grantedRoleIds = await db.AdminRolePermissions
+                    .Where(grant => grant.PermissionId == permissionId)
+                    .Select(grant => grant.RoleId)
+                    .ToListAsync();
 
-            Assert.Equal(new[] { 2 }, grantedRoleIds);
+                Assert.Equal(new[] { 2 }, grantedRoleIds);
+
+                await db.Database.MigrateAsync("20261105150000_AddOffersCreatePermission");
+                Assert.False(await db.AdminRolePermissions.AnyAsync(grant => grant.PermissionId == permissionId));
+                Assert.True(await db.AdminPermissions.AnyAsync(permission => permission.Id == permissionId));
+            }
         }
         finally
         {

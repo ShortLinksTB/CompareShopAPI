@@ -34,6 +34,26 @@ public sealed class UserCommerceTests
     }
 
     [Fact]
+    public async Task Wishlist_keeps_a_dangling_product_reference_with_null_catalog_fields()
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options;
+        await using var db = new CompareShopDbContext(options);
+        var user = new User("wishlist-dangling-subject", DateTime.UtcNow);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        db.WishlistItems.Add(new WishlistItem(user.Id, 987654, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+
+        var result = await new EfUserCommerceRepository(db).Wishlist(user.Id, default);
+
+        var item = Assert.Single(result);
+        Assert.Equal(987654, item.ProductId);
+        Assert.Null(item.Slug);
+        Assert.Null(item.Name);
+        Assert.Null(item.ImageUrl);
+    }
+
+    [Fact]
     public void Commerce_entities_reject_invalid_identity_product_and_target_price()
     {
         Assert.Throws<ArgumentException>(() => new User("", DateTime.UtcNow));

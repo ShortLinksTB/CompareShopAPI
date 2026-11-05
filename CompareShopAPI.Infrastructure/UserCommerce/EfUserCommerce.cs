@@ -89,12 +89,17 @@ public sealed class EfUserCommerceRepository(CompareShopDbContext db) : IUserCom
              || ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Brand && x.Brand != null
                 && ban.NormalizedBrandName == x.Brand.Trim().ToUpper())), ct);
 
-    public async Task<IReadOnlyList<WishlistItemDto>> Wishlist(int userId, CancellationToken ct) => await db.WishlistItems.AsNoTracking()
-        .Where(x => x.UserId == userId && x.Product.IsActive && !db.BannedItems.Any(ban => ban.IsActive &&
-            (ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Product && ban.ProductId == x.ProductId
-             || ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Brand && x.Product.Brand != null
-                && ban.NormalizedBrandName == x.Product.Brand.Trim().ToUpper()))).OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.ProductId)
-        .Select(x => new WishlistItemDto(x.ProductId, x.Product.Slug, x.Product.Name, x.CreatedAtUtc)).ToListAsync(ct);
+    public async Task<IReadOnlyList<WishlistItemDto>> Wishlist(int userId, CancellationToken ct) => await (
+        from item in db.WishlistItems.AsNoTracking()
+        join catalogProduct in db.Products.AsNoTracking() on item.ProductId equals catalogProduct.Id into products
+        from product in products.DefaultIfEmpty()
+        where item.UserId == userId && (product == null || product.IsActive && !db.BannedItems.Any(ban => ban.IsActive &&
+            (ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Product && ban.ProductId == item.ProductId
+             || ban.TargetType == CompareShopAPI.Domain.Admin.BannedTargetType.Brand && product.Brand != null
+                && ban.NormalizedBrandName == product.Brand.Trim().ToUpper())))
+        orderby item.CreatedAtUtc descending, item.ProductId
+        select new WishlistItemDto(item.ProductId, product == null ? null : product.Slug, product == null ? null : product.Name,
+            item.CreatedAtUtc, product == null ? null : product.ImageUrl)).ToListAsync(ct);
 
     public async Task AddWishlist(int userId, int productId, DateTime nowUtc, CancellationToken ct)
     {

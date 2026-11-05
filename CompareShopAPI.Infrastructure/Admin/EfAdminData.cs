@@ -7,6 +7,7 @@ using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 using DomainFeatureFlag = CompareShopAPI.Domain.Admin.AdminFeatureFlag;
 using DomainSetting = CompareShopAPI.Domain.Admin.AdminSetting;
 using DomainUserRole = CompareShopAPI.Domain.Admin.AdminUserRole;
@@ -113,7 +114,18 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         if (!id.HasValue) db.Products.Add(item);
         await db.SaveChangesAsync(ct); return ToDto(item);
     }
-    public async Task<bool> DeleteProduct(int id, CancellationToken ct) { var rows = await db.Products.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
+    public async Task<bool> DeleteProduct(int id, CancellationToken ct)
+    {
+        try
+        {
+            var rows = await db.Products.Where(x => x.Id == id).ExecuteDeleteAsync(ct);
+            return rows > 0;
+        }
+        catch (SqlException exception) when (exception.Number == 547)
+        {
+            throw new ProductDeleteConflictException();
+        }
+    }
 
     public async Task<IReadOnlyList<AdminOffer>> Offers(CancellationToken ct) => await db.ProductOffers.AsNoTracking().OrderBy(x => x.Id)
         .Select(x => new AdminOffer(x.Id, x.ProductId, x.PartnerShopId, x.PriceVnd, x.Url, x.IsActive, x.IsOutlier, x.UpdatedAtUtc)).ToListAsync(ct);

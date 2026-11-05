@@ -37,6 +37,8 @@ public static class AdminEndpoints
         admin.MapPost("/offers/{id:int}/approve", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.ApproveOffer(Subject(c), id, ct)));
         admin.MapGet("/matching", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.MatchingList(Subject(c), ct)));
         admin.MapPost("/matching/{id:int}/approve", (HttpContext c, int id, MatchingApproval input, AdminService s, CancellationToken ct) => Run(() => s.ApproveMatching(Subject(c), id, input.ProductId, ct)));
+        admin.MapGet("/products/{id:int}/matchings", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.ProductMatchings(Subject(c), id, ct)));
+        admin.MapDelete("/matching/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.UnlinkMatching(Subject(c), id, ct)));
         admin.MapGet("/sync-jobs", async (HttpContext c, IngestionAdminService s, CancellationToken ct) =>
         {
             try { return Results.Ok(await s.List(Subject(c), ct)); }

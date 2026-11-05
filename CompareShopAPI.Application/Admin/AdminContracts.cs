@@ -27,6 +27,7 @@ public sealed record AdminMatching(int Id, string Name, string? Brand, int? Prod
 {
     public IReadOnlyList<AdminMatchingCandidate> Candidates { get; init; } = [];
 }
+public sealed record AdminAttachedMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku, int? DataSourceId, string? DataSourceDisplayName);
 public sealed record MatchingCandidateInput(string Name, string? Brand);
 public sealed record MatchingCandidateProduct(int ProductId, string Name, string? Brand);
 public sealed record AdminMatchingCandidate(int ProductId, string Name, string? Brand, double SimilarityScore);
@@ -75,6 +76,8 @@ public interface IAdminData
     Task<AdminOffer?> SaveOffer(int id, OfferInput input, CancellationToken ct);
     Task<AdminOffer?> ApproveOffer(int id, CancellationToken ct);
     Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct);
+    Task<IReadOnlyList<AdminAttachedMatching>> MatchingsForProduct(int productId, CancellationToken ct);
+    Task<DomainProductMatching?> MatchingForUnlink(int id, CancellationToken ct);
     Task<IReadOnlyList<MatchingCandidateProduct>> MatchingCandidateProducts(IReadOnlyList<MatchingCandidateInput> pending, CancellationToken ct);
     Task<DomainProductMatching?> MatchingForApproval(int id, int productId, CancellationToken ct);
     Task SaveMatching(DomainProductMatching matching, CancellationToken ct);
@@ -170,6 +173,24 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         await data.SaveMatching(matching, t);
         return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved, matching.ExternalSku, matching.DataSourceId), before, new { productId });
     }, ct);
+    public async Task<IReadOnlyList<AdminAttachedMatching>> ProductMatchings(string? s, int productId, CancellationToken ct)
+    {
+        await Authorize(s, AdminPermissions.MatchingRead, ct);
+        return await data.MatchingsForProduct(productId, ct);
+    }
+    public async Task UnlinkMatching(string? s, int id, CancellationToken ct)
+    {
+        var actor = await Authorize(s, AdminPermissions.MatchingApprove, ct);
+        await data.ExecuteAudited<bool?>(actor, "unlink", "matching", id.ToString(), async t =>
+        {
+            var matching = await data.MatchingForUnlink(id, t);
+            if (matching is null) return (null, null, null);
+            var before = new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved, matching.ExternalSku, matching.DataSourceId);
+            matching.UnlinkFromProduct();
+            await data.SaveMatching(matching, t);
+            return ((bool?)true, before, new { productId = (int?)null });
+        }, ct);
+    }
     public async Task<Page<AdminAuditEntry>> AuditLogs(string? s, int p, int z, CancellationToken ct) { await Authorize(s, AdminPermissions.AuditRead, ct); ValidatePage(p, z); return await data.AuditLogs(p, z, ct); }
     public async Task<AdminDashboard> Dashboard(string? s, CancellationToken ct) { await Authorize(s, AdminPermissions.DashboardRead, ct); return await data.Dashboard(ct); }
     public async Task<Page<AdminPriceAlert>> PriceAlerts(string? s, int p, int z, int? product, int? user, CancellationToken ct) { await Authorize(s, AdminPermissions.PriceAlertsReadAll, ct); ValidatePage(p, z); if (product is <= 0 || user is <= 0) throw new ArgumentException("Filter IDs must be positive."); return await data.PriceAlerts(p, z, product, user, ct); }

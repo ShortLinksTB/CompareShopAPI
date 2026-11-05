@@ -143,4 +143,6 @@ public sealed class ProductMatching
         IsApproved = true;
         return true;
     }
+
+    public void UnlinkFromProduct() => ProductId = null;
 }

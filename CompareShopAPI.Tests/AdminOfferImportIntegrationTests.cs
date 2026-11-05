@@ -67,7 +67,12 @@ public sealed class AdminOfferImportIntegrationTests(SqlServerTestFixture fixtur
             Assert.Contains(audit, x => x.Action == "create" && x.AfterJson!.Contains("source-1", StringComparison.Ordinal));
             Assert.Contains(audit, x => x.Action == "update" && x.BeforeJson is not null && x.AfterJson is not null);
             var permission = await verify.AdminPermissions.SingleAsync(x => x.Key == "offers.create");
-            Assert.False(await verify.AdminRolePermissions.AnyAsync(x => x.PermissionId == permission.Id && x.RoleId != seeded.WriterRoleId));
+            var grantedRoleIds = await verify.AdminRolePermissions
+                .Where(x => x.PermissionId == permission.Id)
+                .Select(x => x.RoleId)
+                .OrderBy(x => x)
+                .ToListAsync();
+            Assert.Equal(new[] { 2, seeded.WriterRoleId }.OrderBy(x => x), grantedRoleIds);
         }
         finally { await Cleanup(seeded); }
     }

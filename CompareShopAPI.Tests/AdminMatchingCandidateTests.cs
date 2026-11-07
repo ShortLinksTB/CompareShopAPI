@@ -35,9 +35,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             await using (var db = new CompareShopDbContext(options))
             {
                 await db.Database.MigrateAsync();
-                var category = new Category { Slug = "attached-matchings", Name = "Attached matchings" };
-                db.Categories.Add(category);
-                await db.SaveChangesAsync();
+                var category = await CategoryTestData.AddLeafAsync(db, "attached-matchings", "Attached matchings");
                 var product = new Product { Slug = "attached-product", Name = "Attached product", CategoryId = category.Id };
                 var otherProduct = new Product { Slug = "other-attached-product", Name = "Other attached product", CategoryId = category.Id };
                 db.Products.AddRange(product, otherProduct);
@@ -146,9 +144,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             var reader = new User("matching-reader", DateTime.UtcNow);
             var denied = new User("matching-denied", DateTime.UtcNow);
             db.Users.AddRange(reader, denied);
-            var category = new Category { Slug = "matching", Name = "Matching" };
-            db.Categories.Add(category);
-            await db.SaveChangesAsync();
+            var category = await CategoryTestData.AddLeafAsync(db, "matching", "Matching");
             // A principal with matching.read alone must be able to get suggestions.
             var role = new AdminRole { Name = "Matching reader" };
             db.AdminRoles.Add(role);

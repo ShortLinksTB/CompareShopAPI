@@ -255,9 +255,9 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             await using (var setup = new CompareShopDbContext(options))
             {
                 await setup.Database.EnsureCreatedAsync();
-                var category = new Category { Slug = "test", Name = "Test" };
+                var category = await CategoryTestData.AddLeafAsync(setup, "test", "Test");
                 var shop = new PartnerShop { Slug = "bhx", Name = "Bách Hóa Xanh" };
-                setup.AddRange(category, shop);
+                setup.Add(shop);
                 await setup.SaveChangesAsync();
 
                 var product = new Product { Slug = "mapped-product", Name = "Mapped product", CategoryId = category.Id };

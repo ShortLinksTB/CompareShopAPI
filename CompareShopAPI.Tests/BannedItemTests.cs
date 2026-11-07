@@ -61,9 +61,8 @@ public sealed class BannedItemTests(SqlServerTestFixture fixture)
                 await db.Database.MigrateAsync();
                 db.Users.Add(new User(subject, DateTime.UtcNow));
                 db.Users.Add(new User(editorSubject, DateTime.UtcNow));
-                var category = new Category { Slug = "banned-test-category", Name = "Banned test" };
+                var category = await CategoryTestData.AddLeafAsync(db, "banned-test-category", "Banned test");
                 var shop = new PartnerShop { Slug = "banned-test-shop", Name = "Banned test shop" };
-                db.Categories.Add(category);
                 db.PartnerShops.Add(shop);
                 await db.SaveChangesAsync();
                 var product = new Product { Slug = "banned-test-product", Name = "Banned target product", Brand = "Acme", CategoryId = category.Id };

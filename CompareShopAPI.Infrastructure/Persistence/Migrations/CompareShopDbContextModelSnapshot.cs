@@ -516,6 +516,14 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<byte>("Level")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint")
+                        .HasDefaultValue((byte)1);
+
+                    b.Property<int?>("ParentCategoryId")
+                        .HasColumnType("int");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -526,14 +534,24 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .HasMaxLength(160)
                         .HasColumnType("nvarchar(160)");
 
+                    b.Property<int>("SortOrder")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.HasKey("Id");
 
                     b.HasIndex("IsActive");
 
+                    b.HasIndex("ParentCategoryId");
+
                     b.HasIndex("Slug")
                         .IsUnique();
 
-                    b.ToTable("Categories");
+                    b.ToTable("Categories", t =>
+                        {
+                            t.HasCheckConstraint("CK_Categories_Level_ParentCategoryId", "([Level] = 1 AND [ParentCategoryId] IS NULL) OR ([Level] = 2 AND [ParentCategoryId] IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.PartnerShop", b =>
@@ -654,6 +672,16 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.ToTable("Products");
                 });
 
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.Category", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.Category", "ParentCategory")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("ParentCategory");
+                });
+
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.ProductOffer", b =>
                 {
                     b.Property<int>("Id")
@@ -697,6 +725,11 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.HasIndex("ProductId", "IsActive", "IsOutlier");
 
                     b.ToTable("ProductOffers");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.Category", b =>
+                {
+                    b.Navigation("Children");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.ProductOfferSnapshot", b =>

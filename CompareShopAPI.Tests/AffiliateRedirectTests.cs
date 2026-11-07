@@ -208,7 +208,8 @@ public sealed class AffiliateRedirectTests
         int linkId;
         await using (var db = new CompareShopDbContext(options))
         {
-            var category = new Category { Id = 1, Slug = "test", Name = "Test", IsActive = true };
+            var parent = new Category { Id = 2, Slug = "test-parent", Name = "Test Parent", IsActive = true };
+            var category = new Category { Id = 1, Slug = "test", Name = "Test", IsActive = true, ParentCategoryId = parent.Id, ParentCategory = parent, Level = 2 };
             var shop = new PartnerShop { Id = 1, Slug = "test", Name = "Test", IsActive = true };
             var product = new Product { Id = 1, Slug = "test", Name = "Test", Category = category, IsActive = true };
             var offer = new ProductOffer { Id = 17, Product = product, PartnerShop = shop, PriceVnd = 100, UpdatedAtUtc = now, IsActive = true };

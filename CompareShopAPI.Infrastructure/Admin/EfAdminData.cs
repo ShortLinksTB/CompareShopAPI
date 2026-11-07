@@ -72,16 +72,27 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         return true;
     }
 
-    public Task<Page<AdminCategory>> Categories(int page, int size, CancellationToken ct) => PageOf(db.Categories.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive)), page, size, ct);
-    public Task<AdminCategory?> Category(int id, CancellationToken ct) => db.Categories.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive)).SingleOrDefaultAsync(ct);
+    public Task<Page<AdminCategory>> Categories(int page, int size, CancellationToken ct) => PageOf(db.Categories.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId)), page, size, ct);
+    public Task<AdminCategory?> Category(int id, CancellationToken ct) => db.Categories.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId)).SingleOrDefaultAsync(ct);
     public async Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct)
     {
         var item = id.HasValue ? await db.Categories.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
+        if (input.ParentCategoryId is int parentId)
+        {
+            if (parentId == id) throw new ArgumentException("A category cannot be its own parent.");
+            var parent = await db.Categories.AsNoTracking().SingleOrDefaultAsync(x => x.Id == parentId, ct);
+            if (parent is null) throw new ArgumentException("Parent category does not exist.");
+            if (parent.Level != 1) throw new ArgumentException("Parent category must be Level 1.");
+            if (item is not null && item.Level == 1 && await db.Categories.AnyAsync(x => x.ParentCategoryId == item.Id, ct))
+                throw new ArgumentException("A category with children cannot become a child category.");
+        }
         item ??= new Category { Slug = input.Slug, Name = input.Name };
         item.Slug = input.Slug; item.Name = input.Name; item.IsActive = input.IsActive;
+        item.ParentCategoryId = input.ParentCategoryId;
+        item.Level = input.ParentCategoryId.HasValue ? (byte)2 : (byte)1;
         if (!id.HasValue) db.Categories.Add(item);
-        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.IsActive);
+        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.IsActive, item.ParentCategoryId);
     }
     public async Task<bool> DeleteCategory(int id, CancellationToken ct) { var rows = await db.Categories.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 
@@ -107,7 +118,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     public Task<AdminProduct?> Product(int id, CancellationToken ct) => db.Products.AsNoTracking().Where(x => x.Id == id).Select(ProductDto).SingleOrDefaultAsync(ct);
     public async Task<AdminProduct> SaveProduct(int? id, ProductInput input, CancellationToken ct)
     {
-        if (!await db.Categories.AnyAsync(x => x.Id == input.CategoryId, ct)) throw new ArgumentException("Category does not exist.");
+        if (!await db.Categories.AnyAsync(x => x.Id == input.CategoryId && x.Level == 2, ct)) throw new ArgumentException("Category does not exist or is not a Level 2 category.");
         var item = id.HasValue ? await db.Products.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
         item ??= new Product { Slug = input.Slug, Name = input.Name };

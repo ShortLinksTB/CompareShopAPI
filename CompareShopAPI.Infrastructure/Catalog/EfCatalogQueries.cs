@@ -7,7 +7,17 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
     private IQueryable<CompareShopAPI.Domain.Catalog.ProductOffer> VisibleOffers() => VisibleCatalogOffers.Query(db, clock);
     private IQueryable<CompareShopAPI.Domain.Catalog.Product> ActiveProducts() => BannedItemVisibility.ExcludeBannedProducts(db,
         db.Products.AsNoTracking().Where(p => p.IsActive && p.Category.IsActive));
-    public async Task<IReadOnlyList<CategoryDto>> Categories(CancellationToken ct) => await db.Categories.AsNoTracking().Where(c => c.IsActive).OrderBy(c => c.Name).ThenBy(c => c.Id).Select(c => new CategoryDto(c.Id, c.Slug, c.Name)).ToListAsync(ct);
+    public async Task<IReadOnlyList<CategoryDto>> Categories(int? parentId, CancellationToken ct)
+    {
+        var categories = db.Categories.AsNoTracking().Where(category => category.IsActive);
+        categories = parentId.HasValue
+            ? categories.Where(category => category.Level == 2 && category.ParentCategoryId == parentId.Value &&
+                db.Categories.Any(parent => parent.Id == parentId.Value && parent.IsActive && parent.Level == 1))
+            : categories.Where(category => category.Level == 1);
+        return await categories.OrderBy(category => category.SortOrder).ThenBy(category => category.Name).ThenBy(category => category.Id)
+            .Select(category => new CategoryDto(category.Id, category.Slug, category.Name, category.ParentCategoryId, category.Level))
+            .ToListAsync(ct);
+    }
     public async Task<PageDto<ProductListDto>> Products(ProductFilter f, CancellationToken ct)
     {
         var products = ActiveProducts();
@@ -25,7 +35,7 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
         var skip = (long)(f.Page - 1) * f.PageSize;
         if (skip >= total) return new PageDto<ProductListDto>([], f.Page, f.PageSize, total, (int)Math.Ceiling(total / (double)f.PageSize));
         var rows = await products.OrderBy(p => p.Name).ThenBy(p => p.Id).Skip((int)skip).Take(f.PageSize)
-            .Select(p => new { p.Id, p.Slug, p.Name, p.Brand, p.ImageUrl, Category = new CategoryDto(p.Category.Id, p.Category.Slug, p.Category.Name),
+            .Select(p => new { p.Id, p.Slug, p.Name, p.Brand, p.ImageUrl, Category = new CategoryDto(p.Category.Id, p.Category.Slug, p.Category.Name, p.Category.ParentCategoryId, p.Category.Level),
                 Summary = new OfferSummaryDto(VisibleOffers().Where(o => o.ProductId == p.Id).Select(o => (int?)o.PriceVnd).Min(), VisibleOffers().Where(o => o.ProductId == p.Id).Select(o => (int?)o.PriceVnd).Max(), VisibleOffers().Count(o => o.ProductId == p.Id)) }).ToListAsync(ct);
         var productIds = rows.Select(p => p.Id).ToArray();
         var representatives = await VisibleOffers().Where(o => productIds.Contains(o.ProductId)).OrderBy(o => o.PriceVnd).ThenBy(o => o.PartnerShopId).ThenBy(o => o.Id)
@@ -41,7 +51,7 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
     public async Task<ProductDetailDto?> Product(string slug, CancellationToken ct)
     {
         var row = await ActiveProducts().Where(x => x.Slug == slug)
-            .Select(x => new { x.Id, x.Slug, x.Name, x.Brand, x.Description, x.ImageUrl, Category = new CategoryDto(x.Category.Id, x.Category.Slug, x.Category.Name),
+            .Select(x => new { x.Id, x.Slug, x.Name, x.Brand, x.Description, x.ImageUrl, Category = new CategoryDto(x.Category.Id, x.Category.Slug, x.Category.Name, x.Category.ParentCategoryId, x.Category.Level),
                 Summary = new OfferSummaryDto(VisibleOffers().Where(o => o.ProductId == x.Id).Select(o => (int?)o.PriceVnd).Min(), VisibleOffers().Where(o => o.ProductId == x.Id).Select(o => (int?)o.PriceVnd).Max(), VisibleOffers().Count(o => o.ProductId == x.Id)),
                 Groups = x.SpecificationGroups.OrderBy(g => g.SortOrder).Select(g => new SpecificationGroupDto(g.Name, g.Items.OrderBy(i => i.SortOrder).Select(i => new SpecificationItemDto(i.Name, i.Value)).ToList())).ToList() }).FirstOrDefaultAsync(ct);
         if (row is null) return null;

@@ -3,7 +3,7 @@ using System.Globalization;
 
 namespace CompareShopAPI.Application.Catalog;
 
-public sealed record CategoryDto(int Id, string Slug, string Name);
+public sealed record CategoryDto(int Id, string Slug, string Name, int? ParentId, byte Level);
 public sealed record PageDto<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalItems, int TotalPages);
 public sealed record OfferSummaryDto(int? MinPrice, int? MaxPrice, int OfferCount);
 public sealed record OfferDto(int Id, int Price, string? Url, DateTime UpdatedAt, int ShopId, string ShopSlug, string ShopName, int? OriginalPrice = null, string? ImageUrl = null, string StockStatus = "unknown", IReadOnlyDictionary<string,string>? Specifications = null);
@@ -18,7 +18,7 @@ public sealed record ProductFilter(int Page = 1, int PageSize = 20, int? Categor
 
 public interface ICatalogQueries
 {
-    Task<IReadOnlyList<CategoryDto>> Categories(CancellationToken ct);
+    Task<IReadOnlyList<CategoryDto>> Categories(int? parentId, CancellationToken ct);
     Task<PageDto<ProductListDto>> Products(ProductFilter filter, CancellationToken ct);
     Task<ProductDetailDto?> Product(string slug, CancellationToken ct);
     Task<IReadOnlyList<OfferDto>?> Offers(int productId, CancellationToken ct);
@@ -36,7 +36,7 @@ public interface IPriceHistoryStore
 
 public sealed class CatalogService(ICatalogQueries queries)
 {
-    public Task<IReadOnlyList<CategoryDto>> Categories(CancellationToken ct) => queries.Categories(ct);
+    public Task<IReadOnlyList<CategoryDto>> Categories(int? parentId, CancellationToken ct) => queries.Categories(parentId, ct);
     public Task<PageDto<ProductListDto>> Products(ProductFilter filter, CancellationToken ct)
     {
         if (filter.Page < 1 || filter.PageSize < 1 || filter.PageSize > 100 || filter.MinPrice < 0 || filter.MaxPrice < 0 || filter.MinPrice > filter.MaxPrice)

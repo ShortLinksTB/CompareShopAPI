@@ -9,12 +9,28 @@ public static class CatalogSeed
     public static async Task SeedAsync(CompareShopDbContext db, CancellationToken cancellationToken = default)
     {
         var categoryNames = new[] { "Phones", "Computers", "Audio" };
-        foreach (var name in categoryNames)
+        var parent = await db.Categories.SingleOrDefaultAsync(x => x.Slug == "electronics", cancellationToken);
+        if (parent is null)
         {
-            var slug = name.ToLowerInvariant();
-            if (!await db.Categories.AnyAsync(x => x.Slug == slug, cancellationToken))
-                db.Categories.Add(new Category { Slug = slug, Name = name, IsActive = true });
+            parent = new Category { Slug = "electronics", Name = "Electronics", IsActive = true, Level = 1, SortOrder = 0 };
+            db.Categories.Add(parent);
+            await db.SaveChangesAsync(cancellationToken);
         }
+        for (var index = 0; index < categoryNames.Length; index++)
+        {
+            var name = categoryNames[index];
+            var slug = name.ToLowerInvariant();
+            var category = await db.Categories.SingleOrDefaultAsync(x => x.Slug == slug, cancellationToken);
+            if (category is null)
+            {
+                category = new Category { Slug = slug, Name = name, IsActive = true };
+                db.Categories.Add(category);
+            }
+            category.ParentCategoryId = parent.Id;
+            category.Level = 2;
+            category.SortOrder = index;
+        }
+        await db.SaveChangesAsync(cancellationToken);
         var shopNames = new[] { "North Shop", "Central Store", "South Market" };
         foreach (var name in shopNames)
         {

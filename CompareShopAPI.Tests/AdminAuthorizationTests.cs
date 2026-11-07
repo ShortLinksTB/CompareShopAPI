@@ -241,14 +241,23 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             var targetSubject = $"customer-{Guid.NewGuid():N}"; var targetUserId = await AddUser(db, targetSubject, 5);
             var service = new AdminService(new EfAdminData(db, TimeProvider.System));
 
-            var category = await service.CreateCategory(subject, new("admin-category", "Admin Category"), default);
+            var rootCategory = await service.CreateCategory(subject, new("admin-root", "Admin Root"), default);
+            Assert.Null(rootCategory.ParentCategoryId);
+            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProduct(subject, new("root-category-product", "Invalid Root Product", null, null, rootCategory.Id), default));
+            var category = await service.CreateCategory(subject, new("admin-category", "Admin Category", true, rootCategory.Id), default);
+            Assert.Equal(rootCategory.Id, category.ParentCategoryId);
+            var secondRootCategory = await service.CreateCategory(subject, new("admin-root-two", "Admin Root Two"), default);
+            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateCategory(subject, new("invalid-parent", "Invalid Parent", true, category.Id), default));
+            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateCategory(subject, new("missing-parent", "Missing Parent", true, int.MaxValue), default));
+            await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateCategory(subject, rootCategory.Id, new("admin-root", "Admin Root", true, secondRootCategory.Id), default));
             await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProduct(subject, new("bad-image", "Bad Image", null, null, category.Id, true, "http://images.example.test/a.jpg"), default));
             await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProduct(subject, new("long-image", "Long Image", null, null, category.Id, true, "https://images.example.test/" + new string('x', 2048)), default));
-            await service.UpdateCategory(subject, category.Id, new("admin-category-updated", "Updated Category", false), default);
+            await service.UpdateCategory(subject, category.Id, new("admin-category-updated", "Updated Category", false, rootCategory.Id), default);
             var disposableCategory = await service.CreateCategory(subject, new("delete-category", "Delete Category"), default);
             var shop = await service.CreateShop(subject, new("admin-shop", "Admin Shop", "https://shop.example"), default);
             var product = await service.CreateProduct(subject, new("admin-product", "Admin Product", "Brand", "Description", category.Id, true, "https://images.example.test/product.jpg"), default);
             Assert.Equal("https://images.example.test/product.jpg", product.ImageUrl);
+            await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProduct(subject, product.Id, new("admin-product", "Invalid Root Assignment", "Brand", "Description", rootCategory.Id), default));
             var offer = new CompareShopAPI.Domain.Catalog.ProductOffer { ProductId = product.Id, PartnerShopId = shop.Id, PriceVnd = 100, Url = "https://shop.example/item", UpdatedAtUtc = DateTime.UtcNow, IsActive = false };
             db.ProductOffers.Add(offer); await db.SaveChangesAsync();
             await service.UpdateProduct(subject, product.Id, new("admin-product", "Updated Product", "Brand", "Updated", category.Id, true, product.ImageUrl), default);

@@ -99,7 +99,24 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
                 offer => Assert.Contains(offer.PartnerShop.Slug, new[] { "north-shop", "central-store" }));
 
             var queries = new EfCatalogQueries(db, FixedClock);
-            Assert.Equal(3, (await queries.Categories(default)).Count);
+            var rootCategories = await queries.Categories(null, default);
+            Assert.Single(rootCategories);
+            Assert.Equal("electronics", rootCategories[0].Slug);
+            Assert.Equal(1, rootCategories[0].Level);
+            Assert.Null(rootCategories[0].ParentId);
+            var childCategories = await queries.Categories(rootCategories[0].Id, default);
+            Assert.Equal(new[] { "audio", "computers", "phones" }, childCategories.OrderBy(x => x.Slug).Select(x => x.Slug));
+            Assert.All(childCategories, category =>
+            {
+                Assert.Equal(rootCategories[0].Id, category.ParentId);
+                Assert.Equal(2, category.Level);
+            });
+            var inactiveParent = new Category { Slug = "inactive-category-parent", Name = "Inactive Parent", IsActive = false };
+            db.Categories.Add(inactiveParent);
+            await db.SaveChangesAsync();
+            db.Categories.Add(new Category { Slug = "hidden-category-child", Name = "Hidden Child", IsActive = true, ParentCategoryId = inactiveParent.Id, Level = 2 });
+            await db.SaveChangesAsync();
+            Assert.Empty(await queries.Categories(inactiveParent.Id, default));
             var first = await queries.Products(new ProductFilter(Page: 1, PageSize: 5), default);
             var second = await queries.Products(new ProductFilter(Page: 2, PageSize: 5), default);
             Assert.Equal(30, first.TotalItems); Assert.Equal(6, first.TotalPages); Assert.Equal(5, second.Items.Count);
@@ -236,6 +253,16 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection }, signing: true, timeProvider: FixedClock);
             var client = app.CreateClient();
             Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/api/v1/categories")).StatusCode);
+            using (var rootJson = System.Text.Json.JsonDocument.Parse(await (await client.GetAsync("/api/v1/categories")).Content.ReadAsStringAsync()))
+            {
+                var items = rootJson.RootElement.GetProperty("items");
+                Assert.Single(items.EnumerateArray());
+                Assert.Equal("electronics", items[0].GetProperty("slug").GetString());
+                Assert.Equal(1, items[0].GetProperty("level").GetInt32());
+                Assert.Equal(System.Text.Json.JsonValueKind.Null, items[0].GetProperty("parentId").ValueKind);
+            }
+            using (var childrenJson = System.Text.Json.JsonDocument.Parse(await (await client.GetAsync($"/api/v1/categories?parentId={rootCategories[0].Id}")).Content.ReadAsStringAsync()))
+                Assert.Equal(3, childrenJson.RootElement.GetProperty("items").GetArrayLength());
             var response = await client.GetAsync("/api/v1/products?page=1&pageSize=5&categoryId=1&minPrice=1000000&maxPrice=2000000&shopId=1");
             Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await client.GetAsync("/api/v1/products?page=0")).StatusCode);

@@ -19,7 +19,7 @@ public static class AdminPermissions
     public const string ComplianceRead = "compliance.read", ComplianceManage = "compliance.manage";
 }
 
-public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive);
+public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId);
 public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive);
 public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null);
 public sealed record AdminOffer(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc);
@@ -46,7 +46,7 @@ public sealed record AdminFeatureFlag(int Id, string Key, bool Enabled, string? 
 public sealed record AdminSetting(string Key, string Value);
 public sealed record PermissionsResponse(IReadOnlyList<string> Permissions);
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int TotalItems);
-public sealed record CategoryInput(string Slug, string Name, bool IsActive = true);
+public sealed record CategoryInput(string Slug, string Name, bool IsActive = true, int? ParentCategoryId = null, bool ClearParentCategory = false);
 public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true);
 public sealed record ProductInput(string Slug, string Name, string? Brand, string? Description, int CategoryId, bool IsActive = true, string? ImageUrl = null);
 public sealed record OfferInput(int PriceVnd, string? Url, bool IsActive, bool IsOutlier);

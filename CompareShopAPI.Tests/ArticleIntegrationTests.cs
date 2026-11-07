@@ -25,8 +25,7 @@ public sealed class ArticleIntegrationTests(SqlServerTestFixture sqlServer)
         {
             await using var db = new CompareShopDbContext(options);
             await db.Database.MigrateAsync();
-            var category = new Category { Slug = "article-test-category", Name = "Article Test", IsActive = true };
-            db.Categories.Add(category); await db.SaveChangesAsync();
+            var category = await CategoryTestData.AddLeafAsync(db, "article-test-category", "Article Test");
             var product = new Product { Slug = "article-test-product", Name = "Article Product", CategoryId = category.Id, IsActive = true };
             db.Products.Add(product); await db.SaveChangesAsync();
             var productLookup = new UserCommerceArticleProductLookup(new EfUserCommerceRepository(db));

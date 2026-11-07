@@ -76,7 +76,7 @@ public sealed class CatalogSeedCommandTests
         Assert.True(await CatalogSeedCommand.TryRunAsync(["seed-catalog"], Environment("Development"), configuration, services, NullLogger.Instance));
         Assert.Equal(initialCounts, await ReadCountsAsync(services));
         Assert.Equal(30, initialCounts.ActiveProducts);
-        Assert.Equal(3, initialCounts.Categories);
+        Assert.Equal(4, initialCounts.Categories);
         Assert.Equal(3, initialCounts.ActiveShops);
         Assert.True(initialCounts.Offers >= 50);
         Assert.True(initialCounts.InactiveProducts >= 1);

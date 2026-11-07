@@ -31,9 +31,7 @@ public sealed class WishlistIntegrationTests(SqlServerTestFixture sqlServer)
             await using (var setup = new CompareShopDbContext(options))
             {
                 await setup.Database.MigrateAsync();
-                var category = new Category { Slug = "wishlist-test-category", Name = "Wishlist Test" };
-                setup.Categories.Add(category);
-                await setup.SaveChangesAsync();
+                var category = await CategoryTestData.AddLeafAsync(setup, "wishlist-test-category", "Wishlist Test");
 
                 withImage = new Product
                 {

@@ -38,6 +38,11 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
+        model.Entity<Category>().HasIndex(x => x.ParentCategoryId);
+        model.Entity<Category>().Property(x => x.Level).HasDefaultValue((byte)1);
+        model.Entity<Category>().Property(x => x.SortOrder).HasDefaultValue(0);
+        model.Entity<Category>().ToTable(table => table.HasCheckConstraint("CK_Categories_Level_ParentCategoryId", "([Level] = 1 AND [ParentCategoryId] IS NULL) OR ([Level] = 2 AND [ParentCategoryId] IS NOT NULL)"));
+        model.Entity<Category>().HasOne(x => x.ParentCategory).WithMany(x => x.Children).HasForeignKey(x => x.ParentCategoryId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Category>().Property(x => x.Slug).HasMaxLength(160); model.Entity<Category>().Property(x => x.Name).HasMaxLength(200);
         model.Entity<PartnerShop>().HasKey(x => x.Id); model.Entity<PartnerShop>().HasIndex(x => x.Slug).IsUnique(); model.Entity<PartnerShop>().HasIndex(x => x.IsActive);
         model.Entity<PartnerShop>().Property(x => x.Slug).HasMaxLength(160); model.Entity<PartnerShop>().Property(x => x.Name).HasMaxLength(200);

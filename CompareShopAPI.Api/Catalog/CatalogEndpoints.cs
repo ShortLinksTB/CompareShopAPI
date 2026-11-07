@@ -7,8 +7,8 @@ public static class CatalogEndpoints
 {
     public static RouteGroupBuilder MapCatalogEndpoints(this RouteGroupBuilder api)
     {
-        api.MapGet("/categories", async (CatalogService service, CancellationToken ct) =>
-            Results.Ok(new { items = await service.Categories(ct) })).AllowAnonymous();
+        api.MapGet("/categories", async (int? parentId, CatalogService service, CancellationToken ct) =>
+            Results.Ok(new { items = await service.Categories(parentId, ct) })).AllowAnonymous();
         api.MapGet("/products", async (int? page, int? pageSize, int? categoryId, int? minPrice, int? maxPrice, int? shopId, string? search, CatalogService service, CancellationToken ct) =>
         {
             var filter = new ProductFilter(page ?? 1, pageSize ?? 20, categoryId, minPrice, maxPrice, shopId, search);

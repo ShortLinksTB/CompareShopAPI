@@ -257,6 +257,13 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             var shop = await service.CreateShop(subject, new("admin-shop", "Admin Shop", "https://shop.example"), default);
             var product = await service.CreateProduct(subject, new("admin-product", "Admin Product", "Brand", "Description", category.Id, true, "https://images.example.test/product.jpg"), default);
             Assert.Equal("https://images.example.test/product.jpg", product.ImageUrl);
+            var legacyCategoryInput = System.Text.Json.JsonSerializer.Deserialize<CategoryInput>("{\"slug\":\"admin-category-legacy\",\"name\":\"Legacy Update\",\"isActive\":true}",
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+            var legacyUpdatedCategory = await service.UpdateCategory(subject, category.Id, legacyCategoryInput, default);
+            Assert.Equal(rootCategory.Id, legacyUpdatedCategory.ParentCategoryId);
+            await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateCategory(subject, category.Id,
+                new("admin-category-promote", "Unsafe Promotion", true, ClearParentCategory: true), default));
+            Assert.Equal(rootCategory.Id, (await service.Category(subject, category.Id, default))?.ParentCategoryId);
             await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProduct(subject, product.Id, new("admin-product", "Invalid Root Assignment", "Brand", "Description", rootCategory.Id), default));
             var offer = new CompareShopAPI.Domain.Catalog.ProductOffer { ProductId = product.Id, PartnerShopId = shop.Id, PriceVnd = 100, Url = "https://shop.example/item", UpdatedAtUtc = DateTime.UtcNow, IsActive = false };
             db.ProductOffers.Add(offer); await db.SaveChangesAsync();

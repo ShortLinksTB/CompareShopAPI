@@ -46,7 +46,7 @@ public sealed record AdminFeatureFlag(int Id, string Key, bool Enabled, string? 
 public sealed record AdminSetting(string Key, string Value);
 public sealed record PermissionsResponse(IReadOnlyList<string> Permissions);
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int TotalItems);
-public sealed record CategoryInput(string Slug, string Name, bool IsActive = true, int? ParentCategoryId = null);
+public sealed record CategoryInput(string Slug, string Name, bool IsActive = true, int? ParentCategoryId = null, bool ClearParentCategory = false);
 public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true);
 public sealed record ProductInput(string Slug, string Name, string? Brand, string? Description, int CategoryId, bool IsActive = true, string? ImageUrl = null);
 public sealed record OfferInput(int PriceVnd, string? Url, bool IsActive, bool IsOutlier);

@@ -78,7 +78,11 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     {
         var item = id.HasValue ? await db.Categories.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
-        if (input.ParentCategoryId is int parentId)
+        var parentCategoryId = input.ClearParentCategory ? null : input.ParentCategoryId ?? item?.ParentCategoryId;
+        if (input.ClearParentCategory && item?.ParentCategoryId is not null &&
+            await db.Products.AnyAsync(x => x.CategoryId == item.Id, ct))
+            throw new ArgumentException("A category with products cannot become a Level 1 category.");
+        if (parentCategoryId is int parentId)
         {
             if (parentId == id) throw new ArgumentException("A category cannot be its own parent.");
             var parent = await db.Categories.AsNoTracking().SingleOrDefaultAsync(x => x.Id == parentId, ct);
@@ -89,8 +93,8 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         }
         item ??= new Category { Slug = input.Slug, Name = input.Name };
         item.Slug = input.Slug; item.Name = input.Name; item.IsActive = input.IsActive;
-        item.ParentCategoryId = input.ParentCategoryId;
-        item.Level = input.ParentCategoryId.HasValue ? (byte)2 : (byte)1;
+        item.ParentCategoryId = parentCategoryId;
+        item.Level = parentCategoryId.HasValue ? (byte)2 : (byte)1;
         if (!id.HasValue) db.Categories.Add(item);
         await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.IsActive, item.ParentCategoryId);
     }

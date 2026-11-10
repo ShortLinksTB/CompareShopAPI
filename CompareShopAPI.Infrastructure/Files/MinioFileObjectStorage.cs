@@ -46,8 +46,7 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
         var storedType = contentType == "image/svg+xml" ? "application/octet-stream" : contentType;
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["Cache-Control"] = "no-store",
-            ["Content-Type"] = storedType
+            ["Cache-Control"] = "no-store"
         };
         if (contentType == "image/svg+xml")
             headers["x-amz-meta-download-disposition"] = "attachment";

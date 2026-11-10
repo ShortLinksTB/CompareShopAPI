@@ -23,7 +23,7 @@ public sealed class FileServiceTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Minio:Endpoint"] = "http://minio.internal:9000",
-            ["Minio:PublicEndpoint"] = "https://objects.example.test/storage",
+            ["Minio:PublicEndpoint"] = "http://objects.example.test/storage",
             ["Minio:AccessKey"] = "test-access",
             ["Minio:SecretKey"] = "test-secret",
             ["Minio:Bucket"] = "compareshop-files"
@@ -31,7 +31,11 @@ public sealed class FileServiceTests
 
         var storage = new MinioFileObjectStorage(configuration);
 
-        Assert.Equal("https://objects.example.test/storage/compareshop-files/abc123", storage.PublicUrl("abc123"));
+        var publicUrl = new Uri(storage.PublicUrl("abc123"));
+        Assert.Equal("https", publicUrl.Scheme);
+        Assert.Equal("objects.example.test", publicUrl.Host);
+        Assert.Equal("/storage/compareshop-files/abc123", publicUrl.AbsolutePath);
+        Assert.Empty(publicUrl.Query);
     }
 
     [Fact]

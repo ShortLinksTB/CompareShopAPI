@@ -23,6 +23,12 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
             ? publicEndpointUri
             : new Uri($"http://{publicEndpointValue}", UriKind.Absolute);
         if (publicEndpoint.Scheme is not ("http" or "https")) throw new InvalidOperationException("Minio:PublicEndpoint must use HTTP or HTTPS.");
+        var publicEndpointPort = publicEndpoint.IsDefaultPort ? -1 : publicEndpoint.Port;
+        publicEndpoint = new UriBuilder(publicEndpoint)
+        {
+            Scheme = Uri.UriSchemeHttps,
+            Port = publicEndpointPort
+        }.Uri;
         var accessKey = configuration["Minio:AccessKey"] ?? throw new InvalidOperationException("Minio:AccessKey is required.");
         var secretKey = configuration["Minio:SecretKey"] ?? throw new InvalidOperationException("Minio:SecretKey is required.");
         bucket = configuration["Minio:Bucket"] ?? throw new InvalidOperationException("Minio:Bucket is required.");

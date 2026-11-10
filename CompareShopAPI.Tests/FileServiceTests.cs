@@ -47,7 +47,7 @@ public sealed class FileServiceTests
     [Fact]
     public async Task Minio_storage_uploads_svg_with_download_headers()
     {
-        string? contentType = null;
+        string?[]? contentTypes = null;
         string? contentDisposition = null;
         string? cacheControl = null;
         var builder = WebApplication.CreateBuilder();
@@ -55,7 +55,7 @@ public sealed class FileServiceTests
         await using var server = builder.Build();
         server.MapPut("/{**path}", (HttpContext context) =>
         {
-            contentType = context.Request.Headers["Content-Type"].ToString();
+            contentTypes = context.Request.Headers["Content-Type"].ToArray();
             contentDisposition = context.Request.Headers["Content-Disposition"].ToString();
             cacheControl = context.Request.Headers["Cache-Control"].ToString();
             context.Response.Headers.ETag = "\"svg-etag\"";
@@ -74,7 +74,7 @@ public sealed class FileServiceTests
         var storage = new MinioFileObjectStorage(configuration);
         await storage.Put("svg-test", new MemoryStream([1, 2, 3]), 3, "image/svg+xml", default);
 
-        Assert.Equal("application/octet-stream", contentType);
+        Assert.Equal(new[] { "application/octet-stream" }, contentTypes);
         Assert.Equal("attachment", contentDisposition);
         Assert.Equal("no-store", cacheControl);
     }

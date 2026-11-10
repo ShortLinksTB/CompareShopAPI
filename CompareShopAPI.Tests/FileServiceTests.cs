@@ -23,7 +23,7 @@ public sealed class FileServiceTests
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Minio:Endpoint"] = "http://minio.internal:9000",
-            ["Minio:PublicEndpoint"] = "https://objects.example.test/storage",
+            ["Minio:PublicEndpoint"] = "http://objects.example.test/storage",
             ["Minio:AccessKey"] = "test-access",
             ["Minio:SecretKey"] = "test-secret",
             ["Minio:Bucket"] = "compareshop-files"
@@ -31,7 +31,13 @@ public sealed class FileServiceTests
 
         var storage = new MinioFileObjectStorage(configuration);
 
-        Assert.Equal("https://objects.example.test/storage/compareshop-files/abc123", storage.PublicUrl("abc123"));
+        var url = new Uri(storage.PublicUrl("abc123"));
+        Assert.Equal(Uri.UriSchemeHttps, url.Scheme);
+        Assert.Equal("objects.example.test", url.Host);
+        Assert.Equal("/storage/compareshop-files/abc123", url.AbsolutePath);
+        Assert.True(url.IsDefaultPort);
+        Assert.Empty(url.Query);
+        Assert.Empty(url.Fragment);
     }
 
     [Fact]
@@ -142,6 +148,7 @@ public sealed class FileServiceTests
         Assert.Equal(HttpStatusCode.Redirect, redirect.StatusCode);
         Assert.Equal("public, max-age=31536000, immutable", redirect.Headers.CacheControl?.ToString());
         Assert.Equal($"https://files.example.test/compareshop/{metadata.Id:N}", redirect.Headers.Location?.ToString());
+        Assert.Empty(redirect.Headers.Location!.Query);
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/admin/files/{metadata.Id:D}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/files/{metadata.Id:D}")).StatusCode);
         permissions.Allowed.Remove(FilePermissions.Write);

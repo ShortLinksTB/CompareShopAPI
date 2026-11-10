@@ -4,6 +4,7 @@ using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Articles;
 using CompareShopAPI.Domain.Ingestion;
+using CompareShopAPI.Domain.Files;
 namespace CompareShopAPI.Infrastructure.Persistence;
 public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> options) : DbContext(options)
 {
@@ -35,6 +36,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<DataSource> DataSources => Set<DataSource>();
     public DbSet<SyncJob> SyncJobs => Set<SyncJob>();
     public DbSet<SourceItemMapping> SourceItemMappings => Set<SourceItemMapping>();
+    public DbSet<FileAsset> Files => Set<FileAsset>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
@@ -100,6 +102,12 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<AdminRolePermission>().HasKey(x => new { x.RoleId, x.PermissionId });
         model.Entity<AdminRolePermission>().HasOne<AdminRole>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<AdminRolePermission>().HasOne<AdminPermission>().WithMany().HasForeignKey(x => x.PermissionId).OnDelete(DeleteBehavior.Cascade);
+        model.Entity<FileAsset>().HasKey(x => x.Id);
+        model.Entity<FileAsset>().Property(x => x.OriginalFileName).HasMaxLength(255).IsRequired();
+        model.Entity<FileAsset>().Property(x => x.ContentType).HasMaxLength(100).IsRequired();
+        model.Entity<FileAsset>().Property(x => x.ObjectKey).HasMaxLength(512).IsRequired();
+        model.Entity<FileAsset>().Property(x => x.UploadedBy).HasMaxLength(200).IsRequired();
+        model.Entity<FileAsset>().HasIndex(x => x.UploadedAtUtc);
         model.Entity<AdminUserRole>().HasKey(x => new { x.UserId, x.RoleId });
         model.Entity<AdminUserRole>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<AdminUserRole>().HasOne<AdminRole>().WithMany().HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);

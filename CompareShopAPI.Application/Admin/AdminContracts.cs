@@ -17,6 +17,7 @@ public static class AdminPermissions
     public const string SeoRead = "seo.read", SeoUpdate = "seo.update", UsersManage = "users.manage", RolesManage = "roles.manage";
     public const string FeatureFlagsRead = "feature_flags.read", FeatureFlagsUpdate = "feature_flags.update", SettingsManage = "settings.manage";
     public const string ComplianceRead = "compliance.read", ComplianceManage = "compliance.manage";
+    public const string FilesRead = "files.read", FilesWrite = "files.write";
 }
 
 public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId);

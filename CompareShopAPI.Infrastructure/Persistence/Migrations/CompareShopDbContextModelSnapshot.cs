@@ -226,6 +226,22 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.ToTable("AdminUserRoles");
                 });
 
+            modelBuilder.Entity("CompareShopAPI.Domain.Files.FileAsset", b =>
+                {
+                    b.Property<Guid>("Id").HasColumnType("uniqueidentifier");
+                    b.Property<string>("ContentType").IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)");
+                    b.Property<int?>("Height").HasColumnType("int");
+                    b.Property<string>("ObjectKey").IsRequired().HasMaxLength(512).HasColumnType("nvarchar(512)");
+                    b.Property<string>("OriginalFileName").IsRequired().HasMaxLength(255).HasColumnType("nvarchar(255)");
+                    b.Property<long>("SizeBytes").HasColumnType("bigint");
+                    b.Property<DateTime>("UploadedAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("UploadedBy").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<int?>("Width").HasColumnType("int");
+                    b.HasKey("Id");
+                    b.HasIndex("UploadedAtUtc");
+                    b.ToTable("Files");
+                });
+
             modelBuilder.Entity("CompareShopAPI.Domain.Admin.BannedItem", b =>
                 {
                     b.HasOne("CompareShopAPI.Domain.Catalog.Product", "Product")

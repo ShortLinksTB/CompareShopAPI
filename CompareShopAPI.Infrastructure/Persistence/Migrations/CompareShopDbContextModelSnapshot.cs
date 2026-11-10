@@ -372,6 +372,12 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)")
+                        .HasDefaultValue("shopping-tips");
+
                     b.Property<string>("AuthorAvatarUrl")
                         .HasMaxLength(2048)
                         .HasColumnType("nvarchar(2048)");
@@ -394,6 +400,9 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("nvarchar(2048)");
 
+                    b.Property<int?>("CoverFileId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -414,7 +423,8 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
+                        .HasColumnType("nvarchar(200)")
+                        .UseCollation("Latin1_General_100_CI_AS");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -425,6 +435,11 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
+
+                    b.Property<string>("TagsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)")
+                        .HasDefaultValue("[]");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
@@ -437,6 +452,16 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.HasIndex("Status", "ScheduledAtUtc");
 
                     b.ToTable("Articles");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Articles.ArticleViewDaily", b =>
+                {
+                    b.Property<int>("ArticleId").HasColumnType("int");
+                    b.Property<DateOnly>("DateUtc").HasColumnType("date");
+                    b.Property<long>("Views").ValueGeneratedOnAdd().HasColumnType("bigint").HasDefaultValue(0L);
+                    b.HasKey("ArticleId", "DateUtc");
+                    b.HasOne("CompareShopAPI.Domain.Articles.Article", null).WithMany().HasForeignKey("ArticleId").OnDelete(DeleteBehavior.Restrict).IsRequired();
+                    b.ToTable("ArticleViewDaily");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Articles.ArticleRelatedProduct", b =>

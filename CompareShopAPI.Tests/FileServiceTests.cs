@@ -48,7 +48,8 @@ public sealed class FileServiceTests
         var contentType = context.Request.ContentType;
         var disposition = context.Request.Headers["Content-Disposition"];
         var cacheControl = context.Request.Headers["Cache-Control"];
-        await context.Request.InputStream.CopyToAsync(Stream.Null);
+        using var uploadedBody = new MemoryStream();
+        await context.Request.InputStream.CopyToAsync(uploadedBody);
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentLength64 = 0;
         context.Response.Close();
@@ -58,6 +59,7 @@ public sealed class FileServiceTests
         Assert.Equal("application/octet-stream", contentType);
         Assert.Equal("attachment; filename=\"download.svg\"", disposition);
         Assert.Equal("no-store", cacheControl);
+        Assert.Equal(new byte[] { 1, 2, 3 }, uploadedBody.ToArray());
     }
 
     [Fact]

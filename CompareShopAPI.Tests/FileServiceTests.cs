@@ -43,7 +43,8 @@ public sealed class FileServiceTests
         await storage.Put("svg-key", new MemoryStream([1, 2, 3]), 3, "image/svg+xml", default);
 
         var args = Assert.IsType<PutObjectArgs>(recorder.PutArgs);
-        Assert.Equal("application/octet-stream", args.GetType().GetProperty("ContentType")!.GetValue(args));
+        Assert.Equal("application/octet-stream",
+            args.GetType().GetMethod("GetContentType", Type.EmptyTypes)!.Invoke(args, null));
         var headers = Assert.IsAssignableFrom<IDictionary<string, string>>(
             args.GetType().GetProperty("Headers")!.GetValue(args));
         Assert.Equal("no-store", headers["Cache-Control"]);

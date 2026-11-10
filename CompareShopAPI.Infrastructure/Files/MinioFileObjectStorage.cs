@@ -2,6 +2,7 @@ using CompareShopAPI.Application.Files;
 using Microsoft.Extensions.Configuration;
 using Minio;
 using Minio.DataModel.Args;
+using System.Net.Http.Headers;
 
 namespace CompareShopAPI.Infrastructure.Files;
 
@@ -29,7 +30,9 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
         var secure = bool.TryParse(configuration["Minio:UseSsl"], out var configuredSsl)
             ? configuredSsl
             : endpoint.Scheme == Uri.UriSchemeHttps;
-        client = new MinioClient().WithEndpoint(endpoint.Authority).WithSSL(secure).WithCredentials(accessKey, secretKey).Build();
+        var httpClient = new HttpClient(new SvgDispositionHandler(new HttpClientHandler()));
+        client = new MinioClient().WithEndpoint(endpoint.Authority).WithSSL(secure).WithCredentials(accessKey, secretKey)
+            .WithHttpClient(httpClient, disposeHttpClient: true).Build();
     }
 
     public string PublicUrl(string key) => new UriBuilder(publicEndpoint.Scheme, publicEndpoint.Host, publicEndpoint.IsDefaultPort ? -1 : publicEndpoint.Port,
@@ -44,11 +47,27 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
             ["Content-Type"] = storedType
         };
         if (contentType == "image/svg+xml")
-            headers["Content-Disposition"] = "attachment; filename=\"download.svg\"";
+            headers["x-amz-meta-download-disposition"] = "attachment";
         await client.PutObjectAsync(new PutObjectArgs().WithBucket(bucket).WithObject(key).WithStreamData(content)
             .WithObjectSize(size).WithContentType(storedType).WithHeaders(headers), ct);
     }
 
     public Task Delete(string key, CancellationToken ct) => client.RemoveObjectAsync(
         new RemoveObjectArgs().WithBucket(bucket).WithObject(key), ct);
+
+    private sealed class SvgDispositionHandler(HttpMessageHandler innerHandler) : DelegatingHandler(innerHandler)
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (HttpMethod.Put == request.Method
+                && request.Headers.TryGetValues("x-amz-meta-download-disposition", out var values)
+                && values.Contains("attachment", StringComparer.OrdinalIgnoreCase)
+                && request.Content is not null)
+            {
+                request.Content.Headers.ContentDisposition = new ContentDispositionHeaderValue("attachment");
+            }
+
+            return base.SendAsync(request, cancellationToken);
+        }
+    }
 }

@@ -8,6 +8,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -32,6 +36,41 @@ public sealed class FileServiceTests
         var storage = new MinioFileObjectStorage(configuration);
 
         Assert.Equal("https://objects.example.test/storage/compareshop-files/abc123", storage.PublicUrl("abc123"));
+    }
+
+    [Fact]
+    public async Task Minio_storage_uploads_svg_with_download_headers()
+    {
+        string? contentType = null;
+        string? contentDisposition = null;
+        string? cacheControl = null;
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        await using var server = builder.Build();
+        server.MapPut("/{**path}", (HttpContext context) =>
+        {
+            contentType = context.Request.Headers["Content-Type"].ToString();
+            contentDisposition = context.Request.Headers["Content-Disposition"].ToString();
+            cacheControl = context.Request.Headers["Cache-Control"].ToString();
+            context.Response.Headers.ETag = "\"svg-etag\"";
+            return Results.Ok();
+        });
+        await server.StartAsync();
+        var address = server.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Minio:Endpoint"] = address,
+            ["Minio:AccessKey"] = "test-access",
+            ["Minio:SecretKey"] = "test-secret",
+            ["Minio:Bucket"] = "compareshop-files"
+        }).Build();
+
+        var storage = new MinioFileObjectStorage(configuration);
+        await storage.Put("svg-test", new MemoryStream([1, 2, 3]), 3, "image/svg+xml", default);
+
+        Assert.Equal("application/octet-stream", contentType);
+        Assert.Equal("attachment", contentDisposition);
+        Assert.Equal("no-store", cacheControl);
     }
 
     [Fact]

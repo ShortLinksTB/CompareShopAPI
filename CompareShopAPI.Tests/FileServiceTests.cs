@@ -44,9 +44,9 @@ public sealed class FileServiceTests
 
         var args = Assert.IsType<PutObjectArgs>(recorder.PutArgs);
         Assert.Equal("application/octet-stream",
-            args.GetType().GetMethod("GetContentType", Type.EmptyTypes)!.Invoke(args, null));
+            ReadSdkArgumentMember(args, "ContentType"));
         var headers = Assert.IsAssignableFrom<IDictionary<string, string>>(
-            args.GetType().GetProperty("Headers")!.GetValue(args));
+            ReadSdkArgumentMember(args, "Headers"));
         Assert.Equal("no-store", headers["Cache-Control"]);
         Assert.Equal("attachment; filename=\"download.svg\"", headers["Content-Disposition"]);
         Assert.DoesNotContain("Content-Type", headers.Keys);
@@ -212,6 +212,19 @@ public sealed class FileServiceTests
         ["Minio:SecretKey"] = "test-secret",
         ["Minio:Bucket"] = "compareshop-files"
     }).Build();
+
+    private static object? ReadSdkArgumentMember(object args, string name)
+    {
+        for (var type = args.GetType(); type is not null; type = type.BaseType)
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+            var property = type.GetProperty(name, flags);
+            if (property is not null) return property.GetValue(args);
+            var field = type.GetField($"<{name}>k__BackingField", flags) ?? type.GetField(name, flags);
+            if (field is not null) return field.GetValue(args);
+        }
+        throw new InvalidOperationException($"MinIO PutObjectArgs does not expose '{name}'.");
+    }
 
     private static FileService Create(FakeRepository repository, FakeStorage storage, FakePermissions permissions) =>
         new(repository, storage, permissions, TimeProvider.System, NullLogger<FileService>.Instance);

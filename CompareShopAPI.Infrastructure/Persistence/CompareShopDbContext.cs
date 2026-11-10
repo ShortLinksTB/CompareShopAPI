@@ -33,6 +33,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<ProductMatching> ProductMatchings => Set<ProductMatching>();
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<ArticleRelatedProduct> ArticleRelatedProducts => Set<ArticleRelatedProduct>();
+    public DbSet<ArticleViewDaily> ArticleViewDaily => Set<ArticleViewDaily>();
     public DbSet<DataSource> DataSources => Set<DataSource>();
     public DbSet<SyncJob> SyncJobs => Set<SyncJob>();
     public DbSet<SourceItemMapping> SourceItemMappings => Set<SourceItemMapping>();
@@ -140,7 +141,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<ProductMatching>().HasIndex(x => new { x.DataSourceId, x.ExternalSku }).IsUnique().HasFilter("[DataSourceId] IS NOT NULL AND [ExternalSku] IS NOT NULL");
 
         model.Entity<Article>().HasKey(x => x.Id);
-        model.Entity<Article>().Property(x => x.Slug).HasMaxLength(200).IsRequired();
+        model.Entity<Article>().Property(x => x.Slug).UseCollation("Latin1_General_100_CI_AS").HasMaxLength(200).IsRequired();
         model.Entity<Article>().HasIndex(x => x.Slug).IsUnique();
         model.Entity<Article>().HasIndex(x => new { x.Status, x.ScheduledAtUtc });
         model.Entity<Article>().Property(x => x.Title).HasMaxLength(300).IsRequired();
@@ -150,6 +151,13 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<Article>().Property(x => x.AuthorName).HasMaxLength(200).IsRequired();
         model.Entity<Article>().Property(x => x.AuthorAvatarUrl).HasMaxLength(2048);
         model.Entity<Article>().Property(x => x.Content).IsRequired();
+        model.Entity<Article>().Property(x => x.Category).HasMaxLength(32).HasDefaultValue("shopping-tips").IsRequired();
+        model.Entity<Article>().Property(x => x.TagsJson).HasDefaultValue("[]").IsRequired();
+        model.Entity<Article>().Property(x => x.CoverFileId);
+        model.Entity<ArticleViewDaily>().HasKey(x => new { x.ArticleId, x.DateUtc });
+        model.Entity<ArticleViewDaily>().Property(x => x.DateUtc).HasColumnType("date");
+        model.Entity<ArticleViewDaily>().Property(x => x.Views).HasDefaultValue(0L);
+        model.Entity<ArticleViewDaily>().HasOne<Article>().WithMany().HasForeignKey(x => x.ArticleId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Article>().Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
         model.Entity<Article>().OwnsOne(x => x.Seo, seo =>
         {

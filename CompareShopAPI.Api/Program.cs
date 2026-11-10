@@ -55,10 +55,11 @@ builder.Services.AddScoped<IAdminData, EfAdminData>();
 builder.Services.AddScoped<IBannedItemData, EfBannedItemData>();
 builder.Services.AddScoped<BannedItemService>();
 builder.Services.AddScoped<IArticleRepository, EfArticleRepository>();
+builder.Services.AddScoped<IBlogArticleRepository, EfArticleRepository>();
 builder.Services.AddScoped<IArticlePermissionGate, AdminArticlePermissionGate>();
 builder.Services.AddScoped<IArticleProductLookup, UserCommerceArticleProductLookup>();
 builder.Services.AddScoped<ArticleService>();
-builder.Services.AddHostedService<ArticlePublishingWorker>();
+builder.Services.AddScoped<BlogArticleService>();
 builder.Services.AddScoped<ISyncJobStore, EfSyncJobStore>();
 builder.Services.AddScoped<IDataSourceStore, EfDataSourceStore>();
 builder.Services.AddScoped<IPriceHistoryRecorder, EfPriceHistoryRecorder>();
@@ -117,8 +118,8 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check 
 app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminEndpoints();
 app.MapGroup("/api/v1").MapCatalogEndpoints();
 app.MapGroup("/api/v1").MapUserCommerceEndpoints();
-app.MapGroup("/api/v1").MapArticleEndpoints();
-app.MapGroup("/api/v1/admin").RequireAuthorization("Admin").MapAdminArticleEndpoints();
+app.MapGroup("/api/v1").MapArticleBlogEndpoints();
+app.MapGroup("/api/v1/admin").RequireAuthorization("Admin").MapAdminArticleBlogEndpoints();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminFileEndpoints();
 app.MapGroup("/files").AllowAnonymous().MapPublicFileEndpoints();
 if (app.Environment.IsDevelopment())

@@ -60,6 +60,22 @@ public sealed class Article
     public DateTime? PublishedAtUtc { get; private set; }
     public DateTime? ScheduledAtUtc { get; private set; }
     public List<ArticleRelatedProduct> RelatedProducts { get; private set; } = [];
+    public string Category { get; private set; } = "shopping-tips";
+    public string TagsJson { get; private set; } = "[]";
+    public int? CoverFileId { get; private set; }
+
+    public void UpdateBlogFields(string slug, string title, string category, string excerptText, string markdown, int? coverFileId, string tagsJson, DateTime nowUtc)
+    {
+        if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 160) throw new ArgumentException("Title must be 1–160 characters.", nameof(title));
+        Slug = NormalizeSlug(slug);
+        Title = title.Trim();
+        Category = category;
+        Excerpt = excerptText.Trim();
+        Content = markdown;
+        CoverFileId = coverFileId;
+        TagsJson = tagsJson;
+        UpdatedAtUtc = AsUtc(nowUtc);
+    }
 
     public void Update(string slug, string title, string excerpt, string? coverImageUrl, string authorSubject, string authorName,
         string? authorAvatarUrl, int readingMinutes, string content, ArticleSeo seo, IEnumerable<int> relatedProductIds, DateTime nowUtc)
@@ -101,10 +117,20 @@ public sealed class Article
         UpdatedAtUtc = nowUtc;
     }
 
+    public void UpdateStatus(ArticleStatus target, DateTime nowUtc)
+    {
+        if (Status == target) throw new InvalidArticleTransitionException($"Article is already {target}.");
+        if (target is not (ArticleStatus.Draft or ArticleStatus.Published)) throw new InvalidArticleTransitionException("Unsupported article status.");
+        if (target == ArticleStatus.Published) PublishedAtUtc ??= AsUtc(nowUtc);
+        Status = target;
+        UpdatedAtUtc = AsUtc(nowUtc);
+        ScheduledAtUtc = null;
+    }
+
     public static string NormalizeSlug(string? slug)
     {
         slug = slug?.Trim().ToLowerInvariant() ?? string.Empty;
-        if (slug.Length is < 1 or > 200 || !SlugPattern.IsMatch(slug)) throw new ArgumentException("Slug must contain lowercase letters, numbers, and single hyphens.", nameof(slug));
+        if (slug.Length is < 1 or > 160 || !SlugPattern.IsMatch(slug)) throw new ArgumentException("Slug must contain lowercase letters, numbers, and single hyphens.", nameof(slug));
         return slug;
     }
 
@@ -144,4 +170,14 @@ public sealed class ArticleRelatedProduct(int articleId, int productId)
 {
     public int ArticleId { get; private set; } = articleId;
     public int ProductId { get; private set; } = productId;
+}
+
+public sealed class ArticleViewDaily
+{
+    private ArticleViewDaily() { }
+    public ArticleViewDaily(int articleId, DateOnly dateUtc) { ArticleId = articleId; DateUtc = dateUtc; Views = 0; }
+    public int ArticleId { get; private set; }
+    public DateOnly DateUtc { get; private set; }
+    public long Views { get; private set; }
+    public void Increment() => Views++;
 }

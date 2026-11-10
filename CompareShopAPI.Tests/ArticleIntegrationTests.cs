@@ -17,6 +17,61 @@ namespace CompareShopAPI.Tests;
 public sealed class ArticleIntegrationTests(SqlServerTestFixture sqlServer)
 {
     [Fact]
+    public async Task Blog_article_crud_publication_views_analytics_and_delete_use_additive_schema()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopBlog_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            await using var db = new CompareShopDbContext(options);
+            await db.Database.MigrateAsync();
+            var repository = new EfArticleRepository(db);
+            var now = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc);
+            var input = new BlogArticleInput("Blog title", " My-Blog ", "shopping-tips", "Excerpt", "# Markdown", null, ["tag"]);
+            var created = await repository.BlogCreate(input, "subject", "Author", now, default);
+            Assert.Equal("my-blog", created.Slug);
+            Assert.Equal("Draft", created.Status);
+            Assert.Null(await repository.BlogPublishedBySlug("my-blog", default));
+            await Assert.ThrowsAsync<ArticleSlugConflictException>(() => repository.BlogCreate(input with { Slug = "MY-BLOG" }, "subject", "Author", now, default));
+            var draftList = await repository.BlogAdminList(1, 20, "Blog", "shopping-tips", "Draft", default);
+            Assert.Single(draftList.Items);
+            var updated = await repository.BlogUpdate(created.Id, input with { Title = "Updated title", Tags = ["second"] }, now.AddMinutes(1), default);
+            Assert.Equal("Updated title", updated.Title);
+            Assert.Equal("second", Assert.Single(updated.Tags));
+            Assert.NotNull(await repository.BlogAdminGet(created.Id, default));
+            Assert.Null(await repository.BlogAnalytics(int.MaxValue, 7, DateOnly.FromDateTime(now), default));
+            await Assert.ThrowsAsync<KeyNotFoundException>(() => repository.RecordBlogView("missing", DateOnly.FromDateTime(now), default));
+
+            await repository.BlogTransition(created.Id, true, now.AddMinutes(2), default);
+            Assert.Equal(1, (await repository.BlogPublished(1, 20, null, default)).TotalItems);
+            Assert.Equal(1, (await repository.BlogPublished(1, 20, "shopping-tips", default)).TotalItems);
+            Assert.NotNull(await repository.BlogPublishedBySlug("my-blog", default));
+            await repository.RecordBlogView("my-blog", DateOnly.FromDateTime(now), default);
+            await repository.RecordBlogView("my-blog", DateOnly.FromDateTime(now), default);
+            await repository.RecordBlogView("my-blog", DateOnly.FromDateTime(now.AddDays(-7)), default);
+            var analytics = await repository.BlogAnalytics(created.Id, 7, DateOnly.FromDateTime(now), default);
+            Assert.NotNull(analytics);
+            Assert.Equal(2L, analytics.TotalViews);
+            Assert.Equal(1L, analytics.PreviousPeriodTotalViews);
+            Assert.Equal(7, analytics.Daily.Count);
+            Assert.Equal(2L, analytics.PeakViews);
+
+            await repository.BlogTransition(created.Id, false, now.AddMinutes(1), default);
+            Assert.Null(await repository.BlogPublishedBySlug("my-blog", default));
+            await repository.BlogDelete(created.Id, default);
+            Assert.Empty(await db.ArticleViewDaily.ToListAsync());
+            Assert.Null(await repository.BlogAdminGet(created.Id, default));
+            await Assert.ThrowsAsync<KeyNotFoundException>(() => repository.BlogDelete(created.Id, default));
+            Assert.False(await repository.BlogTransition(created.Id, true, now, default));
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task Article_schema_public_visibility_scheduler_and_restrictive_product_link_work_together()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopArticles_{Guid.NewGuid():N}" }.ConnectionString;

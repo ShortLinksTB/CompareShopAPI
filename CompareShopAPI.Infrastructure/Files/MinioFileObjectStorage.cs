@@ -11,9 +11,7 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
     private readonly string bucket;
     private readonly Uri publicEndpoint;
 
-    public MinioFileObjectStorage(IConfiguration configuration) : this(configuration, CreateClient(configuration)) { }
-
-    internal MinioFileObjectStorage(IConfiguration configuration, IMinioClient client)
+    public MinioFileObjectStorage(IConfiguration configuration)
     {
         var endpointValue = configuration["Minio:Endpoint"] ?? throw new InvalidOperationException("Minio:Endpoint is required.");
         var endpoint = Uri.TryCreate(endpointValue, UriKind.Absolute, out var endpointUri)
@@ -25,22 +23,13 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
             ? publicEndpointUri
             : new Uri($"http://{publicEndpointValue}", UriKind.Absolute);
         if (publicEndpoint.Scheme is not ("http" or "https")) throw new InvalidOperationException("Minio:PublicEndpoint must use HTTP or HTTPS.");
-        bucket = configuration["Minio:Bucket"] ?? throw new InvalidOperationException("Minio:Bucket is required.");
-        this.client = client;
-    }
-
-    private static IMinioClient CreateClient(IConfiguration configuration)
-    {
-        var endpointValue = configuration["Minio:Endpoint"] ?? throw new InvalidOperationException("Minio:Endpoint is required.");
-        var endpoint = Uri.TryCreate(endpointValue, UriKind.Absolute, out var endpointUri)
-            ? endpointUri
-            : new Uri($"http://{endpointValue}", UriKind.Absolute);
         var accessKey = configuration["Minio:AccessKey"] ?? throw new InvalidOperationException("Minio:AccessKey is required.");
         var secretKey = configuration["Minio:SecretKey"] ?? throw new InvalidOperationException("Minio:SecretKey is required.");
+        bucket = configuration["Minio:Bucket"] ?? throw new InvalidOperationException("Minio:Bucket is required.");
         var secure = bool.TryParse(configuration["Minio:UseSsl"], out var configuredSsl)
             ? configuredSsl
             : endpoint.Scheme == Uri.UriSchemeHttps;
-        return new MinioClient().WithEndpoint(endpoint.Authority).WithSSL(secure).WithCredentials(accessKey, secretKey).Build();
+        client = new MinioClient().WithEndpoint(endpoint.Authority).WithSSL(secure).WithCredentials(accessKey, secretKey).Build();
     }
 
     public string PublicUrl(string key) => new UriBuilder(publicEndpoint.Scheme, publicEndpoint.Host, publicEndpoint.IsDefaultPort ? -1 : publicEndpoint.Port,

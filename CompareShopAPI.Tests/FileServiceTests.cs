@@ -8,12 +8,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Minio;
-using Minio.DataModel.Args;
-using System.Reflection;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -33,23 +31,33 @@ public sealed class FileServiceTests
     }
 
     [Fact]
-    public async Task Minio_put_executes_svg_mapping_and_passes_type_and_headers_to_sdk()
+    public async Task Minio_put_sends_svg_type_and_response_headers_on_the_actual_request()
     {
-        var configuration = MinioConfiguration();
-        var minio = DispatchProxy.Create<IMinioClient, RecordingMinioClient>();
-        var recorder = (RecordingMinioClient)(object)minio;
-        var storage = new MinioFileObjectStorage(configuration, minio);
+        using var portFinder = new TcpListener(IPAddress.Loopback, 0);
+        portFinder.Start();
+        var port = ((IPEndPoint)portFinder.LocalEndpoint).Port;
+        portFinder.Stop();
 
-        await storage.Put("svg-key", new MemoryStream([1, 2, 3]), 3, "image/svg+xml", default);
+        using var listener = new HttpListener();
+        listener.Prefixes.Add($"http://127.0.0.1:{port}/");
+        listener.Start();
+        var requestTask = listener.GetContextAsync();
+        var storage = new MinioFileObjectStorage(MinioConfiguration($"http://127.0.0.1:{port}"));
+        var putTask = storage.Put("svg-key", new MemoryStream([1, 2, 3]), 3, "image/svg+xml", default);
+        var context = await requestTask.WaitAsync(TimeSpan.FromSeconds(10));
+        var contentType = context.Request.ContentType;
+        var disposition = context.Request.Headers["Content-Disposition"];
+        var cacheControl = context.Request.Headers["Cache-Control"];
+        await context.Request.InputStream.CopyToAsync(Stream.Null);
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentLength64 = 0;
+        context.Response.Close();
+        await putTask.WaitAsync(TimeSpan.FromSeconds(10));
 
-        var args = Assert.IsType<PutObjectArgs>(recorder.PutArgs);
-        Assert.Equal("application/octet-stream",
-            ReadSdkArgumentMember(args, "ContentType"));
-        var headers = Assert.IsAssignableFrom<IDictionary<string, string>>(
-            ReadSdkArgumentMember(args, "Headers"));
-        Assert.Equal("no-store", headers["Cache-Control"]);
-        Assert.Equal("attachment; filename=\"download.svg\"", headers["Content-Disposition"]);
-        Assert.DoesNotContain("Content-Type", headers.Keys);
+        Assert.Equal("PUT", context.Request.HttpMethod);
+        Assert.Equal("application/octet-stream", contentType);
+        Assert.Equal("attachment; filename=\"download.svg\"", disposition);
+        Assert.Equal("no-store", cacheControl);
     }
 
     [Fact]
@@ -204,27 +212,14 @@ public sealed class FileServiceTests
     private static FileAsset NewAsset(string name, string type, long size, int? width, int? height) =>
         new(Guid.NewGuid(), name, type, size, "key", "admin", DateTime.UtcNow, width, height);
 
-    private static IConfiguration MinioConfiguration() => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    private static IConfiguration MinioConfiguration(string? endpoint = null) => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
     {
-        ["Minio:Endpoint"] = "http://minio.internal:9000",
+        ["Minio:Endpoint"] = endpoint ?? "http://minio.internal:9000",
         ["Minio:PublicEndpoint"] = "https://objects.example.test/storage",
         ["Minio:AccessKey"] = "test-access",
         ["Minio:SecretKey"] = "test-secret",
         ["Minio:Bucket"] = "compareshop-files"
     }).Build();
-
-    private static object? ReadSdkArgumentMember(object args, string name)
-    {
-        for (var type = args.GetType(); type is not null; type = type.BaseType)
-        {
-            const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-            var property = type.GetProperty(name, flags);
-            if (property is not null) return property.GetValue(args);
-            var field = type.GetField($"<{name}>k__BackingField", flags) ?? type.GetField(name, flags);
-            if (field is not null) return field.GetValue(args);
-        }
-        throw new InvalidOperationException($"MinIO PutObjectArgs does not expose '{name}'.");
-    }
 
     private static FileService Create(FakeRepository repository, FakeStorage storage, FakePermissions permissions) =>
         new(repository, storage, permissions, TimeProvider.System, NullLogger<FileService>.Instance);
@@ -265,25 +260,6 @@ public sealed class FileServiceTests
             return Task.CompletedTask;
         }
         public Task Delete(string key, CancellationToken ct) { DeleteCount++; return Task.CompletedTask; }
-    }
-
-    public class RecordingMinioClient : DispatchProxy
-    {
-        public PutObjectArgs? PutArgs { get; private set; }
-
-        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
-        {
-            if (targetMethod?.Name == nameof(IMinioClient.PutObjectAsync))
-            {
-                PutArgs = Assert.IsType<PutObjectArgs>(args![0]);
-                if (targetMethod.ReturnType == typeof(Task)) return Task.CompletedTask;
-                var resultType = targetMethod.ReturnType.GenericTypeArguments[0];
-                var defaultValue = resultType.IsValueType ? Activator.CreateInstance(resultType) : null;
-                return typeof(Task).GetMethod(nameof(Task.FromResult))!.MakeGenericMethod(resultType)
-                    .Invoke(null, [defaultValue]);
-            }
-            throw new NotSupportedException($"Unexpected MinIO call: {targetMethod?.Name}");
-        }
     }
 
     private sealed class FakePermissions(params string[] grants) : IFilePermissionGate

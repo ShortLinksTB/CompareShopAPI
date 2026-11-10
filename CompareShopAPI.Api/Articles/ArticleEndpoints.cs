@@ -24,7 +24,7 @@ public static class ArticleEndpoints
         admin.MapDelete("/articles/{id:int}",(HttpContext c,int id,BlogArticleService s,CancellationToken ct)=>RunBlogNoContent(()=>s.Delete(Subject(c),id,ct)));
         admin.MapPost("/articles/{id:int}/publish",(HttpContext c,int id,BlogArticleService s,CancellationToken ct)=>RunBlogNoContent(()=>s.Transition(Subject(c),id,true,ct)));
         admin.MapPost("/articles/{id:int}/unpublish",(HttpContext c,int id,BlogArticleService s,CancellationToken ct)=>RunBlogNoContent(()=>s.Transition(Subject(c),id,false,ct)));
-        admin.MapGet("/articles/{id:int}/analytics",(HttpContext c,int id,int? rangeDays,BlogArticleService s,CancellationToken ct)=>RunBlog(()=>s.Analytics(Subject(c),id,rangeDays??7,ct)));
+        admin.MapGet("/articles/{id:int}/analytics",(HttpContext c,int id,int? range,int? rangeDays,BlogArticleService s,CancellationToken ct)=>RunBlog(()=>s.Analytics(Subject(c),id,range??rangeDays??7,ct)));
         return admin;
     }
     public static RouteGroupBuilder MapArticleEndpoints(this RouteGroupBuilder api)

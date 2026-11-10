@@ -120,7 +120,7 @@ app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminEndpoints();
 app.MapGroup("/api/v1").MapCatalogEndpoints();
 app.MapGroup("/api/v1").MapUserCommerceEndpoints();
 app.MapGroup("/api/v1").MapArticleBlogEndpoints();
-app.MapGroup("/api/v1/admin").RequireAuthorization("Admin").MapAdminArticleBlogEndpoints();
+app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminArticleBlogEndpoints();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminFileEndpoints();
 app.MapGroup("/files").AllowAnonymous().MapPublicFileEndpoints();
 if (app.Environment.IsDevelopment())

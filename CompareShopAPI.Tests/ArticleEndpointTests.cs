@@ -30,22 +30,25 @@ public sealed class ArticleEndpointTests
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/articles/article")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/v1/articles/missing")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/api/v1/articles/missing/view", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/admin/articles")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/admin/articles")).StatusCode);
 
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}"));
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/admin/articles")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/admin/articles/1")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/api/v1/admin/articles/2")).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/api/v1/admin/articles", BlogInput())).StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/api/v1/admin/articles", BlogInput() with { Category = "unknown" })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync("/api/v1/admin/articles/1", BlogInput())).StatusCode);
-        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/admin/articles/1/publish", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/admin/articles/1/unpublish", null)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/admin/articles/1/analytics?rangeDays=7")).StatusCode);
-        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync("/api/v1/admin/articles/1")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/articles")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/articles/1")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/admin/articles/2")).StatusCode);
+        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/admin/articles", BlogInput())).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/admin/articles", BlogInput() with { Category = "unknown" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync("/admin/articles/1", BlogInput())).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/admin/articles/1/publish", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/admin/articles/1/unpublish", null)).StatusCode);
+        using var analyticsResponse = await client.GetAsync("/admin/articles/1/analytics?range=30");
+        Assert.Equal(HttpStatusCode.OK, analyticsResponse.StatusCode);
+        Assert.Contains("\"rangeDays\":30", await analyticsResponse.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/articles/1/analytics?rangeDays=7")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync("/admin/articles/1")).StatusCode);
 
         permissions.Allowed = false;
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/admin/articles")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/articles")).StatusCode);
         permissions.Allowed = true;
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/articles/article/view", null)).StatusCode);
     }

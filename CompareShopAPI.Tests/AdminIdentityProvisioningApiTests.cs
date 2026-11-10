@@ -50,7 +50,7 @@ public sealed class AdminIdentityProvisioningApiTests(SqlServerTestFixture fixtu
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/me/permissions")).StatusCode);
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(clientAdminRole, subject: noPermissionSubject));
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/admin/articles")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/articles")).StatusCode);
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(subject: noClientRoleSubject));
             Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/me/permissions")).StatusCode);

@@ -39,14 +39,14 @@ public sealed class EfArticleRepository(CompareShopDbContext db) : IArticleRepos
     public async Task<BlogArticleDto> BlogCreate(BlogArticleInput input,string actor,string authorName,DateTime nowUtc,CancellationToken ct)
     {
         var article=new Article(input.Slug,input.Title,input.ExcerptText,null,actor,authorName,null,1,input.ContentMarkdown,ArticleSeo.Create(null,null,null,null,true),Array.Empty<int>(),nowUtc);
-        article.UpdateBlogFields(input.Slug,input.Title,input.Category,input.ExcerptText,input.ContentMarkdown,input.CoverFileId,System.Text.Json.JsonSerializer.Serialize(input.Tags.Select(x=>x.Trim()).ToArray()),nowUtc);
+        article.UpdateBlogFields(input.Slug,input.Title,input.Category,input.ExcerptText,input.ContentMarkdown,ParseCoverFileId(input.CoverFileId),System.Text.Json.JsonSerializer.Serialize(input.Tags.Select(x=>x.Trim()).ToArray()),nowUtc);
         db.Articles.Add(article); try { await db.SaveChangesAsync(ct); } catch(DbUpdateException ex) when(IsUniqueViolation(ex)){db.Entry(article).State=EntityState.Detached;throw new ArticleSlugConflictException();}
         return (await AdminDtos([article],ct)).Single();
     }
     public async Task<BlogArticleDto> BlogUpdate(int id,BlogArticleInput input,DateTime nowUtc,CancellationToken ct)
     {
         var article=await db.Articles.SingleOrDefaultAsync(x=>x.Id==id,ct)??throw new KeyNotFoundException();
-        article.UpdateBlogFields(input.Slug,input.Title,input.Category,input.ExcerptText,input.ContentMarkdown,input.CoverFileId,System.Text.Json.JsonSerializer.Serialize(input.Tags.Select(x=>x.Trim()).ToArray()),nowUtc);
+        article.UpdateBlogFields(input.Slug,input.Title,input.Category,input.ExcerptText,input.ContentMarkdown,ParseCoverFileId(input.CoverFileId),System.Text.Json.JsonSerializer.Serialize(input.Tags.Select(x=>x.Trim()).ToArray()),nowUtc);
         try{await db.SaveChangesAsync(ct);}catch(DbUpdateException ex) when(IsUniqueViolation(ex)){throw new ArticleSlugConflictException();}
         return (await AdminDtos([article],ct)).Single();
     }
@@ -89,6 +89,7 @@ public sealed class EfArticleRepository(CompareShopDbContext db) : IArticleRepos
         return rows.Select(x=>new PublicBlogArticleDto(x.Title,x.Slug,x.Category,x.Excerpt,x.Content,x.CoverFileId,DeserializeTags(x.TagsJson),x.AuthorName,x.PublishedAtUtc,x.UpdatedAtUtc,views.GetValueOrDefault(x.Id))).ToArray();
     }
     private static string[] DeserializeTags(string json)=>System.Text.Json.JsonSerializer.Deserialize<string[]>(json)??[];
+    private static Guid? ParseCoverFileId(string? coverFileId)=>coverFileId is null?null:Guid.Parse(coverFileId);
     private IQueryable<Article> Ordered() => db.Articles.AsNoTracking().OrderByDescending(x => x.PublishedAtUtc).ThenBy(x => x.Id);
 
     public async Task<ArticlePage> Published(int page, int pageSize, CancellationToken ct)

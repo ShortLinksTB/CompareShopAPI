@@ -29,6 +29,8 @@ public sealed class BlogArticleServiceTests
     {
         var service = new BlogArticleService(new FakeRepository(), new PermissionGate(ArticlePermissions.Create), new Clock(Now));
         await Assert.ThrowsAsync<ArgumentException>(() => service.Create("editor", null, Input with { Category = "Shopping-Tips" }, default));
+        var invalidCover = await Assert.ThrowsAsync<ArgumentException>(() => service.Create("editor", null, Input with { CoverFileId = "not-a-guid" }, default));
+        Assert.Contains("coverFileId must be a GUID or null", invalidCover.Message);
         await Assert.ThrowsAsync<ArgumentException>(() => service.Create("editor", null, Input with { Title = new string('x', 161) }, default));
         await Assert.ThrowsAsync<ArgumentException>(() => service.Create("editor", null, Input with { ContentMarkdown = new string('x', 102401) }, default));
         await Assert.ThrowsAsync<ArgumentException>(() => service.Create("editor", null, Input with { Tags = ["Tag", " tag "] }, default));

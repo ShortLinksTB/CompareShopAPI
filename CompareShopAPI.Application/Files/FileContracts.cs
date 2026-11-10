@@ -13,8 +13,10 @@ public sealed record FileMetadata(Guid Id, string OriginalFileName, string Conte
     int? Width, int? Height, string UploadedBy, DateTime UploadedAtUtc);
 public sealed record FilePage(IReadOnlyList<FileMetadata> Items, int Page, int PageSize, int TotalItems, int TotalPages);
 public sealed record FileUpload(string FileName, string ContentType, long SizeBytes, Stream Content);
-public sealed record StoredObject(Stream Content, string ContentType);
-
+public sealed record FileUploadOutcome(string FileName, FileMetadata? File, int StatusCode, string? Error)
+{
+    public bool Succeeded => File is not null;
+}
 public interface IFileRepository
 {
     Task<FilePage> List(int page, int pageSize, string? query, string? type, CancellationToken ct);
@@ -25,8 +27,8 @@ public interface IFileRepository
 
 public interface IFileObjectStorage
 {
+    string PublicUrl(string key);
     Task Put(string key, Stream content, long size, string contentType, CancellationToken ct);
-    Task<StoredObject?> Get(string key, CancellationToken ct);
     Task Delete(string key, CancellationToken ct);
 }
 
@@ -90,20 +92,11 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
         return true;
     }
 
-    public async Task<StoredObject?> GetPublicObject(Guid id, CancellationToken ct)
-    {
-        ValidateId(id);
-        var file = await files.Get(id, ct);
-        return file is null ? null : await storage.Get(file.ObjectKey, ct) is { } stored
-            ? new(stored.Content, file.ContentType == "image/svg+xml" ? "application/octet-stream" : file.ContentType)
-            : null;
-    }
-
     public async Task<string?> PublicObjectUrl(Guid id, CancellationToken ct)
     {
         ValidateId(id);
-        if (await files.Get(id, ct) is null) return null;
-        return $"/files/objects/{id:D}";
+        if (await files.Get(id, ct) is not { } file) return null;
+        return storage.PublicUrl(file.ObjectKey);
     }
 
     private async Task<string> Authorize(string? subject, string permission, CancellationToken ct)

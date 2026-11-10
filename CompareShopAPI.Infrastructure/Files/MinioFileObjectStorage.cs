@@ -9,6 +9,7 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
 {
     private readonly IMinioClient client;
     private readonly string bucket;
+    private readonly Uri publicEndpoint;
 
     public MinioFileObjectStorage(IConfiguration configuration)
     {
@@ -17,6 +18,11 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
             ? endpointUri
             : new Uri($"http://{endpointValue}", UriKind.Absolute);
         if (endpoint.Scheme is not ("http" or "https")) throw new InvalidOperationException("Minio:Endpoint must use HTTP or HTTPS.");
+        var publicEndpointValue = configuration["Minio:PublicEndpoint"] ?? endpointValue;
+        publicEndpoint = Uri.TryCreate(publicEndpointValue, UriKind.Absolute, out var publicEndpointUri)
+            ? publicEndpointUri
+            : new Uri($"http://{publicEndpointValue}", UriKind.Absolute);
+        if (publicEndpoint.Scheme is not ("http" or "https")) throw new InvalidOperationException("Minio:PublicEndpoint must use HTTP or HTTPS.");
         var accessKey = configuration["Minio:AccessKey"] ?? throw new InvalidOperationException("Minio:AccessKey is required.");
         var secretKey = configuration["Minio:SecretKey"] ?? throw new InvalidOperationException("Minio:SecretKey is required.");
         bucket = configuration["Minio:Bucket"] ?? throw new InvalidOperationException("Minio:Bucket is required.");
@@ -25,6 +31,9 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
             : endpoint.Scheme == Uri.UriSchemeHttps;
         client = new MinioClient().WithEndpoint(endpoint.Authority).WithSSL(secure).WithCredentials(accessKey, secretKey).Build();
     }
+
+    public string PublicUrl(string key) => new UriBuilder(publicEndpoint.Scheme, publicEndpoint.Host, publicEndpoint.IsDefaultPort ? -1 : publicEndpoint.Port,
+        $"{publicEndpoint.AbsolutePath.TrimEnd('/')}/{Uri.EscapeDataString(bucket)}/{Uri.EscapeDataString(key)}").Uri.AbsoluteUri;
 
     public async Task Put(string key, Stream content, long size, string contentType, CancellationToken ct)
     {
@@ -38,28 +47,6 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
             headers["Content-Disposition"] = "attachment; filename=\"download.svg\"";
         await client.PutObjectAsync(new PutObjectArgs().WithBucket(bucket).WithObject(key).WithStreamData(content)
             .WithObjectSize(size).WithContentType(storedType).WithHeaders(headers), ct);
-    }
-
-    public async Task<StoredObject?> Get(string key, CancellationToken ct)
-    {
-        var output = new MemoryStream();
-        try
-        {
-            await client.GetObjectAsync(new GetObjectArgs().WithBucket(bucket).WithObject(key)
-                .WithCallbackStream((input, token) => input.CopyToAsync(output, token)), ct);
-            output.Position = 0;
-            return new(output, "application/octet-stream");
-        }
-        catch (Minio.Exceptions.ObjectNotFoundException)
-        {
-            await output.DisposeAsync();
-            return null;
-        }
-        catch
-        {
-            await output.DisposeAsync();
-            throw;
-        }
     }
 
     public Task Delete(string key, CancellationToken ct) => client.RemoveObjectAsync(

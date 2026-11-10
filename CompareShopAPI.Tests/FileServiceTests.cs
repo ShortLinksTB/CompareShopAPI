@@ -1,7 +1,10 @@
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Application.Files;
 using CompareShopAPI.Domain.Files;
+using CompareShopAPI.Infrastructure.Files;
+using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -14,6 +17,23 @@ namespace CompareShopAPI.Tests;
 
 public sealed class FileServiceTests
 {
+    [Fact]
+    public void Minio_storage_generates_stable_public_object_url_without_presigning()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Minio:Endpoint"] = "http://minio.internal:9000",
+            ["Minio:PublicEndpoint"] = "https://objects.example.test/storage",
+            ["Minio:AccessKey"] = "test-access",
+            ["Minio:SecretKey"] = "test-secret",
+            ["Minio:Bucket"] = "compareshop-files"
+        }).Build();
+
+        var storage = new MinioFileObjectStorage(configuration);
+
+        Assert.Equal("https://objects.example.test/storage/compareshop-files/abc123", storage.PublicUrl("abc123"));
+    }
+
     [Fact]
     public async Task Upload_rejects_unsupported_type_and_files_above_10_mib_before_storage()
     {
@@ -57,7 +77,7 @@ public sealed class FileServiceTests
         Assert.Equal("photo.png", uploaded.OriginalFileName);
         Assert.NotNull(await service.Get("operator", uploaded.Id, default));
         Assert.Single((await service.List("operator", 1, 20, " photo ", "IMAGES", default)).Items);
-        Assert.Equal($"/files/objects/{uploaded.Id:D}", await service.PublicObjectUrl(uploaded.Id, default));
+        Assert.Equal($"https://files.example.test/compareshop/{uploaded.Id:N}", await service.PublicObjectUrl(uploaded.Id, default));
         Assert.True(await service.Delete("operator", uploaded.Id, default));
         Assert.Equal(1, storage.DeleteCount);
         Assert.Null(await service.Get("operator", uploaded.Id, default));
@@ -96,34 +116,37 @@ public sealed class FileServiceTests
         using var form = new MultipartFormDataContent();
         var bytes = new ByteArrayContent([1, 2, 3]);
         bytes.Headers.ContentType = new MediaTypeHeaderValue("image/svg+xml");
-        form.Add(bytes, "file", "test.svg");
+        form.Add(bytes, "files", "test.svg");
+        var invalidBytes = new ByteArrayContent([1, 2, 3]);
+        invalidBytes.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(invalidBytes, "files", "bad.exe");
         using var uploadResponse = await client.PostAsync("/admin/files", form);
-        Assert.Equal(HttpStatusCode.Created, uploadResponse.StatusCode);
-        var metadata = await uploadResponse.Content.ReadFromJsonAsync<FileMetadata>();
-        Assert.NotNull(metadata);
+        Assert.Equal(HttpStatusCode.OK, uploadResponse.StatusCode);
+        var outcomes = await uploadResponse.Content.ReadFromJsonAsync<FileUploadOutcome[]>();
+        Assert.NotNull(outcomes);
+        Assert.Equal(2, outcomes.Length);
+        Assert.True(outcomes[0].Succeeded);
+        Assert.Equal(StatusCodes.Status201Created, outcomes[0].StatusCode);
+        Assert.False(outcomes[1].Succeeded);
+        Assert.Equal(StatusCodes.Status400BadRequest, outcomes[1].StatusCode);
+        var metadata = outcomes[0].File!;
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/files?page=1&pageSize=20")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/admin/files/{metadata.Id:D}")).StatusCode);
         using var redirect = await client.GetAsync($"/files/{metadata.Id:D}");
         Assert.Equal(HttpStatusCode.Redirect, redirect.StatusCode);
         Assert.Equal("public, max-age=31536000, immutable", redirect.Headers.CacheControl?.ToString());
-        Assert.Equal($"/files/objects/{metadata.Id:D}", redirect.Headers.Location?.ToString());
-        using var objectResponse = await client.GetAsync(redirect.Headers.Location);
-        Assert.Equal(HttpStatusCode.OK, objectResponse.StatusCode);
-        Assert.Equal("no-store", objectResponse.Headers.CacheControl?.ToString());
-        Assert.Equal("application/octet-stream", objectResponse.Content.Headers.ContentType?.MediaType);
-        Assert.Equal($"attachment; filename=\"{metadata.Id:D}.svg\"", objectResponse.Content.Headers.ContentDisposition?.ToString());
-        storage.FailGet = true;
-        Assert.Equal(HttpStatusCode.InternalServerError, (await client.GetAsync($"/files/objects/{metadata.Id:D}")).StatusCode);
-        storage.FailGet = false;
+        Assert.Equal($"https://files.example.test/compareshop/{metadata.Id:N}", redirect.Headers.Location?.ToString());
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/admin/files/{metadata.Id:D}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/files/{metadata.Id:D}")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/files/objects/{metadata.Id:D}")).StatusCode);
         permissions.Allowed.Remove(FilePermissions.Write);
         using var deniedForm = new MultipartFormDataContent();
         var deniedContent = new ByteArrayContent([1]);
         deniedContent.Headers.ContentType = new MediaTypeHeaderValue("image/png");
-        deniedForm.Add(deniedContent, "file", "denied.png");
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync("/admin/files", deniedForm)).StatusCode);
+        deniedForm.Add(deniedContent, "files", "denied.png");
+        var deniedResponse = await client.PostAsync("/admin/files", deniedForm);
+        Assert.Equal(HttpStatusCode.OK, deniedResponse.StatusCode);
+        var deniedOutcome = (await deniedResponse.Content.ReadFromJsonAsync<FileUploadOutcome[]>())!.Single();
+        Assert.Equal(StatusCodes.Status403Forbidden, deniedOutcome.StatusCode);
     }
 
     private static FileAsset NewAsset(string name, string type, long size, int? width, int? height) =>
@@ -157,11 +180,8 @@ public sealed class FileServiceTests
     {
         public int PutCount { get; private set; }
         public int DeleteCount { get; private set; }
-        public bool FailGet { get; set; }
+        public string PublicUrl(string key) => $"https://files.example.test/compareshop/{key}";
         public Task Put(string key, Stream content, long size, string contentType, CancellationToken ct) { PutCount++; return Task.CompletedTask; }
-        public Task<StoredObject?> Get(string key, CancellationToken ct) => FailGet
-            ? Task.FromException<StoredObject?>(new InvalidOperationException("storage failure"))
-            : Task.FromResult<StoredObject?>(new(new MemoryStream([1, 2, 3]), "application/octet-stream"));
         public Task Delete(string key, CancellationToken ct) { DeleteCount++; return Task.CompletedTask; }
     }
 

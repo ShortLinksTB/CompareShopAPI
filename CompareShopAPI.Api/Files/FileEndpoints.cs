@@ -18,16 +18,31 @@ public static class FileEndpoints
             try { return await service.Get(Subject(context), id, ct) is { } file ? Results.Ok(file) : Results.NotFound(); }
             catch (Exception ex) { return Error(ex); }
         });
-        admin.MapPost("/files", async (HttpContext context, IFormFile? file, FileService service, CancellationToken ct) =>
+        admin.MapPost("/files", async (HttpContext context, IFormFileCollection files, FileService service, CancellationToken ct) =>
         {
-            if (file is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["A file is required."] });
-            try
+            if (files.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["files"] = ["At least one file is required."] });
+            var outcomes = new List<FileUploadOutcome>(files.Count);
+            foreach (var file in files)
             {
-                await using var stream = file.OpenReadStream();
-                var uploaded = await service.Upload(Subject(context), new(file.FileName, file.ContentType, file.Length, stream), ct);
-                return Results.Json(uploaded, statusCode: StatusCodes.Status201Created);
+                try
+                {
+                    await using var stream = file.OpenReadStream();
+                    var uploaded = await service.Upload(Subject(context), new(file.FileName, file.ContentType, file.Length, stream), ct);
+                    outcomes.Add(new(file.FileName, uploaded, StatusCodes.Status201Created, null));
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    var status = UploadStatus(ex);
+                    outcomes.Add(new(file.FileName, null, status, status == StatusCodes.Status500InternalServerError
+                        ? "An unexpected error occurred."
+                        : ex.Message));
+                }
             }
-            catch (Exception ex) { return Error(ex); }
+            return Results.Ok(outcomes);
         }).DisableAntiforgery();
         admin.MapDelete("/files/{id:guid}", async (HttpContext context, Guid id, FileService service, CancellationToken ct) =>
         {
@@ -50,19 +65,6 @@ public static class FileEndpoints
             }
             catch (Exception ex) { return Error(ex); }
         });
-        files.MapGet("/objects/{id:guid}", async (Guid id, HttpContext context, FileService service, CancellationToken ct) =>
-        {
-            context.Response.Headers.CacheControl = "no-store";
-            try
-            {
-                var value = await service.GetPublicObject(id, ct);
-                if (value is null) return Results.NotFound();
-                if (value.ContentType == "application/octet-stream")
-                    context.Response.Headers.ContentDisposition = $"attachment; filename=\"{id:D}.svg\"";
-                return Results.Stream(value.Content, value.ContentType);
-            }
-            catch (Exception ex) { return Error(ex); }
-        });
         return files;
     }
 
@@ -74,5 +76,13 @@ public static class FileEndpoints
         KeyNotFoundException => Results.NotFound(),
         ArgumentException => Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }),
         _ => Results.Problem("An unexpected error occurred.", statusCode: StatusCodes.Status500InternalServerError)
+    };
+
+    private static int UploadStatus(Exception ex) => ex switch
+    {
+        CompareShopAPI.Application.Admin.AdminUnauthorizedException => StatusCodes.Status401Unauthorized,
+        CompareShopAPI.Application.Admin.AdminForbiddenException => StatusCodes.Status403Forbidden,
+        ArgumentException => StatusCodes.Status400BadRequest,
+        _ => StatusCodes.Status500InternalServerError
     };
 }

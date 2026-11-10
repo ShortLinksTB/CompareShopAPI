@@ -62,9 +62,9 @@ public sealed class Article
     public List<ArticleRelatedProduct> RelatedProducts { get; private set; } = [];
     public string Category { get; private set; } = "shopping-tips";
     public string TagsJson { get; private set; } = "[]";
-    public int? CoverFileId { get; private set; }
+    public Guid? CoverFileId { get; private set; }
 
-    public void UpdateBlogFields(string slug, string title, string category, string excerptText, string markdown, int? coverFileId, string tagsJson, DateTime nowUtc)
+    public void UpdateBlogFields(string slug, string title, string category, string excerptText, string markdown, Guid? coverFileId, string tagsJson, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 160) throw new ArgumentException("Title must be 1–160 characters.", nameof(title));
         Slug = NormalizeSlug(slug);

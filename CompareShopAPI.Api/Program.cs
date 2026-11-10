@@ -59,6 +59,7 @@ builder.Services.AddScoped<IBlogArticleRepository, EfArticleRepository>();
 builder.Services.AddScoped<IArticlePermissionGate, AdminArticlePermissionGate>();
 builder.Services.AddScoped<IArticleProductLookup, UserCommerceArticleProductLookup>();
 builder.Services.AddScoped<ArticleService>();
+builder.Services.AddHostedService<ArticlePublishingWorker>();
 builder.Services.AddScoped<BlogArticleService>();
 builder.Services.AddScoped<ISyncJobStore, EfSyncJobStore>();
 builder.Services.AddScoped<IDataSourceStore, EfDataSourceStore>();

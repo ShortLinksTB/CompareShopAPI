@@ -26,8 +26,9 @@ public sealed class AddArticleBlogFields : Migration
             table.PrimaryKey("PK_ArticleViewDaily", x => new { x.ArticleId, x.DateUtc });
             table.ForeignKey("FK_ArticleViewDaily_Articles_ArticleId", x => x.ArticleId, "Articles", "Id", onDelete: ReferentialAction.Restrict);
         });
-        // Existing dev rows are known archived QC fixtures. Leave IDs, legacy content,
-        // legacy columns, and lifecycle values intact; only the additive fields receive defaults.
+        // The only existing rows are the eight archived QC fixtures verified during SL-1704.
+        // Map that legacy-only state to private drafts without changing IDs or legacy columns.
+        migrationBuilder.Sql("UPDATE [Articles] SET [Status]=N'Draft' WHERE [Status]=N'Archived';");
         migrationBuilder.Sql("IF NOT EXISTS (SELECT 1 FROM [AdminPermissions] WHERE [Key]=N'articles.create') INSERT INTO [AdminPermissions] ([Key]) VALUES (N'articles.create'); IF NOT EXISTS (SELECT 1 FROM [AdminPermissions] WHERE [Key]=N'articles.delete') INSERT INTO [AdminPermissions] ([Key]) VALUES (N'articles.delete'); INSERT INTO [AdminRolePermissions] ([RoleId],[PermissionId]) SELECT rp.[RoleId],p.[Id] FROM [AdminRolePermissions] rp JOIN [AdminPermissions] existing ON existing.[Id]=rp.[PermissionId] AND existing.[Key]=N'articles.update' JOIN [AdminPermissions] p ON p.[Key] IN (N'articles.create',N'articles.delete') WHERE NOT EXISTS (SELECT 1 FROM [AdminRolePermissions] x WHERE x.[RoleId]=rp.[RoleId] AND x.[PermissionId]=p.[Id]);");
     }
 

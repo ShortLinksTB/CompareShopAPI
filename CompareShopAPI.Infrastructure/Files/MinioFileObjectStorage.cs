@@ -37,17 +37,25 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
 
     public async Task Put(string key, Stream content, long size, string contentType, CancellationToken ct)
     {
-        var storedType = contentType == "image/svg+xml" ? "application/octet-stream" : contentType;
-        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Cache-Control"] = "no-store",
-            ["Content-Type"] = storedType
-        };
-        if (contentType == "image/svg+xml")
-            headers["Content-Disposition"] = "attachment; filename=\"download.svg\"";
+        var storedType = StoredContentType(contentType);
+        var headers = BuildObjectHeaders(contentType);
         await client.PutObjectAsync(new PutObjectArgs().WithBucket(bucket).WithObject(key).WithStreamData(content)
             .WithObjectSize(size).WithContentType(storedType).WithHeaders(headers), ct);
     }
+
+    internal static Dictionary<string, string> BuildObjectHeaders(string contentType)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Cache-Control"] = "no-store"
+        };
+        if (contentType == "image/svg+xml")
+            headers["Content-Disposition"] = "attachment; filename=\"download.svg\"";
+        return headers;
+    }
+
+    internal static string StoredContentType(string contentType) =>
+        contentType == "image/svg+xml" ? "application/octet-stream" : contentType;
 
     public Task Delete(string key, CancellationToken ct) => client.RemoveObjectAsync(
         new RemoveObjectArgs().WithBucket(bucket).WithObject(key), ct);

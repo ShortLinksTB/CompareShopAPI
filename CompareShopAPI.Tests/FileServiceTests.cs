@@ -18,6 +18,36 @@ namespace CompareShopAPI.Tests;
 public sealed class FileServiceTests
 {
     [Fact]
+    public void Svg_object_headers_force_attachment_and_keep_content_type_in_sdk_argument()
+    {
+        var headers = MinioFileObjectStorage.BuildObjectHeaders("image/svg+xml");
+
+        Assert.Equal("no-store", headers["Cache-Control"]);
+        Assert.Equal("attachment; filename=\"download.svg\"", headers["Content-Disposition"]);
+        Assert.DoesNotContain("Content-Type", headers.Keys);
+        Assert.Equal("application/octet-stream", MinioFileObjectStorage.StoredContentType("image/svg+xml"));
+        Assert.Equal("image/png", MinioFileObjectStorage.StoredContentType("image/png"));
+    }
+
+    [Fact]
+    public async Task Svg_upload_is_accepted_and_creates_public_target()
+    {
+        var repository = new FakeRepository();
+        var storage = new FakeStorage();
+        var service = Create(repository, storage, new FakePermissions(FilePermissions.Write));
+
+        var uploaded = await service.Upload("operator", new("diagram.svg", "image/svg+xml", 3,
+            new MemoryStream([1, 2, 3])), default);
+
+        Assert.Equal("diagram.svg", uploaded.OriginalFileName);
+        Assert.Equal("image/svg+xml", uploaded.ContentType);
+        Assert.Equal(1, storage.PutCount);
+        Assert.Equal("image/svg+xml", storage.LastContentType);
+        Assert.Equal($"https://files.example.test/compareshop/{uploaded.Id:N}",
+            await service.PublicObjectUrl(uploaded.Id, default));
+    }
+
+    [Fact]
     public void Minio_storage_generates_stable_public_object_url_without_presigning()
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
@@ -187,10 +217,12 @@ public sealed class FileServiceTests
         public int PutCount { get; private set; }
         public int DeleteCount { get; private set; }
         public bool FailNextPut { get; set; }
+        public string? LastContentType { get; private set; }
         public string PublicUrl(string key) => $"https://files.example.test/compareshop/{key}";
         public Task Put(string key, Stream content, long size, string contentType, CancellationToken ct)
         {
             PutCount++;
+            LastContentType = contentType;
             if (FailNextPut) { FailNextPut = false; return Task.FromException(new InvalidOperationException("storage failure")); }
             return Task.CompletedTask;
         }

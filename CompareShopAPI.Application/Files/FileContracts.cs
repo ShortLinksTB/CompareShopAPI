@@ -81,6 +81,9 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
         return ToMetadata(file);
     }
 
+    public async Task EnsureWritePermission(string? subject, CancellationToken ct) =>
+        _ = await Authorize(subject, FilePermissions.Write, ct);
+
     public async Task<bool> Delete(string? subject, Guid id, CancellationToken ct)
     {
         await Authorize(subject, FilePermissions.Write, ct);

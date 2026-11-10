@@ -113,7 +113,11 @@ public sealed class FileServiceTests
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsync("/admin/files", null)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/files/00000000-0000-0000-0000-000000000000")).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await client.DeleteAsync("/admin/files/00000000-0000-0000-0000-000000000000")).StatusCode);
+        storage.FailNextPut = true;
         using var form = new MultipartFormDataContent();
+        var storageFailureBytes = new ByteArrayContent([1]);
+        storageFailureBytes.Headers.ContentType = new MediaTypeHeaderValue("image/png");
+        form.Add(storageFailureBytes, "files", "storage-error.png");
         var bytes = new ByteArrayContent([1, 2, 3]);
         bytes.Headers.ContentType = new MediaTypeHeaderValue("image/svg+xml");
         form.Add(bytes, "files", "test.svg");
@@ -124,12 +128,14 @@ public sealed class FileServiceTests
         Assert.Equal(HttpStatusCode.OK, uploadResponse.StatusCode);
         var outcomes = await uploadResponse.Content.ReadFromJsonAsync<FileUploadOutcome[]>();
         Assert.NotNull(outcomes);
-        Assert.Equal(2, outcomes.Length);
-        Assert.True(outcomes[0].Succeeded);
-        Assert.Equal(StatusCodes.Status201Created, outcomes[0].StatusCode);
-        Assert.False(outcomes[1].Succeeded);
-        Assert.Equal(StatusCodes.Status400BadRequest, outcomes[1].StatusCode);
-        var metadata = outcomes[0].File!;
+        Assert.Equal(3, outcomes.Length);
+        Assert.False(outcomes[0].Succeeded);
+        Assert.Equal(StatusCodes.Status500InternalServerError, outcomes[0].StatusCode);
+        Assert.True(outcomes[1].Succeeded);
+        Assert.Equal(StatusCodes.Status201Created, outcomes[1].StatusCode);
+        Assert.False(outcomes[2].Succeeded);
+        Assert.Equal(StatusCodes.Status400BadRequest, outcomes[2].StatusCode);
+        var metadata = outcomes[1].File!;
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/files?page=1&pageSize=20")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/admin/files/{metadata.Id:D}")).StatusCode);
         using var redirect = await client.GetAsync($"/files/{metadata.Id:D}");
@@ -143,10 +149,10 @@ public sealed class FileServiceTests
         var deniedContent = new ByteArrayContent([1]);
         deniedContent.Headers.ContentType = new MediaTypeHeaderValue("image/png");
         deniedForm.Add(deniedContent, "files", "denied.png");
+        var putCountBeforeDeniedBatch = storage.PutCount;
         var deniedResponse = await client.PostAsync("/admin/files", deniedForm);
-        Assert.Equal(HttpStatusCode.OK, deniedResponse.StatusCode);
-        var deniedOutcome = (await deniedResponse.Content.ReadFromJsonAsync<FileUploadOutcome[]>())!.Single();
-        Assert.Equal(StatusCodes.Status403Forbidden, deniedOutcome.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, deniedResponse.StatusCode);
+        Assert.Equal(putCountBeforeDeniedBatch, storage.PutCount);
     }
 
     private static FileAsset NewAsset(string name, string type, long size, int? width, int? height) =>
@@ -180,8 +186,14 @@ public sealed class FileServiceTests
     {
         public int PutCount { get; private set; }
         public int DeleteCount { get; private set; }
+        public bool FailNextPut { get; set; }
         public string PublicUrl(string key) => $"https://files.example.test/compareshop/{key}";
-        public Task Put(string key, Stream content, long size, string contentType, CancellationToken ct) { PutCount++; return Task.CompletedTask; }
+        public Task Put(string key, Stream content, long size, string contentType, CancellationToken ct)
+        {
+            PutCount++;
+            if (FailNextPut) { FailNextPut = false; return Task.FromException(new InvalidOperationException("storage failure")); }
+            return Task.CompletedTask;
+        }
         public Task Delete(string key, CancellationToken ct) { DeleteCount++; return Task.CompletedTask; }
     }
 

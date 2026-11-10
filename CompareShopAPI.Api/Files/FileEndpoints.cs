@@ -20,6 +20,8 @@ public static class FileEndpoints
         });
         admin.MapPost("/files", async (HttpContext context, IFormFileCollection files, FileService service, CancellationToken ct) =>
         {
+            try { await service.EnsureWritePermission(Subject(context), ct); }
+            catch (Exception ex) { return Error(ex); }
             if (files.Count == 0) return Results.ValidationProblem(new Dictionary<string, string[]> { ["files"] = ["At least one file is required."] });
             var outcomes = new List<FileUploadOutcome>(files.Count);
             foreach (var file in files)

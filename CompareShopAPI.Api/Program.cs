@@ -23,6 +23,9 @@ using CompareShopAPI.Api.Articles;
 using CompareShopAPI.Application.Articles;
 using CompareShopAPI.Infrastructure.Articles;
 using CompareShopAPI.Infrastructure.Ingestion;
+using CompareShopAPI.Api.Files;
+using CompareShopAPI.Application.Files;
+using CompareShopAPI.Infrastructure.Files;
 
 var seedCatalogRequested = CatalogSeedCommand.IsRequested(args);
 var builder = WebApplication.CreateBuilder(seedCatalogRequested ? Array.Empty<string>() : args);
@@ -67,6 +70,10 @@ builder.Services.AddScoped<AdminService>(services => new AdminService(
     services.GetRequiredService<IAdminData>(),
     services.GetRequiredService<IConfiguration>().GetSection("Admin:BootstrapSuperAdminSubjects").GetChildren()
         .Select(section => section.Value).Where(subject => !string.IsNullOrWhiteSpace(subject)).Cast<string>().ToHashSet(StringComparer.Ordinal)));
+builder.Services.AddScoped<IFileRepository, EfFileRepository>();
+builder.Services.AddScoped<IFileObjectStorage, MinioFileObjectStorage>();
+builder.Services.AddScoped<IFilePermissionGate, AdminFilePermissionGate>();
+builder.Services.AddScoped<FileService>();
 builder.Services.AddSingleton<MigrationState>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("database", tags: ["ready"]);
 builder.Services.AddCors(options => options.AddPolicy("UiClients", policy =>
@@ -112,6 +119,8 @@ app.MapGroup("/api/v1").MapCatalogEndpoints();
 app.MapGroup("/api/v1").MapUserCommerceEndpoints();
 app.MapGroup("/api/v1").MapArticleEndpoints();
 app.MapGroup("/api/v1/admin").RequireAuthorization("Admin").MapAdminArticleEndpoints();
+app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminFileEndpoints();
+app.MapGroup("/files").AllowAnonymous().MapPublicFileEndpoints();
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();

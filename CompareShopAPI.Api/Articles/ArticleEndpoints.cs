@@ -5,6 +5,22 @@ using CompareShopAPI.Domain.Articles;
 
 namespace CompareShopAPI.Api.Articles;
 
+public sealed record BlogArticleRequest(string Title, string Slug, string Category, string ExcerptText, string ContentMarkdown, string? CoverFileId, IReadOnlyList<string> Tags)
+{
+    public BlogArticleInput ToInput()
+    {
+        Guid? coverFileId = null;
+        if (CoverFileId is not null)
+        {
+            if (!Guid.TryParse(CoverFileId, out var parsed) || parsed == Guid.Empty)
+                throw new ArgumentException("coverFileId must be a valid GUID.");
+            coverFileId = parsed;
+        }
+
+        return new(Title, Slug, Category, ExcerptText, ContentMarkdown, coverFileId, Tags);
+    }
+}
+
 public static class ArticleEndpoints
 {
     public static RouteGroupBuilder MapArticleBlogEndpoints(this RouteGroupBuilder api)
@@ -19,8 +35,8 @@ public static class ArticleEndpoints
     {
         admin.MapGet("/articles",(HttpContext c,int? page,int? pageSize,string? q,string? category,string? status,BlogArticleService s,CancellationToken ct)=>RunBlog(()=>s.AdminList(Subject(c),page??1,pageSize??20,q,category,status,ct)));
         admin.MapGet("/articles/{id:int}",async(HttpContext c,int id,BlogArticleService s,CancellationToken ct)=>{try{return await s.AdminGet(Subject(c),id,ct) is {} item?Results.Ok(item):Results.NotFound();}catch(Exception ex){return Error(ex);}});
-        admin.MapPost("/articles",(HttpContext c,BlogArticleInput input,BlogArticleService s,CancellationToken ct)=>RunBlog(()=>s.Create(Subject(c),c.User.FindFirst("name")?.Value??c.User.FindFirst(ClaimTypes.Name)?.Value,input,ct),StatusCodes.Status201Created));
-        admin.MapPut("/articles/{id:int}",(HttpContext c,int id,BlogArticleInput input,BlogArticleService s,CancellationToken ct)=>RunBlog(()=>s.Update(Subject(c),id,input,ct)));
+        admin.MapPost("/articles",(HttpContext c,BlogArticleRequest input,BlogArticleService s,CancellationToken ct)=>RunBlog(()=>s.Create(Subject(c),c.User.FindFirst("name")?.Value??c.User.FindFirst(ClaimTypes.Name)?.Value,input.ToInput(),ct),StatusCodes.Status201Created));
+        admin.MapPut("/articles/{id:int}",(HttpContext c,int id,BlogArticleRequest input,BlogArticleService s,CancellationToken ct)=>RunBlog(()=>s.Update(Subject(c),id,input.ToInput(),ct)));
         admin.MapDelete("/articles/{id:int}",(HttpContext c,int id,BlogArticleService s,CancellationToken ct)=>RunBlogNoContent(()=>s.Delete(Subject(c),id,ct)));
         admin.MapPost("/articles/{id:int}/publish",(HttpContext c,int id,BlogArticleService s,CancellationToken ct)=>RunBlogNoContent(()=>s.Transition(Subject(c),id,true,ct)));
         admin.MapPost("/articles/{id:int}/unpublish",(HttpContext c,int id,BlogArticleService s,CancellationToken ct)=>RunBlogNoContent(()=>s.Transition(Subject(c),id,false,ct)));

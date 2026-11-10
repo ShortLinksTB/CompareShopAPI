@@ -400,8 +400,8 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("nvarchar(2048)");
 
-                    b.Property<int?>("CoverFileId")
-                        .HasColumnType("int");
+                    b.Property<Guid?>("CoverFileId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");

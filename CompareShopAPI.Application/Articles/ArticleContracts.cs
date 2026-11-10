@@ -11,9 +11,9 @@ public static class ArticlePermissions
     public const string Publish = "articles.publish";
 }
 
-public sealed record BlogArticleInput(string Title, string Slug, string Category, string ExcerptText, string ContentMarkdown, int? CoverFileId, IReadOnlyList<string> Tags);
-public sealed record BlogArticleDto(int Id, string Title, string Slug, string Category, string ExcerptText, string ContentMarkdown, int? CoverFileId, IReadOnlyList<string> Tags, string Status, string AuthorSubject, string AuthorName, DateTime? PublishedAtUtc, DateTime CreatedAtUtc, DateTime UpdatedAtUtc, long TotalViews);
-public sealed record PublicBlogArticleDto(string Title, string Slug, string Category, string ExcerptText, string ContentMarkdown, int? CoverFileId, IReadOnlyList<string> Tags, string AuthorName, DateTime? PublishedAtUtc, DateTime UpdatedAtUtc, long TotalViews);
+public sealed record BlogArticleInput(string Title, string Slug, string Category, string ExcerptText, string ContentMarkdown, Guid? CoverFileId, IReadOnlyList<string> Tags);
+public sealed record BlogArticleDto(int Id, string Title, string Slug, string Category, string ExcerptText, string ContentMarkdown, Guid? CoverFileId, IReadOnlyList<string> Tags, string Status, string AuthorSubject, string AuthorName, DateTime? PublishedAtUtc, DateTime CreatedAtUtc, DateTime UpdatedAtUtc, long TotalViews);
+public sealed record PublicBlogArticleDto(string Title, string Slug, string Category, string ExcerptText, string ContentMarkdown, Guid? CoverFileId, IReadOnlyList<string> Tags, string AuthorName, DateTime? PublishedAtUtc, DateTime UpdatedAtUtc, long TotalViews);
 public sealed record BlogArticlePage(IReadOnlyList<BlogArticleDto> Items, int Page, int PageSize, int TotalItems, int TotalPages);
 public sealed record PublicBlogArticlePage(IReadOnlyList<PublicBlogArticleDto> Items, int Page, int PageSize, int TotalItems, int TotalPages);
 public sealed record ArticleAnalytics(int RangeDays, DateOnly FromDateUtc, DateOnly ThroughDateUtc, long TotalViews, double AverageViewsPerDay, DateOnly? PeakDateUtc, long PeakViews, long PreviousPeriodTotalViews, double? ChangePercent, IReadOnlyList<ArticleDailyViews> Daily);
@@ -91,7 +91,8 @@ public sealed class BlogArticleService(IBlogArticleRepository repository, IArtic
     private static void Validate(BlogArticleInput input)
     {
         _ = Article.NormalizeSlug(input.Slug);
-        if (string.IsNullOrWhiteSpace(input.Title) || input.Title.Trim().Length > 160 || string.IsNullOrWhiteSpace(input.ExcerptText) || input.ExcerptText.Trim().Length > 160 || string.IsNullOrWhiteSpace(input.ContentMarkdown) || System.Text.Encoding.UTF8.GetByteCount(input.ContentMarkdown) > 102400 || !Categories.Contains(input.Category, StringComparer.Ordinal) || input.CoverFileId is <= 0 || input.Tags is null || input.Tags.Count > 20) throw new ArgumentException("Invalid article fields.");
+        if (input.CoverFileId == Guid.Empty) throw new ArgumentException("coverFileId must not be an empty GUID.");
+        if (string.IsNullOrWhiteSpace(input.Title) || input.Title.Trim().Length > 160 || string.IsNullOrWhiteSpace(input.ExcerptText) || input.ExcerptText.Trim().Length > 160 || string.IsNullOrWhiteSpace(input.ContentMarkdown) || System.Text.Encoding.UTF8.GetByteCount(input.ContentMarkdown) > 102400 || !Categories.Contains(input.Category, StringComparer.Ordinal) || input.Tags is null || input.Tags.Count > 20) throw new ArgumentException("Invalid article fields.");
         var tags = input.Tags.Select(x => x?.Trim() ?? "").ToArray();
         if (tags.Any(x => x.Length is 0 or > 50) || tags.Distinct(StringComparer.OrdinalIgnoreCase).Count() != tags.Length) throw new ArgumentException("Invalid tags.");
     }

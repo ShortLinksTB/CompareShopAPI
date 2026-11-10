@@ -153,7 +153,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<Article>().Property(x => x.Content).IsRequired();
         model.Entity<Article>().Property(x => x.Category).HasMaxLength(32).HasDefaultValue("shopping-tips").IsRequired();
         model.Entity<Article>().Property(x => x.TagsJson).HasDefaultValue("[]").IsRequired();
-        model.Entity<Article>().Property(x => x.CoverFileId);
+        model.Entity<Article>().Property(x => x.CoverFileId).HasColumnType("uniqueidentifier");
         model.Entity<ArticleViewDaily>().HasKey(x => new { x.ArticleId, x.DateUtc });
         model.Entity<ArticleViewDaily>().Property(x => x.DateUtc).HasColumnType("date");
         model.Entity<ArticleViewDaily>().Property(x => x.Views).HasDefaultValue(0L);

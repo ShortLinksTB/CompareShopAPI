@@ -36,9 +36,24 @@ public sealed class ArticleEndpointTests
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/articles")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/articles/1")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/admin/articles/2")).StatusCode);
-        Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/admin/articles", BlogInput())).StatusCode);
+        var coverFileId = Guid.NewGuid();
+        using var createResponse = await client.PostAsJsonAsync("/admin/articles", BlogInput() with { CoverFileId = coverFileId });
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Contains(coverFileId.ToString(), await createResponse.Content.ReadAsStringAsync());
+        using var invalidGuidResponse = await client.PostAsync("/admin/articles", new StringContent(
+            "{\"title\":\"Title\",\"slug\":\"article\",\"category\":\"shopping-tips\",\"excerptText\":\"Excerpt\",\"contentMarkdown\":\"Body\",\"coverFileId\":\"not-a-guid\",\"tags\":[]}",
+            System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalidGuidResponse.StatusCode);
+        Assert.Contains("coverFileId", await invalidGuidResponse.Content.ReadAsStringAsync());
+        using var invalidUpdateGuidResponse = await client.PutAsync("/admin/articles/1", new StringContent(
+            "{\"title\":\"Title\",\"slug\":\"article\",\"category\":\"shopping-tips\",\"excerptText\":\"Excerpt\",\"contentMarkdown\":\"Body\",\"coverFileId\":\"not-a-guid\",\"tags\":[]}",
+            System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, invalidUpdateGuidResponse.StatusCode);
+        Assert.Contains("coverFileId", await invalidUpdateGuidResponse.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/admin/articles", BlogInput() with { Category = "unknown" })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.PutAsJsonAsync("/admin/articles/1", BlogInput())).StatusCode);
+        using var updateResponse = await client.PutAsJsonAsync("/admin/articles/1", BlogInput() with { CoverFileId = coverFileId });
+        Assert.Equal(HttpStatusCode.OK, updateResponse.StatusCode);
+        Assert.Contains(coverFileId.ToString(), await updateResponse.Content.ReadAsStringAsync());
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/admin/articles/1/publish", null)).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await client.PostAsync("/admin/articles/1/unpublish", null)).StatusCode);
         using var analyticsResponse = await client.GetAsync("/admin/articles/1/analytics?range=30");
@@ -94,8 +109,8 @@ public sealed class ArticleEndpointTests
         public Task<PublicBlogArticleDto?> BlogPublishedBySlug(string slug,CancellationToken ct)=>Task.FromResult<PublicBlogArticleDto?>(slug=="article"?new("Title","article","shopping-tips","Excerpt","Body",null,[],"Author",null,DateTime.UtcNow,0):null);
         public Task<BlogArticlePage> BlogAdminList(int page,int size,string? q,string? category,string? status,CancellationToken ct)=>Task.FromResult(new BlogArticlePage([Dto],page,size,1,1));
         public Task<BlogArticleDto?> BlogAdminGet(int id,CancellationToken ct)=>Task.FromResult<BlogArticleDto?>(id==1?Dto:null);
-        public Task<BlogArticleDto> BlogCreate(BlogArticleInput input,string actor,string author,DateTime now,CancellationToken ct)=>Task.FromResult(Dto);
-        public Task<BlogArticleDto> BlogUpdate(int id,BlogArticleInput input,DateTime now,CancellationToken ct)=>Task.FromResult(Dto);
+        public Task<BlogArticleDto> BlogCreate(BlogArticleInput input,string actor,string author,DateTime now,CancellationToken ct)=>Task.FromResult(Dto with { CoverFileId = input.CoverFileId });
+        public Task<BlogArticleDto> BlogUpdate(int id,BlogArticleInput input,DateTime now,CancellationToken ct)=>Task.FromResult(Dto with { CoverFileId = input.CoverFileId });
         public Task BlogDelete(int id,CancellationToken ct)=>Task.CompletedTask;
         public Task<bool> BlogTransition(int id,bool publish,DateTime now,CancellationToken ct)=>Task.FromResult(true);
         public Task RecordBlogView(string slug,DateOnly date,CancellationToken ct)=>slug=="article"?Task.CompletedTask:Task.FromException(new KeyNotFoundException());

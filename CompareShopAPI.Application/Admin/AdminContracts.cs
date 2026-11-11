@@ -42,9 +42,13 @@ public sealed record AdminMatching(int Id, string Name, string? Brand, int? Prod
     public string Verdict { get; init; } = "review";
     public string? GroupKey { get; init; }
     public string? Source { get; init; }
+    public AdminMatchingSourceDetail SourceDetail { get; init; } = new();
     public string Status { get; init; } = "pending";
     public bool NeedsStandardImage { get; init; }
 }
+public sealed record AdminMatchingSourceDetail(string? SpecificationsJson = null, string? ImageUrl = null,
+    int? PriceVnd = null, int? OriginalPriceVnd = null, int? DataSourceId = null,
+    string? DataSourceDisplayName = null, int? PartnerShopId = null, string? PartnerShopDisplayName = null);
 public sealed record AdminAttachedMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku, int? DataSourceId, string? DataSourceDisplayName);
 public sealed record MatchingCandidateInput(string Name, string? Brand, string? SpecificationsJson = null);
 public sealed record MatchingCandidateProduct(int ProductId, string Name, string? Brand, LaptopAttributes? Attributes = null);
@@ -236,7 +240,9 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         return pending.Select(x =>
         {
             var candidates = ranker.Rank(x.Attributes);
-            return x with { Candidates = candidates, Verdict = MatchingCandidateRanker.Verdict(x.Attributes, candidates) };
+            var verdict = MatchingCandidateRanker.Verdict(x.Attributes, candidates);
+            candidates = MatchingCandidateRanker.ApplyVerdictGuard(verdict, candidates);
+            return x with { Candidates = candidates, Verdict = verdict };
         }).ToArray();
     }
     public async Task<AdminMatchingPage> MatchingPage(string? s, AdminMatchingQuery query, CancellationToken ct)

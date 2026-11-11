@@ -305,17 +305,30 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var sourceIds = identities.Select(x => x.Source).Distinct().ToArray();
         var skus = identities.Select(x => x.Sku).Distinct().ToArray();
         var mappings = await db.SourceItemMappings.AsNoTracking().Where(m => sourceIds.Contains(m.DataSourceId) && skus.Contains(m.ExternalSku))
-            .Select(m => new { m.DataSourceId, m.ExternalSku, m.SpecificationsJson, m.ImageUrl }).ToListAsync(ct);
-        var sources = await db.DataSources.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.DisplayName, ct);
+            .Select(m => new { m.DataSourceId, m.ExternalSku, m.SpecificationsJson, m.ImageUrl, m.OriginalPriceVnd, m.ProductOfferId }).ToListAsync(ct);
+        var sources = await db.DataSources.AsNoTracking().Select(x => new { x.Id, x.DisplayName, x.PartnerShopId })
+            .ToDictionaryAsync(x => x.Id, ct);
+        var offerIds = mappings.Where(x => x.ProductOfferId.HasValue).Select(x => x.ProductOfferId!.Value).Distinct().ToArray();
+        var offers = await db.ProductOffers.AsNoTracking().Where(x => offerIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.PriceVnd, x.PartnerShopId }).ToDictionaryAsync(x => x.Id, ct);
+        var shopIds = sources.Values.Where(x => x.PartnerShopId.HasValue).Select(x => x.PartnerShopId!.Value).Distinct().ToArray();
+        var shops = await db.PartnerShops.AsNoTracking().Where(x => shopIds.Contains(x.Id))
+            .Select(x => new { x.Id, x.Name }).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
         return items.Select(item =>
         {
             var mapping = mappings.FirstOrDefault(m => m.DataSourceId == item.DataSourceId && m.ExternalSku == item.ExternalSku);
             var specs = mapping is null ? null : (string?)mapping.SpecificationsJson;
             var imageUrl = mapping is null ? null : (string?)mapping.ImageUrl;
+            sources.TryGetValue(item.DataSourceId ?? 0, out var source);
+            var offer = mapping?.ProductOfferId is int offerId && offers.TryGetValue(offerId, out var existingOffer) ? existingOffer : null;
+            var partnerShopId = source?.PartnerShopId is int id && shops.TryGetValue(id, out var shopName) ? id : (int?)null;
+            var partnerShopName = partnerShopId is int existingShopId ? shops[existingShopId] : null;
             var attrs = LaptopMatchingAttributeParser.Parse(item.Name, item.Brand, specs);
             var group = attrs.Brand is not null && attrs.Line is not null && attrs.Chip is not null && attrs.Gpu is not null && attrs.RamGb.HasValue && attrs.SsdGb.HasValue && attrs.Screen is not null && attrs.IsAccessory == false
                 ? string.Join('|', attrs.Brand.ToLowerInvariant(), attrs.Line.ToLowerInvariant(), attrs.Chip.ToLowerInvariant(), attrs.Gpu.ToLowerInvariant(), attrs.RamGb.Value, attrs.SsdGb.Value, attrs.Screen.ToLowerInvariant()) : null;
-            return item with { Attributes = attrs, Source = item.DataSourceId is int sourceId && sources.TryGetValue(sourceId, out var label) ? label : null, GroupKey = group,
+            return item with { Attributes = attrs, Source = source?.DisplayName, GroupKey = group,
+                SourceDetail = new AdminMatchingSourceDetail(specs, imageUrl, offer?.PriceVnd, mapping?.OriginalPriceVnd,
+                    source?.Id, source?.DisplayName, partnerShopId, partnerShopName),
                 NeedsStandardImage = !System.Text.RegularExpressions.Regex.IsMatch(imageUrl ?? string.Empty, @"^/files/[0-9a-fA-F-]{36}$") };
         }).ToArray();
     }

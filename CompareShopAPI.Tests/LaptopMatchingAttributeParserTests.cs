@@ -42,6 +42,21 @@ public sealed class LaptopMatchingAttributeParserTests
     }
 
     [Fact]
+    public void LikelySkipVerdictSuppressesConfidentCandidateLevels()
+    {
+        var candidates = new[]
+        {
+            new AdminMatchingCandidate(1, "USB-C charger", null, 100) { Level = "confident" },
+            new AdminMatchingCandidate(2, "Another charger", null, 70) { Level = "review" }
+        };
+
+        var guarded = MatchingCandidateRanker.ApplyVerdictGuard("likely_skip", candidates);
+
+        Assert.Equal(new[] { "review", "review" }, guarded.Select(x => x.Level));
+        Assert.Equal("confident", MatchingCandidateRanker.ApplyVerdictGuard("confident", candidates)[0].Level);
+    }
+
+    [Fact]
     public void SkipRequiresReasonCannotBeApprovedAndRestoreReturnsToPending()
     {
         var item = ProductMatching.ForSourceItem("Laptop", "Brand", DateTime.UtcNow, 1, "sku-1");

@@ -58,8 +58,8 @@ public static class MatchingFixtureCommand
     private static async Task<object> Seed(CompareShopDbContext db)
     {
         var latest = await LatestManifest(db);
-        if (latest?.Action == ManifestActionSeeded)
-            return new { alreadySeeded = true, manifest = latest.Manifest };
+        if (latest.HasValue && latest.Value.Action == ManifestActionSeeded)
+            return new { alreadySeeded = true, manifest = latest.Value.Manifest };
 
         if (await db.DataSources.AnyAsync(x => x.Key.StartsWith(Prefix))
             || await db.Categories.AnyAsync(x => x.Slug.StartsWith(Prefix))
@@ -119,9 +119,9 @@ public static class MatchingFixtureCommand
     private static async Task<object> Cleanup(CompareShopDbContext db)
     {
         var latest = await LatestManifest(db);
-        if (latest?.Action != ManifestActionSeeded)
+        if (!latest.HasValue || latest.Value.Action != ManifestActionSeeded)
             return new { alreadyClean = true, manifest = (FixtureManifest?)null };
-        var manifest = latest.Manifest;
+        var manifest = latest.Value.Manifest;
 
         // Delete only IDs captured by this command's append-only ownership manifest.
         // Keep audit/history rows, including the manifest events themselves.

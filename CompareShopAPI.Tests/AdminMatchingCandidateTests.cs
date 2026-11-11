@@ -106,7 +106,8 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
 
             Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/admin/matching/{matchingId}")).StatusCode);
             Assert.Equal(HttpStatusCode.NotFound, (await client.DeleteAsync("/admin/matching/999999")).StatusCode);
-            Assert.Equal("[]", await (await client.GetAsync("/admin/matching")).Content.ReadAsStringAsync());
+            using (var queue = JsonDocument.Parse(await (await client.GetAsync("/admin/matching")).Content.ReadAsStringAsync()))
+                Assert.Empty(queue.RootElement.GetProperty("items").EnumerateArray());
             await using (var verify = new CompareShopDbContext(options))
             {
                 var retained = await verify.ProductMatchings.AsNoTracking().SingleAsync(x => x.Id == matchingId);
@@ -185,7 +186,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             var response = await client.GetAsync("/admin/matching");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            var entry = json.RootElement.EnumerateArray().Single(x => x.GetProperty("id").GetInt32() == first.Id);
+            var entry = json.RootElement.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("id").GetInt32() == first.Id);
             Assert.Equal("Mác Air", entry.GetProperty("name").GetString());
             Assert.Equal("Apple", entry.GetProperty("brand").GetString());
             Assert.Equal(JsonValueKind.Null, entry.GetProperty("productId").ValueKind);
@@ -197,7 +198,9 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             Assert.Equal(best.Id, candidate.GetProperty("productId").GetInt32());
             Assert.Equal("Mac Air", candidate.GetProperty("name").GetString());
             Assert.Equal("Apple", candidate.GetProperty("brand").GetString());
-            Assert.Equal(1d, candidate.GetProperty("similarityScore").GetDouble());
+            Assert.True(candidate.GetProperty("score").GetDouble() >= 0d);
+            Assert.True(candidate.TryGetProperty("level", out _));
+            Assert.True(candidate.TryGetProperty("differences", out _));
             Assert.Equal(2, await db.ProductMatchings.CountAsync(x => !x.IsApproved && x.ProductId == null));
             Assert.Null((await db.SourceItemMappings.AsNoTracking().SingleAsync()).ProductId);
             Assert.Empty(await db.AdminAuditLogs.AsNoTracking().ToListAsync());
@@ -214,10 +217,22 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             Assert.False(second.IsApproved);
             Assert.Single(await db.AdminAuditLogs.AsNoTracking().Where(x => x.Action == "approve" && x.ResourceType == "matching").ToListAsync());
             Assert.Single(await service.MatchingList("matching-reader", default));
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/admin/matching/{second.Id}/skip", new { reason = "duplicate", note = "same listing" })).StatusCode);
+            using (var skippedQueue = JsonDocument.Parse(await (await client.GetAsync("/admin/matching?status=skipped")).Content.ReadAsStringAsync()))
+            {
+                Assert.Equal(1, skippedQueue.RootElement.GetProperty("items").GetArrayLength());
+                Assert.Equal(1, skippedQueue.RootElement.GetProperty("counts").GetProperty("skipped").GetInt32());
+            }
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/admin/matching/{second.Id}/restore", null)).StatusCode);
+            using (var restoredQueue = JsonDocument.Parse(await (await client.GetAsync("/admin/matching")).Content.ReadAsStringAsync()))
+                Assert.Equal(1, restoredQueue.RootElement.GetProperty("items").GetArrayLength());
             await service.ApproveMatching("matching-reader", second.Id, best.Id, default);
             counter.ProductReads = 0;
             Assert.Empty(await service.MatchingList("matching-reader", default));
             Assert.Equal(0, counter.ProductReads);
+            Assert.Equal(1, await db.MatchingDecisions.AsNoTracking().CountAsync(x => x.MatchingId == second.Id && x.Decision == "skipped"));
+            Assert.Equal(1, await db.MatchingDecisions.AsNoTracking().CountAsync(x => x.MatchingId == second.Id && x.Decision == "restored"));
+            Assert.Equal(1, await db.MatchingDecisions.AsNoTracking().CountAsync(x => x.MatchingId == second.Id && x.Decision == "approved"));
         }
         finally { await db.Database.EnsureDeletedAsync(); }
     }

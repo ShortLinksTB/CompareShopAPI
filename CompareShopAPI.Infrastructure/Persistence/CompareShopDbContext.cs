@@ -31,6 +31,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<BannedItem> BannedItems => Set<BannedItem>();
     public DbSet<BannedItemOutboxMessage> BannedItemOutboxMessages => Set<BannedItemOutboxMessage>();
     public DbSet<ProductMatching> ProductMatchings => Set<ProductMatching>();
+    public DbSet<CompareShopAPI.Domain.Admin.MatchingDecision> MatchingDecisions => Set<CompareShopAPI.Domain.Admin.MatchingDecision>();
     public DbSet<Article> Articles => Set<Article>();
     public DbSet<ArticleRelatedProduct> ArticleRelatedProducts => Set<ArticleRelatedProduct>();
     public DbSet<ArticleViewDaily> ArticleViewDaily => Set<ArticleViewDaily>();
@@ -139,6 +140,16 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<ProductMatching>().Property(x => x.ExternalSku).HasMaxLength(160);
         model.Entity<ProductMatching>().HasOne<DataSource>().WithMany().HasForeignKey(x => x.DataSourceId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<ProductMatching>().HasIndex(x => new { x.DataSourceId, x.ExternalSku }).IsUnique().HasFilter("[DataSourceId] IS NOT NULL AND [ExternalSku] IS NOT NULL");
+        model.Entity<ProductMatching>().Property(x => x.Status).HasMaxLength(20).HasDefaultValue("pending").IsRequired();
+        model.Entity<ProductMatching>().Property(x => x.SkipReason).HasMaxLength(80);
+        model.Entity<ProductMatching>().Property(x => x.SkipNote).HasMaxLength(1000);
+        model.Entity<ProductMatching>().Property(x => x.DecisionActor).HasMaxLength(200);
+        model.Entity<CompareShopAPI.Domain.Admin.MatchingDecision>().HasKey(x => x.Id);
+        model.Entity<CompareShopAPI.Domain.Admin.MatchingDecision>().Property(x => x.Decision).HasMaxLength(20).IsRequired();
+        model.Entity<CompareShopAPI.Domain.Admin.MatchingDecision>().Property(x => x.Reason).HasMaxLength(80);
+        model.Entity<CompareShopAPI.Domain.Admin.MatchingDecision>().Property(x => x.Note).HasMaxLength(1000);
+        model.Entity<CompareShopAPI.Domain.Admin.MatchingDecision>().Property(x => x.ActorSubject).HasMaxLength(200).IsRequired();
+        model.Entity<CompareShopAPI.Domain.Admin.MatchingDecision>().HasIndex(x => new { x.MatchingId, x.CreatedAtUtc });
 
         model.Entity<Article>().HasKey(x => x.Id);
         model.Entity<Article>().Property(x => x.Slug).UseCollation("Latin1_General_100_CI_AS").HasMaxLength(200).IsRequired();

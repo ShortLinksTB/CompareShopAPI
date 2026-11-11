@@ -266,6 +266,9 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("DecisionAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<int?>("DataSourceId")
                         .HasColumnType("int");
 
@@ -284,6 +287,25 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<int?>("ProductId")
                         .HasColumnType("int");
 
+                    b.Property<string>("DecisionActor")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("SkipNote")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("SkipReason")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("pending");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ProductId");
@@ -295,6 +317,45 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.HasIndex("IsApproved", "CreatedAtUtc");
 
                     b.ToTable("ProductMatchings");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Admin.MatchingDecision", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("MatchingId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MatchingId", "CreatedAtUtc");
+
+                    b.ToTable("MatchingDecisions");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.DataSource", b =>

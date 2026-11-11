@@ -22,7 +22,10 @@ public static class AdminPermissions
 
 public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId);
 public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive);
-public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null);
+public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null)
+{
+    public bool NeedsStandardImage { get; init; }
+}
 public sealed record AdminOffer(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc, string? OutlierReason = null);
 public sealed record AdminOfferQuery(int Page = 1, int PageSize = 25, string? Q = null, int? ShopId = null, int? ProductId = null, string? Filter = null, string Sort = "attention", int StaleHours = 72);
 public sealed record AdminOfferListItem(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc, string? ProductName, string? ProductImageUrl, string? PartnerShopName, string? ExternalSku, string? ImageUrl, int? OriginalPriceVnd, string StockStatus, int? LowestPriceVnd, int? DeltaVnd, decimal? DeltaPercent, string? OutlierReason, decimal? OtherOffersAveragePriceVnd, decimal? OutlierDeviationPercent);
@@ -35,11 +38,26 @@ public sealed record OfferImportResult(ImportedOffer Offer, bool Created);
 public sealed record AdminMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku = null, int? DataSourceId = null)
 {
     public IReadOnlyList<AdminMatchingCandidate> Candidates { get; init; } = [];
+    public LaptopAttributes Attributes { get; init; } = new(null, null, null, null, null, null, null, null);
+    public string Verdict { get; init; } = "review";
+    public string? GroupKey { get; init; }
+    public string? Source { get; init; }
+    public string Status { get; init; } = "pending";
+    public bool NeedsStandardImage { get; init; }
 }
 public sealed record AdminAttachedMatching(int Id, string Name, string? Brand, int? ProductId, DateTime CreatedAtUtc, bool IsApproved, string? ExternalSku, int? DataSourceId, string? DataSourceDisplayName);
-public sealed record MatchingCandidateInput(string Name, string? Brand);
-public sealed record MatchingCandidateProduct(int ProductId, string Name, string? Brand);
-public sealed record AdminMatchingCandidate(int ProductId, string Name, string? Brand, double SimilarityScore);
+public sealed record MatchingCandidateInput(string Name, string? Brand, string? SpecificationsJson = null);
+public sealed record MatchingCandidateProduct(int ProductId, string Name, string? Brand, LaptopAttributes? Attributes = null);
+public sealed record AdminMatchingCandidate(int ProductId, string Name, string? Brand, double SimilarityScore)
+{
+    public double Score => SimilarityScore;
+    public string Level { get; init; } = "review";
+    public IReadOnlyList<string> Differences { get; init; } = [];
+}
+public sealed record AdminMatchingCounts(int All, int Pending, int Skipped, int Confident, int Review, int LikelyNew, int LikelySkip);
+public sealed record AdminMatchingPage(IReadOnlyList<AdminMatching> Items, int Page, int PageSize, int TotalItems, AdminMatchingCounts Counts);
+public sealed record AdminMatchingQuery(string? Status = null, string? Verdict = null, string? Q = null, int Page = 1, int PageSize = 25);
+public sealed record MatchingProductCreate(string Name, string? Brand, string? Description, int CategoryId, string? ImageUrl, string ImageChoice, IReadOnlyList<int>? ApplyToIds = null);
 public sealed record AdminAuditEntry(long Id, string Actor, string Action, string ResourceType, string? ResourceId, DateTime CreatedAtUtc, JsonElement? Before, JsonElement? After);
 public sealed record AdminDashboard(int Products, int Offers, int Articles, bool ArticlesAvailable);
 public sealed record AdminPriceAlert(int Id, int UserId, int ProductId, string ProductSlug, string ProductName, int TargetPrice, bool IsActive, DateTime CreatedAtUtc);
@@ -89,11 +107,16 @@ public interface IAdminData
     Task<AdminOffer?> ApproveOffer(int id, CancellationToken ct);
     Task<OfferImportResult> ImportOffer(string actor, OfferImportInput input, CancellationToken ct);
     Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct);
+    Task<IReadOnlyList<AdminMatching>> MatchingQueue(CancellationToken ct);
     Task<IReadOnlyList<AdminAttachedMatching>> MatchingsForProduct(int productId, CancellationToken ct);
     Task<DomainProductMatching?> MatchingForUnlink(int id, CancellationToken ct);
     Task<IReadOnlyList<MatchingCandidateProduct>> MatchingCandidateProducts(IReadOnlyList<MatchingCandidateInput> pending, CancellationToken ct);
     Task<DomainProductMatching?> MatchingForApproval(int id, int productId, CancellationToken ct);
+    Task<IReadOnlyList<DomainProductMatching>> MatchingsForApproval(IReadOnlyList<int> ids, CancellationToken ct);
+    Task<bool> ProductSlugExists(string slug, CancellationToken ct);
+    Task<bool> IsLaptopCategory(int categoryId, CancellationToken ct);
     Task SaveMatching(DomainProductMatching matching, CancellationToken ct);
+    Task SaveMatchingDecision(int matchingId, string decision, string? reason, string? note, string actor, DateTime atUtc, CancellationToken ct);
     Task<Page<AdminAuditEntry>> AuditLogs(int page, int pageSize, CancellationToken ct);
     Task<AdminDashboard> Dashboard(CancellationToken ct);
     Task<Page<AdminPriceAlert>> PriceAlerts(int page, int pageSize, int? productId, int? userId, CancellationToken ct);
@@ -118,6 +141,8 @@ public sealed class AdminUnauthorizedException() : Exception("A validated subjec
 public sealed class AdminBootstrapCompletedException() : Exception("The first admin has already been provisioned.");
 public sealed class ProductDeleteConflictException() : Exception("The product has linked records and cannot be deleted.");
 public sealed class AdminOfferImportConflictException() : Exception("The source item is already mapped to another product.");
+public sealed class MatchingLaptopCategoryUnavailableException() : Exception("A configured Laptop category is unavailable.");
+public sealed class MatchingProductSlugConflictException(string slug) : Exception($"Product slug '{slug}' is already in use.") { public string Slug { get; } = slug; }
 
 public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstrapSubjects = null, TimeProvider? clock = null)
 {
@@ -208,7 +233,28 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         if (pending.Count == 0) return pending;
         var products = await data.MatchingCandidateProducts(pending.Select(x => new MatchingCandidateInput(x.Name, x.Brand)).ToArray(), ct);
         var ranker = new MatchingCandidateRanker(products);
-        return pending.Select(x => x with { Candidates = ranker.Rank(x.Name, x.Brand) }).ToArray();
+        return pending.Select(x =>
+        {
+            var candidates = ranker.Rank(x.Attributes);
+            return x with { Candidates = candidates, Verdict = MatchingCandidateRanker.Verdict(x.Attributes, candidates) };
+        }).ToArray();
+    }
+    public async Task<AdminMatchingPage> MatchingPage(string? s, AdminMatchingQuery query, CancellationToken ct)
+    {
+        await Authorize(s, AdminPermissions.MatchingRead, ct);
+        ValidatePage(query.Page, query.PageSize);
+        if (query.Status is not (null or "pending" or "skipped" or "approved") || query.Verdict is not (null or "confident" or "review" or "likely_new" or "likely_skip")) throw new ArgumentException("Invalid matching status or verdict.");
+        var all = await MatchingList(s, ct);
+        var skipped = (await data.MatchingQueue(ct)).Where(x => x.Status == "skipped").ToArray();
+        var queue = all.Concat(skipped).ToArray();
+        var counts = new AdminMatchingCounts(queue.Length, all.Count, skipped.Length,
+            all.Count(x => x.Verdict == "confident"), all.Count(x => x.Verdict == "review"), all.Count(x => x.Verdict == "likely_new"), all.Count(x => x.Verdict == "likely_skip"));
+        var filtered = queue.AsEnumerable();
+        if (query.Status is not null) filtered = filtered.Where(x => x.Status == query.Status);
+        if (query.Verdict is not null) filtered = filtered.Where(x => x.Verdict == query.Verdict);
+        if (!string.IsNullOrWhiteSpace(query.Q)) filtered = filtered.Where(x => (x.Name + " " + x.Brand + " " + x.ExternalSku + " " + x.Source).Contains(query.Q.Trim(), StringComparison.OrdinalIgnoreCase));
+        var rows = filtered.ToArray();
+        return new(rows.Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToArray(), query.Page, query.PageSize, rows.Length, counts);
     }
     public Task<AdminMatching> ApproveMatching(string? s, int id, int productId, CancellationToken ct) => Write(s, AdminPermissions.MatchingApprove, "approve", "matching", id.ToString(), async t =>
     {
@@ -217,8 +263,93 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         var matching = await data.MatchingForApproval(id, productId, t);
         if (matching is null || !matching.TryApprove(productId)) return (null, null, null);
         await data.SaveMatching(matching, t);
+        await data.SaveMatchingDecision(id, "approved", null, null, s!, Clock.GetUtcNow().UtcDateTime, t);
         return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved, matching.ExternalSku, matching.DataSourceId), before, new { productId });
     }, ct);
+    public async Task<AdminMatching> SkipMatching(string? s, int id, string reason, string? note, CancellationToken ct)
+    {
+        var actor = await Authorize(s, AdminPermissions.MatchingApprove, ct);
+        if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length > 80 || note?.Trim().Length > 1000) throw new ArgumentException("Invalid skip reason or note.");
+        return await data.ExecuteAudited(actor, "skip", "matching", id.ToString(), async t =>
+        {
+            var matching = await data.MatchingForUnlink(id, t);
+            if (matching is null) return (null, null, null);
+            var before = matching.Status;
+            matching.Skip(reason.Trim(), note?.Trim(), actor, Clock.GetUtcNow().UtcDateTime);
+            await data.SaveMatching(matching, t);
+            await data.SaveMatchingDecision(id, "skipped", reason.Trim(), note?.Trim(), actor, Clock.GetUtcNow().UtcDateTime, t);
+            return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved, matching.ExternalSku, matching.DataSourceId) { Status = matching.Status }, new { status = before }, new { status = matching.Status, reason, note });
+        }, ct);
+    }
+    public async Task<AdminMatching> RestoreMatching(string? s, int id, CancellationToken ct)
+    {
+        var actor = await Authorize(s, AdminPermissions.MatchingApprove, ct);
+        return await data.ExecuteAudited(actor, "restore", "matching", id.ToString(), async t =>
+        {
+            var matching = await data.MatchingForUnlink(id, t);
+            if (matching is null) return (null, null, null);
+            if (matching.Status != "skipped") return (null, null, null);
+            matching.Restore();
+            await data.SaveMatching(matching, t);
+            await data.SaveMatchingDecision(id, "restored", null, null, actor, Clock.GetUtcNow().UtcDateTime, t);
+            return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved, matching.ExternalSku, matching.DataSourceId) { Status = matching.Status }, new { status = "skipped" }, new { status = "pending" });
+        }, ct);
+    }
+    public async Task<IReadOnlyList<AdminMatching>> ApproveMatchingGroup(string? s, IReadOnlyList<int> ids, int productId, CancellationToken ct)
+    {
+        var actor = await Authorize(s, AdminPermissions.MatchingApprove, ct);
+        if (ids is null || ids.Count is < 1 or > 100 || ids.Any(x => x <= 0) || ids.Distinct().Count() != ids.Count || productId <= 0) throw new ArgumentException("Matching IDs and product ID must be positive and unique.");
+        if (await data.Product(productId, ct) is not { IsActive: true }) throw new ArgumentException("Active product does not exist.");
+        return await data.ExecuteAudited(actor, "approve_group", "matching_group", null, async t =>
+        {
+            var matchings = await data.MatchingsForApproval(ids, t);
+            if (matchings.Count != ids.Count) return (null, null, null);
+            var before = matchings.Select(x => new { x.Id, x.ProductId, x.Status }).ToArray();
+            foreach (var matching in matchings)
+            {
+                if (!matching.TryApprove(productId)) throw new ArgumentException("Every matching must be pending before group approval.");
+                await data.SaveMatching(matching, t);
+                await data.SaveMatchingDecision(matching.Id, "approved", null, null, actor, Clock.GetUtcNow().UtcDateTime, t);
+            }
+            var result = matchings.Select(x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId) { Status = x.Status }).ToArray();
+            return (result, before, new { productId, ids });
+        }, ct);
+    }
+    public async Task<AdminProduct> CreateMatchingProduct(string? s, int id, MatchingProductCreate input, CancellationToken ct)
+    {
+        var actor = await Authorize(s, AdminPermissions.MatchingApprove, ct);
+        if (!await data.HasPermission(actor, AdminPermissions.ProductsCreate, ct)) throw new AdminForbiddenException();
+        if (string.IsNullOrWhiteSpace(input.Name) || input.Name.Trim().Length > 300 || input.Brand?.Length > 200 || input.Description?.Length > 10000 || input.CategoryId <= 0 || input.ImageChoice is not ("files" or "shop" or "none")) throw new ArgumentException("Invalid matching product fields.");
+        var ids = input.ApplyToIds?.ToArray() ?? [id];
+        if (!ids.Contains(id) || ids.Length is < 1 or > 100 || ids.Any(x => x <= 0) || ids.Distinct().Count() != ids.Length) throw new ArgumentException("Apply-to matching IDs must be unique and include the source item.");
+        var slug = Slug(input.Name);
+        if (string.IsNullOrWhiteSpace(slug) || slug.Length > 200) throw new ArgumentException("Product name cannot produce a valid slug.");
+        if (!await data.IsLaptopCategory(input.CategoryId, ct)) throw new MatchingLaptopCategoryUnavailableException();
+        if (await data.ProductSlugExists(slug, ct)) throw new MatchingProductSlugConflictException(slug);
+        var imageUrl = input.ImageChoice == "none" ? null : input.ImageUrl;
+        if (input.ImageChoice == "files" && imageUrl is not null && !System.Text.RegularExpressions.Regex.IsMatch(imageUrl, @"^/files/[0-9a-fA-F-]{36}$")) throw new ArgumentException("Files image must use /files/{guid}.");
+        if (input.ImageChoice == "shop" && imageUrl is not null && !IsValidHttpsUrl(imageUrl, 2048)) throw new ArgumentException("Shop image URL must be HTTPS.");
+        var productInput = new ProductInput(slug, input.Name.Trim(), input.Brand?.Trim(), input.Description?.Trim(), input.CategoryId, true, imageUrl);
+        return await data.ExecuteAudited<AdminProduct>(actor, "create_from_matching", "product", null, async t =>
+        {
+            var matchings = await data.MatchingsForApproval(ids, t);
+            if (matchings.Count != ids.Length) return (null, null, null);
+            var product = await data.SaveProduct(null, productInput, t);
+            foreach (var matching in matchings)
+            {
+                if (!matching.TryApprove(product.Id)) throw new ArgumentException("Every matching must be pending.");
+                await data.SaveMatching(matching, t);
+                await data.SaveMatchingDecision(matching.Id, "created_product", null, null, actor, Clock.GetUtcNow().UtcDateTime, t);
+            }
+            var needsStandardImage = input.ImageChoice != "files" || imageUrl is null;
+            return (product with { NeedsStandardImage = needsStandardImage }, null, new { productId = product.Id, matchingIds = ids, input.ImageChoice, needsStandardImage });
+        }, ct);
+    }
+    private static string Slug(string value)
+    {
+        var folded = string.Concat(value.Normalize(System.Text.NormalizationForm.FormD).Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)).ToLowerInvariant();
+        return System.Text.RegularExpressions.Regex.Replace(folded, "[^a-z0-9]+", "-").Trim('-');
+    }
     public async Task<IReadOnlyList<AdminAttachedMatching>> ProductMatchings(string? s, int productId, CancellationToken ct)
     {
         await Authorize(s, AdminPermissions.MatchingRead, ct);
@@ -286,7 +417,8 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     private static ProductInput Validate(ProductInput x)
     {
         var imageUrl = x.ImageUrl?.Trim();
-        if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 300 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 200 || x.CategoryId <= 0 || x.Brand?.Length > 200 || imageUrl?.Length > 2048 || imageUrl is not null && (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var imageUri) || imageUri.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(imageUri.Host))) throw new ArgumentException("Invalid product.");
+        var isFileReference = imageUrl is not null && System.Text.RegularExpressions.Regex.IsMatch(imageUrl, @"^/files/[0-9a-fA-F-]{36}$");
+        if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 300 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 200 || x.CategoryId <= 0 || x.Brand?.Length > 200 || imageUrl?.Length > 2048 || imageUrl is not null && !isFileReference && (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var imageUri) || imageUri.Scheme != Uri.UriSchemeHttps || string.IsNullOrWhiteSpace(imageUri.Host))) throw new ArgumentException("Invalid product.");
         return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim(), ImageUrl = imageUrl };
     }
     private static OfferInput Validate(OfferInput x) { if (x.PriceVnd <= 0 || x.Url?.Length > 2048) throw new ArgumentException("Invalid offer."); return x; }

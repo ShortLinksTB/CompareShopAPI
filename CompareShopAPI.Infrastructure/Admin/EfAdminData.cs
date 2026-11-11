@@ -143,19 +143,83 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         }
     }
 
-    public async Task<IReadOnlyList<AdminOffer>> Offers(CancellationToken ct) => await db.ProductOffers.AsNoTracking().OrderBy(x => x.Id)
-        .Select(x => new AdminOffer(x.Id, x.ProductId, x.PartnerShopId, x.PriceVnd, x.Url, x.IsActive, x.IsOutlier, x.UpdatedAtUtc)).ToListAsync(ct);
+    public async Task<AdminOfferPage> Offers(AdminOfferQuery request, DateTime nowUtc, CancellationToken ct)
+    {
+        var offers = db.ProductOffers.AsNoTracking();
+        var staleCutoff = nowUtc.AddHours(-request.StaleHours);
+        var counts = new AdminOfferCounts(await offers.CountAsync(ct), await offers.CountAsync(x => x.IsOutlier, ct),
+            await offers.CountAsync(x => x.UpdatedAtUtc < staleCutoff, ct), await offers.CountAsync(x => x.StockStatus == "out_of_stock", ct), await offers.CountAsync(x => !x.IsActive, ct));
+        var eligible = db.ProductOffers.AsNoTracking().Where(x => x.IsActive && !x.IsOutlier && x.StockStatus == "in_stock" && x.UpdatedAtUtc >= nowUtc.AddDays(-30) && x.Product.IsActive && x.PartnerShop.IsActive);
+        var query = offers;
+        if (!string.IsNullOrWhiteSpace(request.Q))
+        {
+            var term = request.Q.Trim();
+            query = query.Where(x => x.Product.Name.Contains(term) || x.PartnerShop.Name.Contains(term) || db.SourceItemMappings.Any(m => m.ProductOfferId == x.Id && m.ExternalSku.Contains(term)));
+        }
+        if (request.ShopId is int shopId) query = query.Where(x => x.PartnerShopId == shopId);
+        if (request.ProductId is int productId) query = query.Where(x => x.ProductId == productId);
+        query = request.Filter switch
+        {
+            "outlier" => query.Where(x => x.IsOutlier), "stale" => query.Where(x => x.UpdatedAtUtc < staleCutoff),
+            "out_of_stock" => query.Where(x => x.StockStatus == "out_of_stock"), "inactive" => query.Where(x => !x.IsActive), _ => query
+        };
+        var total = await query.CountAsync(ct);
+        var ordered = request.Sort switch
+        {
+            "oldest" => query.OrderBy(x => x.UpdatedAtUtc).ThenBy(x => x.Id),
+            "priceAsc" => query.OrderBy(x => x.PriceVnd).ThenBy(x => x.Id),
+            "priceDesc" => query.OrderByDescending(x => x.PriceVnd).ThenBy(x => x.Id),
+            "name" => query.OrderBy(x => x.Product.Name.ToLower()).ThenBy(x => x.Id),
+            _ => query.OrderBy(x => x.IsOutlier ? 0 : x.UpdatedAtUtc < staleCutoff ? 1 : x.StockStatus == "out_of_stock" ? 2 : 3)
+                .ThenBy(x => x.IsOutlier || x.UpdatedAtUtc < staleCutoff || x.StockStatus == "out_of_stock" ? x.UpdatedAtUtc : DateTime.MaxValue)
+                .ThenByDescending(x => !(x.IsOutlier || x.UpdatedAtUtc < staleCutoff || x.StockStatus == "out_of_stock") ? x.UpdatedAtUtc : DateTime.MinValue).ThenBy(x => x.Id)
+        };
+        var rows = await ordered.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize).Select(x => new
+        {
+            x.Id, x.ProductId, x.PartnerShopId, x.PriceVnd, x.Url, x.IsActive, x.IsOutlier, x.UpdatedAtUtc,
+            ProductName = x.Product.Name, ProductImageUrl = x.Product.ImageUrl, PartnerShopName = x.PartnerShop.Name,
+            ExternalSku = db.SourceItemMappings.Where(m => m.ProductOfferId == x.Id).OrderBy(m => m.Id).Select(m => m.ExternalSku).FirstOrDefault(),
+            x.ImageUrl, x.OriginalPriceVnd, x.StockStatus, x.OutlierReason,
+            LowestPriceVnd = eligible.Where(e => e.ProductId == x.ProductId).Select(e => (int?)e.PriceVnd).Min(),
+            OtherAverage = eligible.Where(e => e.ProductId == x.ProductId && e.Id != x.Id).Select(e => (decimal?)e.PriceVnd).Average()
+        }).ToListAsync(ct);
+        var items = rows.Select(x =>
+        {
+            var delta = x.LowestPriceVnd is int low ? x.PriceVnd - low : (int?)null;
+            var pct = x.LowestPriceVnd is > 0 ? decimal.Round((decimal)delta!.Value * 100m / x.LowestPriceVnd.Value, 1, MidpointRounding.AwayFromZero) : (decimal?)null;
+            var deviation = x.OtherAverage is > 0 ? decimal.Round((x.PriceVnd - x.OtherAverage.Value) * 100m / x.OtherAverage.Value, 1, MidpointRounding.AwayFromZero) : (decimal?)null;
+            return new AdminOfferListItem(x.Id, x.ProductId, x.PartnerShopId, x.PriceVnd, x.Url, x.IsActive, x.IsOutlier, DateTime.SpecifyKind(x.UpdatedAtUtc, DateTimeKind.Utc), x.ProductName, x.ProductImageUrl, x.PartnerShopName, x.ExternalSku, x.ImageUrl, x.OriginalPriceVnd, x.StockStatus, x.LowestPriceVnd, delta, pct, x.OutlierReason, x.OtherAverage, deviation);
+        }).ToArray();
+        return new(items, request.Page, request.PageSize, total, counts);
+    }
+    public async Task<IReadOnlyList<AdminOfferHistoryPoint>?> OfferHistory(int id, DateTime fromUtc, DateTime toUtc, CancellationToken ct)
+    {
+        if (!await db.ProductOffers.AsNoTracking().AnyAsync(x => x.Id == id, ct)) return null;
+        var rows = await db.ProductOfferSnapshots.AsNoTracking().Where(x => x.ProductOfferId == id && x.CapturedAtUtc >= fromUtc && x.CapturedAtUtc < toUtc)
+            .OrderBy(x => x.CapturedAtUtc).ThenBy(x => x.Id).Select(x => new { x.CapturedAtUtc, x.PriceVnd }).ToListAsync(ct);
+        return rows.Select(x => new AdminOfferHistoryPoint(DateTime.SpecifyKind(x.CapturedAtUtc, DateTimeKind.Utc), x.PriceVnd)).ToArray();
+    }
+    public Task<AdminOffer?> Offer(int id, CancellationToken ct) => db.ProductOffers.AsNoTracking().Where(x => x.Id == id)
+        .Select(x => new AdminOffer(x.Id, x.ProductId, x.PartnerShopId, x.PriceVnd, x.Url, x.IsActive, x.IsOutlier, x.UpdatedAtUtc, x.OutlierReason)).SingleOrDefaultAsync(ct);
     public async Task<AdminOffer?> SaveOffer(int id, OfferInput input, CancellationToken ct)
     {
         var item = await db.ProductOffers.SingleOrDefaultAsync(x => x.Id == id, ct); if (item is null) return null;
         item.PriceVnd = input.PriceVnd; item.Url = input.Url; item.IsActive = input.IsActive; item.IsOutlier = input.IsOutlier; item.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(ct); return new(item.Id, item.ProductId, item.PartnerShopId, item.PriceVnd, item.Url, item.IsActive, item.IsOutlier, item.UpdatedAtUtc);
+        await db.SaveChangesAsync(ct); return new(item.Id, item.ProductId, item.PartnerShopId, item.PriceVnd, item.Url, item.IsActive, item.IsOutlier, item.UpdatedAtUtc, item.OutlierReason);
     }
     public async Task<AdminOffer?> ApproveOffer(int id, CancellationToken ct)
     {
         var item = await db.ProductOffers.SingleOrDefaultAsync(x => x.Id == id, ct); if (item is null) return null;
         item.IsActive = true; item.IsOutlier = false; item.UpdatedAtUtc = clock.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(ct); return new(item.Id, item.ProductId, item.PartnerShopId, item.PriceVnd, item.Url, item.IsActive, item.IsOutlier, item.UpdatedAtUtc);
+        await db.SaveChangesAsync(ct); return new(item.Id, item.ProductId, item.PartnerShopId, item.PriceVnd, item.Url, item.IsActive, item.IsOutlier, item.UpdatedAtUtc, item.OutlierReason);
+    }
+    public async Task<AdminOffer?> SaveOfferOutlierReason(int id, string? reason, CancellationToken ct)
+    {
+        var item = await db.ProductOffers.SingleOrDefaultAsync(x => x.Id == id, ct);
+        if (item is null) return null;
+        item.OutlierReason = reason;
+        await db.SaveChangesAsync(ct);
+        return new(item.Id, item.ProductId, item.PartnerShopId, item.PriceVnd, item.Url, item.IsActive, item.IsOutlier, item.UpdatedAtUtc, item.OutlierReason);
     }
 
     public async Task<OfferImportResult> ImportOffer(string actor, OfferImportInput input, CancellationToken ct)

@@ -132,17 +132,44 @@ public sealed class ProductMatching
     public int? ProductId { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
     public bool IsApproved { get; private set; }
+    public string Status { get; private set; } = "pending";
+    public string? SkipReason { get; private set; }
+    public string? SkipNote { get; private set; }
+    public string? DecisionActor { get; private set; }
+    public DateTime? DecisionAtUtc { get; private set; }
     public int? DataSourceId { get; private set; }
     public string? ExternalSku { get; private set; }
 
     public bool TryApprove(int productId)
     {
         if (productId <= 0) throw new ArgumentOutOfRangeException(nameof(productId), "Product ID must be positive.");
-        if (ProductId is not null || IsApproved) return false;
+        if (ProductId is not null || IsApproved || Status != "pending") return false;
         ProductId = productId;
         IsApproved = true;
+        Status = "approved";
         return true;
     }
 
     public void UnlinkFromProduct() => ProductId = null;
+    public void Skip(string reason, string? note, string actor, DateTime atUtc)
+    {
+        if (ProductId is not null || IsApproved || string.IsNullOrWhiteSpace(reason) || reason.Length > 80 || note?.Length > 1000 || string.IsNullOrWhiteSpace(actor)) throw new InvalidOperationException("Matching cannot be skipped.");
+        Status = "skipped"; SkipReason = reason.Trim(); SkipNote = note?.Trim(); DecisionActor = actor; DecisionAtUtc = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc);
+    }
+    public void Restore()
+    {
+        if (Status != "skipped") throw new InvalidOperationException("Only skipped matching can be restored.");
+        Status = "pending"; SkipReason = null; SkipNote = null; DecisionActor = null; DecisionAtUtc = null;
+    }
+}
+
+public sealed class MatchingDecision
+{
+    public long Id { get; set; }
+    public int MatchingId { get; set; }
+    public string Decision { get; set; } = string.Empty;
+    public string? Reason { get; set; }
+    public string? Note { get; set; }
+    public string ActorSubject { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; }
 }

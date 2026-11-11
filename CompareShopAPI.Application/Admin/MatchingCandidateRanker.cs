@@ -1,58 +1,75 @@
-using System.Globalization;
-using System.Text;
-
 namespace CompareShopAPI.Application.Admin;
 
-/// <summary>Advisory ranking only; selection and approval remain explicit admin actions.</summary>
+/// <summary>Attribute based advisory ranking. A suggestion never changes a mapping.</summary>
 public sealed class MatchingCandidateRanker
 {
     private const int MaximumCandidates = 5;
-    private readonly IReadOnlyList<PreparedProduct> products;
+    private readonly IReadOnlyList<Prepared> products;
 
     public MatchingCandidateRanker(IReadOnlyList<MatchingCandidateProduct> products)
     {
-        this.products = products.Select(x => new PreparedProduct(x, Tokens(x.Name), Normalize(x.Brand))).ToArray();
+        this.products = products.Select(p => new Prepared(p, p.Attributes ?? LaptopMatchingAttributeParser.Parse(p.Name, p.Brand, null))).ToArray();
     }
 
-    public IReadOnlyList<AdminMatchingCandidate> Rank(string name, string? brand)
+    public IReadOnlyList<AdminMatchingCandidate> Rank(string name, string? brand) => Rank(name, brand, null);
+
+    public IReadOnlyList<AdminMatchingCandidate> Rank(string name, string? brand, string? specificationsJson)
     {
-        var tokens = Tokens(name);
-        var normalizedBrand = Normalize(brand);
-        return products.Select(x => new
-            {
-                Product = x.Product,
-                Tier = BrandTier(normalizedBrand, x.Brand),
-                Score = Jaccard(tokens, x.Tokens)
-            })
-            .OrderBy(x => x.Tier).ThenByDescending(x => x.Score).ThenBy(x => x.Product.ProductId)
-            .Take(MaximumCandidates)
-            .Select(x => new AdminMatchingCandidate(x.Product.ProductId, x.Product.Name, x.Product.Brand, x.Score))
-            .ToArray();
+        return Rank(LaptopMatchingAttributeParser.Parse(name, brand, specificationsJson));
     }
 
-    private static int BrandTier(string pending, string candidate) =>
-        pending.Length == 0 || candidate.Length == 0 ? 1 : pending == candidate ? 0 : 2;
-
-    private static double Jaccard(HashSet<string> left, HashSet<string> right)
+    public IReadOnlyList<AdminMatchingCandidate> Rank(LaptopAttributes source)
     {
-        if (left.Count == 0 || right.Count == 0) return 0;
-        var intersection = left.Count(right.Contains);
-        return (double)intersection / (left.Count + right.Count - intersection);
+        var scored = products.Select(p => Score(source, p)).OrderByDescending(x => x.Score).ThenBy(x => x.Product.ProductId).Take(MaximumCandidates).ToArray();
+        return scored.Select(x => new AdminMatchingCandidate(x.Product.ProductId, x.Product.Name, x.Product.Brand, x.Score)
+        { Level = x.Level, Differences = x.Differences }).ToArray();
     }
 
-    private static HashSet<string> Tokens(string value) => Normalize(value).Split(' ', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
-
-    private static string Normalize(string? value)
+    public static string Verdict(LaptopAttributes a, IReadOnlyList<AdminMatchingCandidate> candidates)
     {
-        var result = new StringBuilder();
-        foreach (var rune in (value ?? string.Empty).Normalize(NormalizationForm.FormD).EnumerateRunes())
-        {
-            if (Rune.GetUnicodeCategory(rune) is UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark) continue;
-            if (Rune.IsLetterOrDigit(rune)) result.Append(Rune.ToLowerInvariant(rune).ToString());
-            else if (result.Length > 0 && result[^1] != ' ') result.Append(' ');
-        }
-        return result.ToString().TrimEnd();
+        if (a.IsAccessory == true) return "likely_skip";
+        if (candidates.Count == 0 || candidates[0].Score < 25) return "likely_new";
+        if (candidates[0].Level == "confident") return "confident";
+        return "review";
     }
 
-    private sealed record PreparedProduct(MatchingCandidateProduct Product, HashSet<string> Tokens, string Brand);
+    private static Ranked Score(LaptopAttributes source, Prepared candidate)
+    {
+        var target = candidate.Attributes;
+        var diffs = new List<string>();
+        var points = 0d; var possible = 0d; var conflicts = 0;
+        Compare(source.Brand, target.Brand, 15, "brand", ref points, ref possible, ref conflicts, diffs);
+        Compare(source.Line, target.Line, 15, "line", ref points, ref possible, ref conflicts, diffs);
+        Compare(source.Chip, target.Chip, 15, "chip", ref points, ref possible, ref conflicts, diffs);
+        Compare(source.Gpu, target.Gpu, 12, "gpu", ref points, ref possible, ref conflicts, diffs);
+        Compare(source.RamGb, target.RamGb, 12, "ram", ref points, ref possible, ref conflicts, diffs);
+        Compare(source.SsdGb, target.SsdGb, 12, "ssd", ref points, ref possible, ref conflicts, diffs);
+        Compare(source.Screen, target.Screen, 9, "screen", ref points, ref possible, ref conflicts, diffs);
+        Compare(source.IsAccessory, target.IsAccessory, 10, "accessory", ref points, ref possible, ref conflicts, diffs);
+        // Names can weakly rank listings whose structured data is sparse, but cannot make them confident.
+        var nameScore = TokenSimilarity(source, candidate.Product.Name);
+        var score = possible == 0 ? nameScore * 20 : Math.Clamp(points / possible * 100 + nameScore * 8, 0, 100);
+        var level = conflicts == 0 && possible >= 60 && score >= 78 ? "confident" : conflicts > 0 ? "variant" : "review";
+        return new(candidate.Product, Math.Round(score, 2), level, diffs);
+    }
+
+    private static void Compare<T>(T? a, T? b, double weight, string key, ref double points, ref double possible, ref int conflicts, List<string> diffs)
+    {
+        if (a is null || b is null) return;
+        possible += weight;
+        if (EqualityComparer<T>.Default.Equals(a, b) || a is string left && b is string right && Normalize(left) == Normalize(right)) points += weight;
+        else { conflicts++; diffs.Add(key); }
+    }
+
+    private static double TokenSimilarity(LaptopAttributes source, string name)
+    {
+        var terms = new[] { source.Brand, source.Line, source.Chip, source.Gpu }.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
+        if (terms.Length == 0) return 0;
+        var text = Normalize(name);
+        return (double)terms.Count(x => text.Contains(Normalize(x!), StringComparison.Ordinal)) / terms.Length;
+    }
+
+    private static string Normalize(string s) => string.Concat(s.Normalize(System.Text.NormalizationForm.FormD).Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)).ToLowerInvariant();
+    private sealed record Prepared(MatchingCandidateProduct Product, LaptopAttributes Attributes);
+    private sealed record Ranked(MatchingCandidateProduct Product, double Score, string Level, IReadOnlyList<string> Differences);
 }

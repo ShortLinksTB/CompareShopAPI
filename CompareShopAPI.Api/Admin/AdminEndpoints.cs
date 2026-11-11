@@ -52,8 +52,12 @@ public static class AdminEndpoints
         admin.MapPatch("/offers/{id:int}", (HttpContext c, int id, OfferInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateOffer(Subject(c), id, input, ct)));
         admin.MapPatch("/offers/{id:int}/outlier-reason", (HttpContext c, int id, OutlierReasonInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateOfferOutlierReason(Subject(c), id, input.OutlierReason, ct)));
         admin.MapPost("/offers/{id:int}/approve", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.ApproveOffer(Subject(c), id, ct)));
-        admin.MapGet("/matching", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.MatchingList(Subject(c), ct)));
+        admin.MapGet("/matching", (HttpContext c, string? status, string? verdict, string? q, int? page, int? pageSize, AdminService s, CancellationToken ct) => Run(() => s.MatchingPage(Subject(c), new(status, verdict, q, page ?? 1, pageSize ?? 25), ct)));
         admin.MapPost("/matching/{id:int}/approve", (HttpContext c, int id, MatchingApproval input, AdminService s, CancellationToken ct) => Run(() => s.ApproveMatching(Subject(c), id, input.ProductId, ct)));
+        admin.MapPost("/matching/approve-group", (HttpContext c, MatchingGroupApproval input, AdminService s, CancellationToken ct) => Run(() => s.ApproveMatchingGroup(Subject(c), input.Ids, input.ProductId, ct)));
+        admin.MapPost("/matching/{id:int}/create-product", (HttpContext c, int id, MatchingProductCreate input, AdminService s, CancellationToken ct) => Run(() => s.CreateMatchingProduct(Subject(c), id, input, ct), StatusCodes.Status201Created));
+        admin.MapPost("/matching/{id:int}/skip", (HttpContext c, int id, MatchingSkip input, AdminService s, CancellationToken ct) => Run(() => s.SkipMatching(Subject(c), id, input.Reason, input.Note, ct)));
+        admin.MapPost("/matching/{id:int}/restore", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.RestoreMatching(Subject(c), id, ct)));
         admin.MapGet("/products/{id:int}/matchings", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.ProductMatchings(Subject(c), id, ct)));
         admin.MapDelete("/matching/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.UnlinkMatching(Subject(c), id, ct)));
         admin.MapGet("/sync-jobs", async (HttpContext c, IngestionAdminService s, CancellationToken ct) =>
@@ -110,6 +114,8 @@ public static class AdminEndpoints
         catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
         catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+        catch (MatchingLaptopCategoryUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "category_unavailable" }); }
+        catch (MatchingProductSlugConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "slug_conflict", ["slug"] = ex.Slug }); }
         catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
         catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
     }
@@ -120,6 +126,8 @@ public static class AdminEndpoints
         catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (ProductDeleteConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+        catch (MatchingLaptopCategoryUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "category_unavailable" }); }
+        catch (MatchingProductSlugConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "slug_conflict", ["slug"] = ex.Slug }); }
         catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
         catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
     }
@@ -161,4 +169,6 @@ public static class AdminEndpoints
 public sealed record OutlierReasonInput(string? OutlierReason);
 
 public sealed record MatchingApproval(int ProductId);
+public sealed record MatchingGroupApproval(IReadOnlyList<int> Ids, int ProductId);
+public sealed record MatchingSkip(string Reason, string? Note);
 public sealed record RoleAssignmentsInput(IReadOnlyList<int> RoleIds);

@@ -290,7 +290,35 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         return new(dto, created);
     }
 
-    public async Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct) => await db.ProductMatchings.AsNoTracking().Where(x => x.ProductId == null && !x.IsApproved).OrderBy(x => x.CreatedAtUtc).Select(MatchingDto).ToListAsync(ct);
+    public async Task<IReadOnlyList<AdminMatching>> Matching(CancellationToken ct)
+    {
+        return await LoadMatchingQueue(true, ct);
+    }
+    public async Task<IReadOnlyList<AdminMatching>> MatchingQueue(CancellationToken ct) => await LoadMatchingQueue(false, ct);
+    private async Task<IReadOnlyList<AdminMatching>> LoadMatchingQueue(bool pendingOnly, CancellationToken ct)
+    {
+        var query = db.ProductMatchings.AsNoTracking().Where(x => x.ProductId == null && !x.IsApproved);
+        if (pendingOnly) query = query.Where(x => x.Status == "pending");
+        else query = query.Where(x => x.Status == "pending" || x.Status == "skipped");
+        var items = await query.OrderBy(x => x.CreatedAtUtc).Select(MatchingDto).ToListAsync(ct);
+        var identities = items.Where(x => x.DataSourceId.HasValue && x.ExternalSku != null).Select(x => new { Source = x.DataSourceId!.Value, Sku = x.ExternalSku! }).ToArray();
+        var sourceIds = identities.Select(x => x.Source).Distinct().ToArray();
+        var skus = identities.Select(x => x.Sku).Distinct().ToArray();
+        var mappings = await db.SourceItemMappings.AsNoTracking().Where(m => sourceIds.Contains(m.DataSourceId) && skus.Contains(m.ExternalSku))
+            .Select(m => new { m.DataSourceId, m.ExternalSku, m.SpecificationsJson, m.ImageUrl }).ToListAsync(ct);
+        var sources = await db.DataSources.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.DisplayName, ct);
+        return items.Select(item =>
+        {
+            var mapping = mappings.FirstOrDefault(m => m.DataSourceId == item.DataSourceId && m.ExternalSku == item.ExternalSku);
+            var specs = mapping is null ? null : (string?)mapping.SpecificationsJson;
+            var imageUrl = mapping is null ? null : (string?)mapping.ImageUrl;
+            var attrs = LaptopMatchingAttributeParser.Parse(item.Name, item.Brand, specs);
+            var group = attrs.Brand is not null && attrs.Line is not null && attrs.Chip is not null && attrs.Gpu is not null && attrs.RamGb.HasValue && attrs.SsdGb.HasValue && attrs.Screen is not null && attrs.IsAccessory == false
+                ? string.Join('|', attrs.Brand.ToLowerInvariant(), attrs.Line.ToLowerInvariant(), attrs.Chip.ToLowerInvariant(), attrs.Gpu.ToLowerInvariant(), attrs.RamGb.Value, attrs.SsdGb.Value, attrs.Screen.ToLowerInvariant()) : null;
+            return item with { Attributes = attrs, Source = item.DataSourceId is int sourceId && sources.TryGetValue(sourceId, out var label) ? label : null, GroupKey = group,
+                NeedsStandardImage = !System.Text.RegularExpressions.Regex.IsMatch(imageUrl ?? string.Empty, @"^/files/[0-9a-fA-F-]{36}$") };
+        }).ToArray();
+    }
     public async Task<IReadOnlyList<AdminAttachedMatching>> MatchingsForProduct(int productId, CancellationToken ct) => await db.ProductMatchings.AsNoTracking()
         .Where(x => x.ProductId == productId)
         .OrderBy(x => x.CreatedAtUtc)
@@ -301,14 +329,27 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     {
         if (pending.Count == 0) return [];
         // All active products remain eligible: the advisory policy has no score threshold.
-        return await db.Products.AsNoTracking().Where(x => x.IsActive)
-            .Select(x => new MatchingCandidateProduct(x.Id, x.Name, x.Brand)).ToListAsync(ct);
+        var products = await db.Products.AsNoTracking().Where(x => x.IsActive).Select(x => new { x.Id, x.Name, x.Brand }).ToListAsync(ct);
+        var ids = products.Select(x => x.Id).ToArray();
+        var specs = await db.SpecificationItems.AsNoTracking().Where(x => ids.Contains(x.Group.ProductId))
+            .Select(x => new { x.Group.ProductId, GroupName = x.Group.Name, x.Name, x.Value }).ToListAsync(ct);
+        return products.Select(p =>
+        {
+            var fields = specs.Where(x => x.ProductId == p.Id).GroupBy(x => x.GroupName + " " + x.Name).ToDictionary(x => x.Key, x => x.First().Value);
+            var attributes = LaptopMatchingAttributeParser.Parse(p.Name, p.Brand, System.Text.Json.JsonSerializer.Serialize(fields));
+            return new MatchingCandidateProduct(p.Id, p.Name, p.Brand, attributes);
+        }).ToArray();
     }
     public async Task<CompareShopAPI.Domain.Admin.ProductMatching?> MatchingForApproval(int id, int productId, CancellationToken ct)
     {
         if (!await db.Products.AnyAsync(x => x.Id == productId && x.IsActive, ct)) throw new ArgumentException("Active product does not exist.");
-        return await db.ProductMatchings.SingleOrDefaultAsync(x => x.Id == id, ct);
+        return await db.ProductMatchings.SingleOrDefaultAsync(x => x.Id == id && x.Status == "pending" && x.ProductId == null && !x.IsApproved, ct);
     }
+    public async Task<IReadOnlyList<CompareShopAPI.Domain.Admin.ProductMatching>> MatchingsForApproval(IReadOnlyList<int> ids, CancellationToken ct) =>
+        await db.ProductMatchings.Where(x => ids.Contains(x.Id) && x.ProductId == null && !x.IsApproved && x.Status == "pending").ToListAsync(ct);
+    public Task<bool> ProductSlugExists(string slug, CancellationToken ct) => db.Products.AsNoTracking().AnyAsync(x => x.Slug == slug, ct);
+    public Task<bool> IsLaptopCategory(int categoryId, CancellationToken ct) => db.Categories.AsNoTracking().AnyAsync(x => x.Id == categoryId && x.Level == 2 &&
+        (x.Slug.Contains("laptop") || x.Name.Contains("laptop") || db.Categories.Any(parent => parent.Id == x.ParentCategoryId && (parent.Slug.Contains("laptop") || parent.Name.Contains("laptop")))), ct);
     public async Task SaveMatching(CompareShopAPI.Domain.Admin.ProductMatching matching, CancellationToken ct)
     {
         if (matching.DataSourceId is int sourceId && matching.ExternalSku is string sku && matching.ProductId is int productId)
@@ -316,6 +357,11 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
             var mapping = await db.SourceItemMappings.SingleAsync(x => x.DataSourceId == sourceId && x.ExternalSku == sku, ct);
             mapping.Approve(productId);
         }
+        await db.SaveChangesAsync(ct);
+    }
+    public async Task SaveMatchingDecision(int matchingId, string decision, string? reason, string? note, string actor, DateTime atUtc, CancellationToken ct)
+    {
+        db.MatchingDecisions.Add(new CompareShopAPI.Domain.Admin.MatchingDecision { MatchingId = matchingId, Decision = decision, Reason = reason, Note = note, ActorSubject = actor, CreatedAtUtc = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc) });
         await db.SaveChangesAsync(ct);
     }
 
@@ -444,7 +490,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     private static System.Text.Json.JsonElement? Parse(string? value) { if (string.IsNullOrWhiteSpace(value)) return null; using var doc = JsonDocument.Parse(value); return doc.RootElement.Clone(); }
     private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl);
     private static readonly System.Linq.Expressions.Expression<Func<Product, AdminProduct>> ProductDto = x => new AdminProduct(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl);
-    private static readonly System.Linq.Expressions.Expression<Func<CompareShopAPI.Domain.Admin.ProductMatching, AdminMatching>> MatchingDto = x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId);
+    private static readonly System.Linq.Expressions.Expression<Func<CompareShopAPI.Domain.Admin.ProductMatching, AdminMatching>> MatchingDto = x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId) { Status = x.Status };
     private static int BoundSize(int size) => Math.Clamp(size, 1, 100);
     private static int Offset(int page, int size) => (int)Math.Min(int.MaxValue, ((long)Math.Max(1, page) - 1) * BoundSize(size));
     private static async Task<Page<T>> PageOf<T>(IQueryable<T> query, int page, int size, CancellationToken ct)

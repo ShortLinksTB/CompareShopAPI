@@ -743,6 +743,10 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsOutlier")
                         .HasColumnType("bit");
 
+                    b.Property<string>("OutlierReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<int>("PartnerShopId")
                         .HasColumnType("int");
 

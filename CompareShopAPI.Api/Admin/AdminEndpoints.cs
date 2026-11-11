@@ -32,7 +32,10 @@ public static class AdminEndpoints
         admin.MapPut("/shops/{id:int}", (HttpContext c, int id, ShopInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateShop(Subject(c), id, input, ct)));
         admin.MapDelete("/shops/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => { await s.DeleteShop(Subject(c), id, ct); return Results.NoContent(); }));
 
-        admin.MapGet("/offers", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.Offers(Subject(c), ct)));
+        admin.MapGet("/offers", (HttpContext c, int? page, int? pageSize, string? q, int? shopId, int? productId, string? filter, string? sort, int? staleHours, AdminService s, CancellationToken ct) =>
+            Run(() => s.Offers(Subject(c), new(page ?? 1, pageSize ?? 25, q, shopId, productId, filter, sort ?? "attention", staleHours ?? 72), ct)));
+        admin.MapGet("/offers/{id:int}/price-history", (HttpContext c, int id, int? days, AdminService s, CancellationToken ct) =>
+            Run(async () => await s.OfferHistory(Subject(c), id, days ?? 30, ct) is { } points ? Results.Ok(points) : Results.NotFound()));
         admin.MapPost("/offers", async (HttpContext c, OfferImportInput input, AdminService s, CancellationToken ct) =>
         {
             try
@@ -47,6 +50,7 @@ public static class AdminEndpoints
             catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
         });
         admin.MapPatch("/offers/{id:int}", (HttpContext c, int id, OfferInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateOffer(Subject(c), id, input, ct)));
+        admin.MapPatch("/offers/{id:int}/outlier-reason", (HttpContext c, int id, OutlierReasonInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateOfferOutlierReason(Subject(c), id, input.OutlierReason, ct)));
         admin.MapPost("/offers/{id:int}/approve", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.ApproveOffer(Subject(c), id, ct)));
         admin.MapGet("/matching", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.MatchingList(Subject(c), ct)));
         admin.MapPost("/matching/{id:int}/approve", (HttpContext c, int id, MatchingApproval input, AdminService s, CancellationToken ct) => Run(() => s.ApproveMatching(Subject(c), id, input.ProductId, ct)));
@@ -153,6 +157,8 @@ public static class AdminEndpoints
         catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
     }
 }
+
+public sealed record OutlierReasonInput(string? OutlierReason);
 
 public sealed record MatchingApproval(int ProductId);
 public sealed record RoleAssignmentsInput(IReadOnlyList<int> RoleIds);

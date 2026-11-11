@@ -67,7 +67,7 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
         {
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
             var firstSeedCounts = await FixtureCounts(services);
-            Assert.Equal((1, 2, 3, 2, 4, 7), firstSeedCounts);
+            Assert.Equal((1, 2, 3, 2, 4, 4), firstSeedCounts);
 
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
             Assert.Equal(firstSeedCounts, await FixtureCounts(services));

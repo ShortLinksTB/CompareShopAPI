@@ -59,7 +59,7 @@ The worker Deployment template is in `deploy/compareshop-api-workers.yaml`. BHX 
 
 ### SL-1815 disposable matching fixtures (one-off dev Job only)
 
-The API image contains `seed-matching-fixtures` and `cleanup-matching-fixtures` commands for the QC-Tester gate. They are not HTTP routes and run before normal application startup/migrations. Both require `ASPNETCORE_ENVIRONMENT=Development`, `Database__AllowMatchingFixtureSeed=true`, and a connection whose initial catalog is exactly `CompareShop`; they do not apply migrations. Run only from a one-off Job in `compareshop-dev`, referencing the existing API connection Secret with `secretKeyRef` (never copy its value). Seed is transactional and idempotent; cleanup is transactional and deletes only records marked by the `QC-SL1815` slug/name/key/SKU namespace. It keeps `MatchingDecisions` and `AdminAuditLogs` intact. Cleanup order is source mappings, matching rows, offers, products, data sources, shops, then categories.
+The API image contains `seed-matching-fixtures` and `cleanup-matching-fixtures` commands for the QC-Tester gate. They are not HTTP routes and run before normal application startup/migrations. Both require `ASPNETCORE_ENVIRONMENT=Development`, `Database__AllowMatchingFixtureSeed=true`, `Database__MatchingFixtureAllowedServer=mssql.shortlink-infra-dev.svc.cluster.local`, and a connection whose initial catalog is `CompareShop` and server matches that explicit dev allowlist; they do not apply migrations. Run only from a one-off Job in `compareshop-dev`, referencing the existing API connection Secret with `secretKeyRef` (never copy its value). Seed is transactional and idempotent; it appends an exact ID manifest to `AdminAuditLogs`. Cleanup deletes only IDs from the latest successful seed manifest; prefix matches alone never authorize deletion. Manifest/audit rows are retained. Cleanup order is source mappings, matching rows, offers, products, data sources, shops, then categories.
 
 Example Job container settings (fill Secret name/key from the existing `compareshop-api` Deployment's env references; do not print Secret data):
 
@@ -83,6 +83,8 @@ spec:
               value: Development
             - name: Database__AllowMatchingFixtureSeed
               value: "true"
+            - name: Database__MatchingFixtureAllowedServer
+              value: mssql.shortlink-infra-dev.svc.cluster.local
             - name: ConnectionStrings__CompareShopDb
               valueFrom:
                 secretKeyRef:

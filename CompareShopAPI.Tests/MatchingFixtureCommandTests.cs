@@ -1,4 +1,5 @@
 using CompareShopAPI.Api.Admin;
+using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -52,6 +53,16 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
     }
 
     [Fact]
+    public async Task Fixture_commands_require_the_allowlisted_dev_server_even_when_catalog_matches()
+    {
+        var connection = "Server=other-sql.example.test;Database=CompareShop;User Id=sa;Password=test;Encrypt=False";
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => MatchingFixtureCommand.TryRunAsync(
+            ["seed-matching-fixtures"], Environment("Development"), Configuration(true, connection, "mssql.shortlink-infra-dev.svc.cluster.local"),
+            new ServiceCollection().BuildServiceProvider()));
+        Assert.Contains("allowlisted dev SQL server", exception.Message);
+    }
+
+    [Fact]
     public async Task Fixture_command_refuses_an_unreachable_compare_shop_database()
     {
         const string connection = "Server=127.0.0.1,1;Database=CompareShop;User Id=sa;Password=test;Connect Timeout=1;ConnectRetryCount=0;Encrypt=False";
@@ -86,8 +97,21 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
             Assert.Equal(firstSeedCounts, await FixtureCounts(services));
 
+            // Same namespace text is not ownership. This row is created outside the fixture manifest.
+            var unowned = new ProductMatching("QC-SL1815 unowned row", null, DateTime.UtcNow);
+            await using (var db = new CompareShopDbContext(new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options))
+            {
+                db.ProductMatchings.Add(unowned);
+                await db.SaveChangesAsync();
+            }
+
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["cleanup-matching-fixtures"], Environment("Development"), config, services));
-            Assert.Equal((0, 0, 0, 0, 0, 0), await FixtureCounts(services));
+            Assert.Equal((0, 0, 0, 0, 0, 1), await FixtureCounts(services));
+            await using (var db = new CompareShopDbContext(new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options))
+            {
+                db.ProductMatchings.Remove(unowned);
+                await db.SaveChangesAsync();
+            }
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["cleanup-matching-fixtures"], Environment("Development"), config, services));
             Assert.Equal((0, 0, 0, 0, 0, 0), await FixtureCounts(services));
         }
@@ -98,11 +122,12 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
         }
     }
 
-    private static IConfiguration Configuration(bool allow, string connectionString) => new ConfigurationBuilder()
+    private static IConfiguration Configuration(bool allow, string connectionString, string? allowedServer = null) => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Database:AllowMatchingFixtureSeed"] = allow.ToString(),
-            ["ConnectionStrings:CompareShopDb"] = connectionString
+            ["ConnectionStrings:CompareShopDb"] = connectionString,
+            ["Database:MatchingFixtureAllowedServer"] = allowedServer ?? new SqlConnectionStringBuilder(connectionString).DataSource
         })
         .Build();
 

@@ -15,6 +15,9 @@ public static class MatchingFixtureCommand
 {
     private const string Owner = "QC-SL1815";
     private const string Prefix = "qc-sl1815-";
+    private const string ManifestActionSeeded = "fixture.manifest.seeded";
+    private const string ManifestActionCleaned = "fixture.manifest.cleaned";
+    private const string ManifestResourceType = "QC-SL1815-MatchingFixture";
     private static readonly DateTime FixtureTime = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     public static bool IsRequested(string[] args) => args.Length == 1 && args[0] is "seed-matching-fixtures" or "cleanup-matching-fixtures";
@@ -25,8 +28,13 @@ public static class MatchingFixtureCommand
         if (!environment.IsDevelopment()) throw new InvalidOperationException("QC-SL1815 fixtures require ASPNETCORE_ENVIRONMENT=Development.");
         if (!configuration.GetValue<bool>("Database:AllowMatchingFixtureSeed")) throw new InvalidOperationException("Fixture command is disabled; explicitly set Database:AllowMatchingFixtureSeed=true for this one-off Job.");
         var cs = configuration.GetConnectionString("CompareShopDb");
-        if (string.IsNullOrWhiteSpace(cs) || !string.Equals(new SqlConnectionStringBuilder(cs).InitialCatalog, "CompareShop", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("QC-SL1815 fixtures require a connection targeting only the CompareShop database.");
+        var allowedServer = configuration["Database:MatchingFixtureAllowedServer"]?.Trim();
+        if (string.IsNullOrWhiteSpace(cs) || string.IsNullOrWhiteSpace(allowedServer))
+            throw new InvalidOperationException("QC-SL1815 fixtures require an explicit dev SQL server allowlist and CompareShop connection.");
+        var target = new SqlConnectionStringBuilder(cs);
+        if (!string.Equals(target.InitialCatalog, "CompareShop", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(NormalizeServer(target.DataSource), NormalizeServer(allowedServer), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("QC-SL1815 fixtures require the allowlisted dev SQL server and CompareShop database.");
 
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CompareShopDbContext>();
@@ -49,8 +57,15 @@ public static class MatchingFixtureCommand
 
     private static async Task<object> Seed(CompareShopDbContext db)
     {
-        var existing = await db.DataSources.Where(x => x.Key.StartsWith(Prefix)).Select(x => x.Id).ToArrayAsync();
-        if (existing.Length > 0) return new { alreadySeeded = true, dataSourceIds = existing };
+        var latest = await LatestManifest(db);
+        if (latest?.Action == ManifestActionSeeded)
+            return new { alreadySeeded = true, manifest = latest.Manifest };
+
+        if (await db.DataSources.AnyAsync(x => x.Key.StartsWith(Prefix))
+            || await db.Categories.AnyAsync(x => x.Slug.StartsWith(Prefix))
+            || await db.PartnerShops.AnyAsync(x => x.Slug.StartsWith(Prefix))
+            || await db.Products.AnyAsync(x => x.Slug.StartsWith(Prefix)))
+            throw new InvalidOperationException("QC-SL1815 namespace is already occupied without an ownership manifest; refusing to seed.");
 
         var category = new Category { Slug = Prefix + "laptop", Name = Owner + " disposable laptop category", IsActive = true };
         var shopA = new PartnerShop { Slug = Prefix + "shop-a", Name = Owner + " Shop A", WebsiteUrl = "https://shop-a.example.test", IsActive = true };
@@ -93,27 +108,61 @@ public static class MatchingFixtureCommand
         var likelyNew = new ProductMatching(Owner + " NOVEL LAPTOP AuroraBook Z1 with 16GB RAM and 1TB SSD", "Aurora", FixtureTime);
         db.ProductMatchings.AddRange(mA, mB, nullable, missingMapping, linked, missingShopMatching, likelyNew);
         await db.SaveChangesAsync();
-        return new { alreadySeeded = false, categoryIds = new[] { category.Id }, shopIds = new[] { shopA.Id, shopB.Id }, productIds = new[] { product.Id }, dataSourceIds = new[] { sourceA.Id, sourceB.Id, sourceNoShop.Id }, offerIds = new[] { offerA.Id, offerB.Id }, mappingIds = new[] { mappingA.Id, mappingB.Id, mappingNoOffer.Id, mappingLinked.Id }, matchingIds = new[] { mA.Id, mB.Id, nullable.Id, missingMapping.Id, linked.Id, missingShopMatching.Id, likelyNew.Id } };
+        var manifest = new FixtureManifest(
+            [category.Id], [shopA.Id, shopB.Id], [product.Id], [sourceA.Id, sourceB.Id, sourceNoShop.Id],
+            [offerA.Id, offerB.Id], [mappingA.Id, mappingB.Id, mappingNoOffer.Id, mappingLinked.Id],
+            [mA.Id, mB.Id, nullable.Id, missingMapping.Id, linked.Id, missingShopMatching.Id, likelyNew.Id]);
+        await WriteManifest(db, ManifestActionSeeded, manifest);
+        return new { alreadySeeded = false, manifest };
     }
 
     private static async Task<object> Cleanup(CompareShopDbContext db)
     {
-        var sourceIds = await db.DataSources.Where(x => x.Key.StartsWith(Prefix)).Select(x => x.Id).ToArrayAsync();
-        var matchingIds = await db.ProductMatchings.Where(x => x.Name.StartsWith(Owner) || (x.DataSourceId != null && sourceIds.Contains(x.DataSourceId.Value))).Select(x => x.Id).ToArrayAsync();
-        var mappingIds = await db.SourceItemMappings.Where(x => sourceIds.Contains(x.DataSourceId) || x.ExternalSku.StartsWith(Owner)).Select(x => x.Id).ToArrayAsync();
-        var offerIds = await db.ProductOffers.Where(x => x.Product.Slug.StartsWith(Prefix) || x.PartnerShop.Slug.StartsWith(Prefix)).Select(x => x.Id).ToArrayAsync();
-        var productIds = await db.Products.Where(x => x.Slug.StartsWith(Prefix)).Select(x => x.Id).ToArrayAsync();
-        var categoryIds = await db.Categories.Where(x => x.Slug.StartsWith(Prefix)).Select(x => x.Id).ToArrayAsync();
-        var shopIds = await db.PartnerShops.Where(x => x.Slug.StartsWith(Prefix)).Select(x => x.Id).ToArrayAsync();
+        var latest = await LatestManifest(db);
+        if (latest?.Action != ManifestActionSeeded)
+            return new { alreadyClean = true, manifest = (FixtureManifest?)null };
+        var manifest = latest.Manifest;
 
-        // Keep MatchingDecision/AdminAuditLog history. Delete only fixture-owned rows, from dependents to roots.
-        await db.SourceItemMappings.Where(x => mappingIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.ProductMatchings.Where(x => matchingIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.ProductOffers.Where(x => offerIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.Products.Where(x => productIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.DataSources.Where(x => sourceIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.PartnerShops.Where(x => shopIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.Categories.Where(x => categoryIds.Contains(x.Id)).ExecuteDeleteAsync();
-        return new { categoryIds, shopIds, productIds, dataSourceIds = sourceIds, offerIds, mappingIds, matchingIds };
+        // Delete only IDs captured by this command's append-only ownership manifest.
+        // Keep audit/history rows, including the manifest events themselves.
+        await db.SourceItemMappings.Where(x => manifest.MappingIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.ProductMatchings.Where(x => manifest.MatchingIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.ProductOffers.Where(x => manifest.OfferIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.Products.Where(x => manifest.ProductIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.DataSources.Where(x => manifest.DataSourceIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.PartnerShops.Where(x => manifest.ShopIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.Categories.Where(x => manifest.CategoryIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await WriteManifest(db, ManifestActionCleaned, manifest);
+        return new { alreadyClean = false, manifest };
     }
+
+    private static async Task<(string Action, FixtureManifest Manifest)?> LatestManifest(CompareShopDbContext db)
+    {
+        var row = await db.AdminAuditLogs.Where(x => x.ActorSubject == Owner && x.ResourceType == ManifestResourceType && x.ResourceId == Owner)
+            .OrderByDescending(x => x.Id).Select(x => new { x.Action, x.AfterJson }).FirstOrDefaultAsync();
+        if (row is null) return null;
+        if (row.Action is not (ManifestActionSeeded or ManifestActionCleaned) || string.IsNullOrWhiteSpace(row.AfterJson))
+            throw new InvalidOperationException("QC-SL1815 ownership manifest is invalid; refusing fixture operation.");
+        var manifest = JsonSerializer.Deserialize<FixtureManifest>(row.AfterJson)
+            ?? throw new InvalidOperationException("QC-SL1815 ownership manifest is invalid; refusing fixture operation.");
+        return (row.Action, manifest);
+    }
+
+    private static async Task WriteManifest(CompareShopDbContext db, string action, FixtureManifest manifest)
+    {
+        db.AdminAuditLogs.Add(new AdminAuditLog
+        {
+            ActorSubject = Owner, Action = action, ResourceType = ManifestResourceType, ResourceId = Owner,
+            CreatedAtUtc = DateTime.UtcNow, AfterJson = JsonSerializer.Serialize(manifest)
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private static string NormalizeServer(string server)
+    {
+        server = server.Trim();
+        return server.StartsWith("tcp:", StringComparison.OrdinalIgnoreCase) ? server[4..].TrimEnd('/') : server.TrimEnd('/');
+    }
+
+    private sealed record FixtureManifest(int[] CategoryIds, int[] ShopIds, int[] ProductIds, int[] DataSourceIds, int[] OfferIds, int[] MappingIds, int[] MatchingIds);
 }

@@ -1,5 +1,6 @@
 using CompareShopAPI.Api.Auth;
 using CompareShopAPI.Api.Catalog;
+using CompareShopAPI.Api.Admin;
 using CompareShopAPI.Api.Health;
 using CompareShopAPI.Api.Observability;
 using CompareShopAPI.Infrastructure.Persistence;
@@ -15,7 +16,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using CompareShopAPI.Api.RateLimiting;
-using CompareShopAPI.Api.Admin;
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Infrastructure.Admin;
@@ -28,7 +28,8 @@ using CompareShopAPI.Application.Files;
 using CompareShopAPI.Infrastructure.Files;
 
 var seedCatalogRequested = CatalogSeedCommand.IsRequested(args);
-var builder = WebApplication.CreateBuilder(seedCatalogRequested ? Array.Empty<string>() : args);
+var matchingFixtureRequested = MatchingFixtureCommand.IsRequested(args);
+var builder = WebApplication.CreateBuilder(seedCatalogRequested || matchingFixtureRequested ? Array.Empty<string>() : args);
 builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlServer(
     builder.Configuration.GetConnectionString("CompareShopDb") ?? "", sql => sql.CommandTimeout(5)));
 builder.Services.AddSingleton(TimeProvider.System);
@@ -110,6 +111,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddCompareShopTelemetry(builder.Configuration);
 var app = builder.Build();
 if (await CatalogSeedCommand.TryRunAsync(args, app.Environment, app.Configuration, app.Services, app.Logger)) return;
+if (await MatchingFixtureCommand.TryRunAsync(args, app.Environment, app.Configuration, app.Services)) return;
 app.UseCors("UiClients");
 app.UseAuthentication();
 app.UseMiddleware<AdminIdentityProvisioningMiddleware>();

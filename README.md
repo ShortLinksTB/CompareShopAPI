@@ -56,3 +56,38 @@ Price history is append-only. `PriceHistoryService.RecordMinimum` records the cu
 The `compareshop-api-workers` executable is deployed separately from the API. Its image alone includes Microsoft.Playwright and its matching Chromium installation. The worker processes the single BHX `/bia` source at a 72-hour cadence, records durable sync jobs, imports only manually mapped SKUs, and uses the existing public offer visibility and price-history rules. `GET /admin/sync-jobs` requires `sync_jobs.read`; retrying a failed or partial job through `POST /admin/sync-jobs/{id}/retry` requires `sync_jobs.execute`.
 
 The worker Deployment template is in `deploy/compareshop-api-workers.yaml`. BHX egress is enforced by a Worker-owned loopback forward proxy: it accepts only HTTPS `CONNECT www.bachhoaxanh.com:443` and validates the exact IDN hostname and port before opening an upstream connection. Chromium has no direct proxy bypass; QUIC and WebRTC are disabled, including non-proxied WebRTC UDP. The scraper also validates every `HttpClient` request and redirect and keeps Playwright interception for all requests as defense in depth. The worker does not rely on Cilium or Kubernetes NetworkPolicy for egress filtering. Apply the ingestion migration with the existing `Database__ApplyMigrations=true` rollout mechanism. The worker uses the `ConnectionStrings__CompareShopDb` secret and does not need a Kubernetes API token. SQL-backed tests use the disposable Testcontainers.MsSql fixture.
+
+### SL-1815 disposable matching fixtures (one-off dev Job only)
+
+The API image contains `seed-matching-fixtures` and `cleanup-matching-fixtures` commands for the QC-Tester gate. They are not HTTP routes and run before normal application startup/migrations. Both require `ASPNETCORE_ENVIRONMENT=Development`, `Database__AllowMatchingFixtureSeed=true`, and a connection whose initial catalog is exactly `CompareShop`; they do not apply migrations. Run only from a one-off Job in `compareshop-dev`, referencing the existing API connection Secret with `secretKeyRef` (never copy its value). Seed is transactional and idempotent; cleanup is transactional and deletes only records marked by the `QC-SL1815` slug/name/key/SKU namespace. It keeps `MatchingDecisions` and `AdminAuditLogs` intact. Cleanup order is source mappings, matching rows, offers, products, data sources, shops, then categories.
+
+Example Job container settings (fill Secret name/key from the existing `compareshop-api` Deployment's env references; do not print Secret data):
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qc-sl1815-fixtures
+  namespace: compareshop-dev
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: fixtures
+          image: ghcr.io/shortlinkstb/compareshop-api:<merged-commit-sha>
+          args: ["seed-matching-fixtures"] # or cleanup-matching-fixtures
+          env:
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Development
+            - name: Database__AllowMatchingFixtureSeed
+              value: "true"
+            - name: ConnectionStrings__CompareShopDb
+              valueFrom:
+                secretKeyRef:
+                  name: <existing-api-secret>
+                  key: <existing-connection-string-key>
+```
+
+Commands: apply the one-off manifest; `kubectl --context default -n compareshop-dev wait --for=condition=complete job/qc-sl1815-fixtures --timeout=180s`; read only its pod logs for JSON ownership, before/after counts and created IDs; delete the Job after completion. For the acceptance run, execute seed twice (second result reports `alreadySeeded`) and cleanup twice (second cleanup reports empty IDs), then verify all relevant counts return to their initial values and no `QC-SL1815` rows remain. The Job must be deleted whether it succeeds or fails. Never run this in prd.

@@ -52,7 +52,8 @@ public sealed class DataSource
     public void MarkError() => State = DataSourceState.Error;
     public static bool IsSupportedCategory(string key, string categoryPath) =>
         (string.Equals(key, BhxKey, StringComparison.Ordinal) && categoryPath == "/bia") ||
-        (CellphoneSCategories.TryGetValue(key, out var expectedPath) && categoryPath == expectedPath);
+        (CellphoneSCategories.TryGetValue(key, out var expectedPath) && categoryPath == expectedPath) ||
+        (key.StartsWith("qc-sl1815-", StringComparison.Ordinal) && categoryPath == "/qc-sl1815/laptop");
 }
 
 public sealed class SyncJob

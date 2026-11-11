@@ -155,10 +155,15 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             db.AdminUserRoles.Add(new() { UserId = reader.Id, RoleId = role.Id });
             var source = await db.DataSources.FirstAsync(x => x.Key == DataSource.BhxKey);
             var mapping = new SourceItemMapping(source.Id, "matching-sku", "Mác Air", "Apple");
-            db.SourceItemMappings.Add(mapping);
+            mapping.UpdateSnapshot("Mác Air", "Apple", new ScrapedOffer("matching-sku", "Mác Air", "Apple", 25000000,
+                "https://shop.example/item", "https://shop.example/item.jpg", 27000000,
+                new Dictionary<string, string> { ["RAM"] = "16GB" }));
+            var mappingWithoutOffer = new SourceItemMapping(source.Id, "matching-no-offer", "Another laptop", "Apple");
+            db.SourceItemMappings.AddRange(mapping, mappingWithoutOffer);
             var first = ProductMatching.ForSourceItem("Mác Air", "Apple", DateTime.UtcNow, source.Id, "matching-sku");
             var second = new ProductMatching("Other pending", null, DateTime.UtcNow);
-            db.ProductMatchings.AddRange(first, second);
+            var withoutOffer = ProductMatching.ForSourceItem("Another laptop", "Apple", DateTime.UtcNow, source.Id, "matching-no-offer");
+            db.ProductMatchings.AddRange(first, second, withoutOffer);
             await db.SaveChangesAsync();
             var service = new AdminService(new EfAdminData(db, TimeProvider.System));
             Assert.All(await service.MatchingList("matching-reader", default), x => Assert.Empty(x.Candidates));
@@ -169,10 +174,23 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             var inactive = new Product { Slug = "inactive", Name = "Mac Air", Brand = "Apple", CategoryId = category.Id, IsActive = false };
             db.Products.AddRange(best, fallback, inactive);
             await db.SaveChangesAsync();
+            var shop = new PartnerShop { Slug = "matching-shop", Name = "Matching Shop", WebsiteUrl = "https://shop.example" };
+            db.PartnerShops.Add(shop);
+            await db.SaveChangesAsync();
+            source.AttachPartnerShop(shop.Id);
+            var offer = new ProductOffer
+            {
+                ProductId = best.Id, PartnerShopId = shop.Id, PriceVnd = 25000000,
+                Url = "https://shop.example/item", UpdatedAtUtc = DateTime.UtcNow
+            };
+            db.ProductOffers.Add(offer);
+            await db.SaveChangesAsync();
+            mapping.SetOffer(offer.Id);
+            await db.SaveChangesAsync();
             counter.ProductReads = 0;
             var ranked = await service.MatchingList("matching-reader", default);
             Assert.Equal(1, counter.ProductReads);
-            Assert.Equal(2, ranked.Count);
+            Assert.Equal(3, ranked.Count);
             Assert.Equal(new[] { best.Id, fallback.Id }, ranked[0].Candidates.Select(x => x.ProductId));
             Assert.All(ranked, x => Assert.DoesNotContain(x.Candidates, c => c.ProductId == inactive.Id));
 
@@ -194,6 +212,26 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             Assert.True(entry.TryGetProperty("createdAtUtc", out _));
             Assert.True(entry.TryGetProperty("externalSku", out _));
             Assert.True(entry.TryGetProperty("dataSourceId", out _));
+            Assert.Equal(source.Id, entry.GetProperty("dataSourceId").GetInt32());
+            Assert.Equal("Bách Hóa Xanh", entry.GetProperty("source").GetString());
+            var sourceDetail = entry.GetProperty("sourceDetail");
+            Assert.Equal("{\"RAM\":\"16GB\"}", sourceDetail.GetProperty("specificationsJson").GetString());
+            Assert.Equal("https://shop.example/item.jpg", sourceDetail.GetProperty("imageUrl").GetString());
+            Assert.Equal(27000000, sourceDetail.GetProperty("originalPriceVnd").GetInt32());
+            Assert.Equal(source.Id, sourceDetail.GetProperty("dataSourceId").GetInt32());
+            Assert.Equal(25000000, sourceDetail.GetProperty("priceVnd").GetInt32());
+            Assert.Equal("Bách Hóa Xanh", sourceDetail.GetProperty("dataSourceDisplayName").GetString());
+            Assert.Equal(shop.Id, sourceDetail.GetProperty("partnerShopId").GetInt32());
+            Assert.Equal("Matching Shop", sourceDetail.GetProperty("partnerShopDisplayName").GetString());
+            var noOfferDetail = json.RootElement.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("id").GetInt32() == withoutOffer.Id).GetProperty("sourceDetail");
+            Assert.Equal(source.Id, noOfferDetail.GetProperty("dataSourceId").GetInt32());
+            Assert.Equal(JsonValueKind.Null, noOfferDetail.GetProperty("priceVnd").ValueKind);
+            Assert.Equal(JsonValueKind.Null, noOfferDetail.GetProperty("originalPriceVnd").ValueKind);
+            var missingRelations = json.RootElement.GetProperty("items").EnumerateArray().Single(x => x.GetProperty("id").GetInt32() == second.Id).GetProperty("sourceDetail");
+            Assert.Equal(JsonValueKind.Null, missingRelations.GetProperty("specificationsJson").ValueKind);
+            Assert.Equal(JsonValueKind.Null, missingRelations.GetProperty("priceVnd").ValueKind);
+            Assert.Equal(JsonValueKind.Null, missingRelations.GetProperty("dataSourceId").ValueKind);
+            Assert.Equal(JsonValueKind.Null, missingRelations.GetProperty("partnerShopDisplayName").ValueKind);
             var candidate = entry.GetProperty("candidates")[0];
             Assert.Equal(best.Id, candidate.GetProperty("productId").GetInt32());
             Assert.Equal("Mac Air", candidate.GetProperty("name").GetString());
@@ -201,9 +239,10 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             Assert.True(candidate.GetProperty("score").GetDouble() >= 0d);
             Assert.True(candidate.TryGetProperty("level", out _));
             Assert.True(candidate.TryGetProperty("differences", out _));
-            Assert.Equal(2, await db.ProductMatchings.CountAsync(x => !x.IsApproved && x.ProductId == null));
-            Assert.Null((await db.SourceItemMappings.AsNoTracking().SingleAsync()).ProductId);
+            Assert.Equal(3, await db.ProductMatchings.CountAsync(x => !x.IsApproved && x.ProductId == null));
+            Assert.Null((await db.SourceItemMappings.AsNoTracking().SingleAsync(x => x.ExternalSku == "matching-sku")).ProductId);
             Assert.Empty(await db.AdminAuditLogs.AsNoTracking().ToListAsync());
+            Assert.Equal(1, await db.ProductOffers.CountAsync());
             Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync($"/admin/matching/{first.Id}/approve", new { productId = best.Id })).StatusCode);
             // Grant approval and deliberately choose a candidate other than rank one.
             var approve = await db.AdminPermissions.SingleAsync(x => x.Key == AdminPermissions.MatchingApprove);
@@ -213,10 +252,10 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             await db.Entry(first).ReloadAsync();
             Assert.True(first.IsApproved);
             Assert.Equal(fallback.Id, first.ProductId);
-            Assert.Equal(fallback.Id, (await db.SourceItemMappings.AsNoTracking().SingleAsync()).ProductId);
+            Assert.Equal(fallback.Id, (await db.SourceItemMappings.AsNoTracking().SingleAsync(x => x.ExternalSku == "matching-sku")).ProductId);
             Assert.False(second.IsApproved);
             Assert.Single(await db.AdminAuditLogs.AsNoTracking().Where(x => x.Action == "approve" && x.ResourceType == "matching").ToListAsync());
-            Assert.Single(await service.MatchingList("matching-reader", default));
+            Assert.Equal(2, (await service.MatchingList("matching-reader", default)).Count);
             Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/admin/matching/{second.Id}/skip", new { reason = "duplicate", note = "same listing" })).StatusCode);
             using (var skippedQueue = JsonDocument.Parse(await (await client.GetAsync("/admin/matching?status=skipped")).Content.ReadAsStringAsync()))
             {
@@ -225,11 +264,11 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             }
             Assert.Equal(HttpStatusCode.OK, (await client.PostAsync($"/admin/matching/{second.Id}/restore", null)).StatusCode);
             using (var restoredQueue = JsonDocument.Parse(await (await client.GetAsync("/admin/matching")).Content.ReadAsStringAsync()))
-                Assert.Equal(1, restoredQueue.RootElement.GetProperty("items").GetArrayLength());
+                Assert.Equal(2, restoredQueue.RootElement.GetProperty("items").GetArrayLength());
             await service.ApproveMatching("matching-reader", second.Id, best.Id, default);
             counter.ProductReads = 0;
-            Assert.Empty(await service.MatchingList("matching-reader", default));
-            Assert.Equal(0, counter.ProductReads);
+            Assert.Single(await service.MatchingList("matching-reader", default));
+            Assert.Equal(1, counter.ProductReads);
             Assert.Equal(1, await db.MatchingDecisions.AsNoTracking().CountAsync(x => x.MatchingId == second.Id && x.Decision == "skipped"));
             Assert.Equal(1, await db.MatchingDecisions.AsNoTracking().CountAsync(x => x.MatchingId == second.Id && x.Decision == "restored"));
             Assert.Equal(1, await db.MatchingDecisions.AsNoTracking().CountAsync(x => x.MatchingId == second.Id && x.Decision == "approved"));

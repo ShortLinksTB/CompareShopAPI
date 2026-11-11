@@ -33,6 +33,11 @@ public sealed class MatchingCandidateRanker
         return "review";
     }
 
+    public static IReadOnlyList<AdminMatchingCandidate> ApplyVerdictGuard(string verdict, IReadOnlyList<AdminMatchingCandidate> candidates) =>
+        verdict == "likely_skip"
+            ? candidates.Select(candidate => candidate.Level == "confident" ? candidate with { Level = "review" } : candidate).ToArray()
+            : candidates;
+
     private static Ranked Score(LaptopAttributes source, Prepared candidate)
     {
         var target = candidate.Attributes;

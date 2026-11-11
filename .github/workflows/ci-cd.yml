@@ -65,6 +65,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.workers
+          network: host
+          allow: network.host
           load: true
           tags: compareshop-api-workers:runtime-check
 

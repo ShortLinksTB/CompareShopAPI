@@ -52,6 +52,20 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
     }
 
     [Fact]
+    public async Task Fixture_command_refuses_an_unreachable_compare_shop_database()
+    {
+        const string connection = "Server=127.0.0.1,1;Database=CompareShop;User Id=sa;Password=test;Connect Timeout=1;ConnectRetryCount=0;Encrypt=False";
+        await using var services = new ServiceCollection()
+            .AddDbContext<CompareShopDbContext>(options => options.UseSqlServer(connection))
+            .BuildServiceProvider();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => MatchingFixtureCommand.TryRunAsync(
+            ["seed-matching-fixtures"], Environment("Development"), Configuration(true, connection), services));
+
+        Assert.Contains("unreachable", exception.Message);
+    }
+
+    [Fact]
     public async Task Seed_and_cleanup_are_idempotent_and_remove_only_fixture_rows()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = "CompareShop" }.ConnectionString;

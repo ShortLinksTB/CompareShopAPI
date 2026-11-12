@@ -19,6 +19,7 @@ public static class MatchingFixtureCommand
     private const string ManifestActionSeeded = "fixture.manifest.seeded";
     private const string ManifestActionCleaned = "fixture.manifest.cleaned";
     private const string ManifestResourceType = "QC-SL1815-MatchingFixture";
+    private const int CurrentManifestVersion = 2;
     private static readonly DateTime FixtureTime = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     public static bool IsRequested(string[] args) => args.Length == 1 && args[0] is "seed-matching-fixtures" or "cleanup-matching-fixtures";
@@ -81,7 +82,14 @@ public static class MatchingFixtureCommand
     {
         var latest = await LatestManifest(db);
         if (latest.HasValue && latest.Value.Action == ManifestActionSeeded)
-            return new { alreadySeeded = true, manifest = latest.Value.Manifest };
+        {
+            if (latest.Value.Manifest.Version >= CurrentManifestVersion)
+                return new { alreadySeeded = true, manifest = latest.Value.Manifest };
+
+            var expanded = await ExpandFixtures(db, latest.Value.Manifest);
+            await WriteManifest(db, ManifestActionSeeded, expanded);
+            return new { alreadySeeded = false, expanded = true, manifest = expanded };
+        }
 
         if (await db.DataSources.AnyAsync(x => x.Key.StartsWith(Prefix))
             || await db.Categories.AnyAsync(x => x.Slug.StartsWith(Prefix))
@@ -138,9 +146,59 @@ public static class MatchingFixtureCommand
         var manifest = new FixtureManifest(
             [], [shopA.Id, shopB.Id], [product.Id], [sourceA.Id, sourceB.Id, sourceNoShop.Id],
             [offerA.Id, offerB.Id], [mappingA.Id, mappingB.Id, mappingNoOffer.Id, mappingLinked.Id],
-            [mA.Id, mB.Id, nullable.Id, missingMapping.Id, linked.Id, missingShopMatching.Id, likelyNew.Id]);
+            [mA.Id, mB.Id, nullable.Id, missingMapping.Id, linked.Id, missingShopMatching.Id, likelyNew.Id], 1);
+        manifest = await ExpandFixtures(db, manifest);
         await WriteManifest(db, ManifestActionSeeded, manifest);
         return new { alreadySeeded = false, manifest };
+    }
+
+    private static async Task<FixtureManifest> ExpandFixtures(CompareShopDbContext db, FixtureManifest manifest)
+    {
+        if (manifest.Version >= CurrentManifestVersion) return manifest;
+        var sourceId = manifest.DataSourceIds.FirstOrDefault();
+        if (sourceId <= 0 || !await db.DataSources.AnyAsync(x => x.Id == sourceId))
+            throw new InvalidOperationException("QC-SL1815 manifest has no usable data source for additive fixture expansion.");
+
+        var groupName = Owner + " ASUS VivoBook 15 X1504ZA Core i5-13420H RTX 4050 16GB RAM 1TB SSD 15.6 inch";
+        var createName = Owner + " ASUS VivoBook 15 X1504ZA Core i5-13420H RTX 4050 8GB RAM 512GB SSD 15.6 inch";
+        var groupSkus = new[] { Owner + "-v2-group-a", Owner + "-v2-group-b" };
+        var createSku = Owner + "-v2-create-product";
+        var skus = groupSkus.Append(createSku).ToArray();
+        if (await db.SourceItemMappings.AnyAsync(x => x.DataSourceId == sourceId && skus.Contains(x.ExternalSku))
+            || await db.ProductMatchings.AnyAsync(x => x.DataSourceId == sourceId && skus.Contains(x.ExternalSku)))
+            throw new InvalidOperationException("QC-SL1815 expansion namespace is occupied by rows absent from its ownership manifest.");
+
+        var mappings = new List<SourceItemMapping>();
+        foreach (var sku in skus)
+        {
+            var isCreateScenario = sku == createSku;
+            var fixtureName = isCreateScenario ? createName : groupName;
+            var ram = isCreateScenario ? "8GB" : "16GB";
+            var ssd = isCreateScenario ? "512GB" : "1TB";
+            var mapping = new SourceItemMapping(sourceId, sku, fixtureName, "ASUS");
+            mapping.UpdateSnapshot(fixtureName, "ASUS", new ScrapedOffer(sku, fixtureName, "ASUS", 15990000,
+                "https://shop-a.example.test/" + sku, null, null,
+                new Dictionary<string, string> { ["ram"] = ram, ["ssd"] = ssd }, "in_stock"));
+            mappings.Add(mapping);
+        }
+        db.SourceItemMappings.AddRange(mappings);
+        await db.SaveChangesAsync();
+
+        var matchings = new List<ProductMatching>();
+        foreach (var sku in skus)
+        {
+            var matchingName = sku == createSku ? createName : groupName;
+            matchings.Add(ProductMatching.ForSourceItem(matchingName, "ASUS", FixtureTime, sourceId, sku));
+        }
+        db.ProductMatchings.AddRange(matchings);
+        await db.SaveChangesAsync();
+
+        return manifest with
+        {
+            MappingIds = manifest.MappingIds.Concat(mappings.Select(x => x.Id)).ToArray(),
+            MatchingIds = manifest.MatchingIds.Concat(matchings.Select(x => x.Id)).ToArray(),
+            Version = CurrentManifestVersion
+        };
     }
 
     private static async Task<object> Cleanup(CompareShopDbContext db)
@@ -221,5 +279,5 @@ public static class MatchingFixtureCommand
             : server;
     }
 
-    private sealed record FixtureManifest(int[] CategoryIds, int[] ShopIds, int[] ProductIds, int[] DataSourceIds, int[] OfferIds, int[] MappingIds, int[] MatchingIds);
+    private sealed record FixtureManifest(int[] CategoryIds, int[] ShopIds, int[] ProductIds, int[] DataSourceIds, int[] OfferIds, int[] MappingIds, int[] MatchingIds, int Version = 1);
 }

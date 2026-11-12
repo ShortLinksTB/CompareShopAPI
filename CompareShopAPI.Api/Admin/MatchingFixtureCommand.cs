@@ -161,7 +161,12 @@ public static class MatchingFixtureCommand
     private static string NormalizeServer(string server)
     {
         server = server.Trim();
-        return server.StartsWith("tcp:", StringComparison.OrdinalIgnoreCase) ? server[4..].TrimEnd('/') : server.TrimEnd('/');
+        if (server.StartsWith("tcp:", StringComparison.OrdinalIgnoreCase)) server = server[4..];
+        server = server.Trim().TrimEnd('/');
+        const string defaultSqlPort = ",1433";
+        return server.EndsWith(defaultSqlPort, StringComparison.OrdinalIgnoreCase)
+            ? server[..^defaultSqlPort.Length]
+            : server;
     }
 
     private sealed record FixtureManifest(int[] CategoryIds, int[] ShopIds, int[] ProductIds, int[] DataSourceIds, int[] OfferIds, int[] MappingIds, int[] MatchingIds);

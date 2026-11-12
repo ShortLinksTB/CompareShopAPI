@@ -333,6 +333,34 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
             await using (var db = new CompareShopDbContext(options))
                 await db.AdminAuditLogs.Where(x => x.Id == malformedManifestAuditId).ExecuteDeleteAsync();
 
+            long emptyManifestAuditId;
+            var countsBeforeEmptyManifestCleanup = await FixtureCounts(services);
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var latestSeed = await db.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+                    .OrderByDescending(x => x.Id).FirstAsync();
+                var explicitlyEmpty = JsonNode.Parse(latestSeed.AfterJson!)!.AsObject();
+                explicitlyEmpty["SyncJobIds"] = JsonSerializer.SerializeToNode(Array.Empty<int>());
+                var row = new AdminAuditLog
+                {
+                    ActorSubject = "QC-SL1815", Action = "fixture.manifest.seeded", ResourceType = "QC-SL1815-MatchingFixture",
+                    ResourceId = "QC-SL1815", CreatedAtUtc = DateTime.UtcNow, AfterJson = explicitlyEmpty.ToJsonString()
+                };
+                db.AdminAuditLogs.Add(row);
+                await db.SaveChangesAsync();
+                emptyManifestAuditId = row.Id;
+            }
+            var emptyManifestFailure = await Assert.ThrowsAsync<InvalidOperationException>(() => MatchingFixtureCommand.TryRunAsync(
+                ["cleanup-matching-fixtures"], Environment("Development"), config, services));
+            Assert.Contains("manifest does not match", emptyManifestFailure.Message);
+            Assert.Equal(countsBeforeEmptyManifestCleanup, await FixtureCounts(services));
+            await using (var db = new CompareShopDbContext(options))
+            {
+                Assert.Equal(4, await db.SyncJobs.CountAsync(x => x.Id == rootJobId || x.Id == runningJobId || x.Id == retryJobId || x.Id == finalRetryJobId));
+                Assert.True(await db.DataSources.AnyAsync(x => x.Id == sourceId));
+                await db.AdminAuditLogs.Where(x => x.Id == emptyManifestAuditId).ExecuteDeleteAsync();
+            }
+
             var rollbackServices = new ServiceCollection()
                 .AddDbContext<CompareShopDbContext>(builder => builder.UseSqlServer(connection).AddInterceptors(new FailCleanedManifestInterceptor()))
                 .BuildServiceProvider();

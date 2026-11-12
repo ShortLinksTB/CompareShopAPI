@@ -222,7 +222,7 @@ public static class MatchingFixtureCommand
         var syncJobs = await DiscoverFixtureSyncJobs(db, manifest);
         var recordedSyncJobIds = manifest.SyncJobIds ?? [];
         if (recordedSyncJobIds.Any(x => x <= 0) || recordedSyncJobIds.Distinct().Count() != recordedSyncJobIds.Length ||
-            (recordedSyncJobIds.Length > 0 && !recordedSyncJobIds.ToHashSet().SetEquals(syncJobs.Select(x => x.Id))))
+            (manifest.SyncJobIds is not null && !recordedSyncJobIds.ToHashSet().SetEquals(syncJobs.Select(x => x.Id))))
             throw new InvalidOperationException("QC-SL1815 SyncJob manifest does not match the complete fixture-source retry-chain closure; refusing cleanup.");
         var discoveredJobIds = syncJobs.Select(x => x.Id).ToArray();
         var beforeNonFixtureJobIds = await db.SyncJobs.AsNoTracking()

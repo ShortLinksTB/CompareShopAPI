@@ -10,6 +10,8 @@ using CompareShopAPI.Api.UserCommerce;
 using CompareShopAPI.Application.UserCommerce;
 using CompareShopAPI.Infrastructure.UserCommerce;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Protocols;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
@@ -118,7 +120,22 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
         ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
         NameClaimType = "sub"
     };
-    if (!string.IsNullOrWhiteSpace(authority)) options.Authority = authority;
+    if (!string.IsNullOrWhiteSpace(authority))
+    {
+        var jwksAddress = $"{authority.TrimEnd('/')}/api/v1/auth/jwks";
+        var documentRetriever = new HttpDocumentRetriever(options.Backchannel)
+        {
+            RequireHttps = options.RequireHttpsMetadata
+        };
+        options.ConfigurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
+            jwksAddress,
+            new AuthApiJwksConfigurationRetriever(issuer!),
+            documentRetriever)
+        {
+            AutomaticRefreshInterval = TimeSpan.FromMinutes(5),
+            RefreshInterval = TimeSpan.FromMinutes(1)
+        };
+    }
 });
 builder.Services.AddAuthorization(options =>
 {

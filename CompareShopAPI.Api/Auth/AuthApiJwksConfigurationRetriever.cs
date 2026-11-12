@@ -39,7 +39,11 @@ public static class AuthApiJwtBearerOptions
             options.ConfigurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
                 jwksUri,
                 new AuthApiJwksConfigurationRetriever(issuer),
-                documentRetriever);
+                documentRetriever)
+            {
+                AutomaticRefreshInterval = TimeSpan.FromMinutes(5),
+                RefreshInterval = TimeSpan.FromMinutes(1)
+            };
         }
         else if (!string.IsNullOrWhiteSpace(authority))
         {

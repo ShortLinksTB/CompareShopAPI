@@ -10,7 +10,6 @@ using CompareShopAPI.Api.UserCommerce;
 using CompareShopAPI.Application.UserCommerce;
 using CompareShopAPI.Infrastructure.UserCommerce;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Protocols;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
@@ -102,9 +101,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
     // With no issuer/audience/signing keys configured all bearer tokens fail closed.
 }).AddJwtBearer(AuthApiAuthenticationDefaults.Scheme, options =>
 {
-    AuthApiJwtBearerOptions.Configure(options, builder.Configuration,
-        new HttpDocumentRetriever { RequireHttps = options.RequireHttpsMetadata });
 });
+builder.Services.AddHttpClient(AuthApiJwksOptionsPostConfigure.HttpClientName);
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<JwtBearerOptions>, AuthApiJwksOptionsPostConfigure>();
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Admin", policy => policy.RequireAuthenticatedUser().AddRequirements(new AdminClientRoleRequirement()));

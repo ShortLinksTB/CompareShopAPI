@@ -1,0 +1,702 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "product-matching-laptop-baseline-2026-11-v1",
+  "source": {
+    "filename": "sl1998-laptop-snapshot-v2.json",
+    "snapshotVersion": 2,
+    "scope": "laptop",
+    "queueRows": 67,
+    "catalogRows": 22,
+    "sourceChoice": "Approved sanitized snapshot attached to parent SL-1812 (SL-1998 artifact v2); no candidate IDs/rank scores."
+  },
+  "labelingPolicy": {
+    "labels": [
+      "exact_existing_product",
+      "likely_new_product",
+      "skip_non_tracked_item"
+    ],
+    "ambiguity": "Use needs_andy_review plus reason only when evidence does not support a defensible label; do not infer product identity from family name alone.",
+    "confidence": "high means exact configuration/title match or clearly out-of-scope item; medium means likely new based on complete catalog absence, with incomplete hardware specs."
+  },
+  "samples": [
+    {
+      "queueId": 2,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "125703",
+      "name": "MacBook Air M5 13 inch 2026 10CPU 8GPU 16GB 512GB | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "13 inch"
+      },
+      "label": "exact_existing_product",
+      "productId": 2053,
+      "confidence": "high",
+      "rationale": "Exact model, CPU/GPU, RAM and storage match catalog product 2053; source and catalog names differ only by no-charge variant wording.",
+      "evidenceCatalogProduct": "MacBook Air M5 13 inch 2026 10CPU 8GPU 16GB 512GB | Chính hãng Apple Việt Nam",
+      "ambiguity": null
+    },
+    {
+      "queueId": 3,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "125882",
+      "name": "MacBook Neo 13 inch A18 Pro 2026 6CPU 5GPU 8GB 512GB Touch ID | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "8GB",
+        "storage": "512GB",
+        "screen": "13 inch"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "MacBook Neo model and 8GB/512GB are explicit; no Neo product exists in the complete 22-row catalog snapshot.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 5,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "86461",
+      "name": "Apple MacBook Air M2 2024 8CPU 8GPU 16GB 256GB I Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "256GB"
+      },
+      "label": "exact_existing_product",
+      "productId": 2062,
+      "confidence": "high",
+      "rationale": "M2, 8CPU/8GPU, 16GB and 256GB match catalog product 2062; redundant Apple prefix is a naming difference.",
+      "evidenceCatalogProduct": "Apple MacBook Air M2 2024 8CPU 8GPU 16GB 256GB I Chính hãng Apple Việt Nam",
+      "ambiguity": null
+    },
+    {
+      "queueId": 6,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "140420",
+      "name": "Apple Mac mini M6 12CPU 12GPU 16GB 256GB 2026 | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "256GB"
+      },
+      "label": "skip_non_tracked_item",
+      "productId": null,
+      "confidence": "high",
+      "rationale": "Mac mini is a desktop computer, not a laptop; excluded from laptop matching.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 7,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "101354",
+      "name": "Mac mini M4 2024 10CPU 10GPU 24GB 256GB | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "24GB",
+        "storage": "256GB"
+      },
+      "label": "skip_non_tracked_item",
+      "productId": null,
+      "confidence": "high",
+      "rationale": "Mac mini is a desktop computer, not a laptop; excluded from laptop matching.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 8,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "129207",
+      "name": "MacBook Air M5 13 inch 2026 10CPU 10GPU 24GB 512GB Sạc 70W | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "24GB",
+        "storage": "512GB",
+        "screen": "13 inch"
+      },
+      "label": "exact_existing_product",
+      "productId": 2044,
+      "confidence": "high",
+      "rationale": "Full model, 13-inch, CPU/GPU, RAM and storage match catalog product 2044.",
+      "evidenceCatalogProduct": "MacBook Air M5 13 inch 2026 10CPU 10GPU 24GB 512GB Sạc 70W | Chính hãng Apple Việt Nam",
+      "ambiguity": null
+    },
+    {
+      "queueId": 10,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "125718",
+      "name": "MacBook Air M5 15 inch 2026 10CPU 10GPU 16GB 512GB | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "15 inch"
+      },
+      "label": "exact_existing_product",
+      "productId": 2055,
+      "confidence": "high",
+      "rationale": "Full model, 15-inch, CPU/GPU, RAM and storage match catalog product 2055.",
+      "evidenceCatalogProduct": "MacBook Air M5 15 inch 2026 10CPU 10GPU 16GB 512GB | Chính hãng Apple Việt Nam",
+      "ambiguity": null
+    },
+    {
+      "queueId": 11,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "125730",
+      "name": "MacBook Pro M5 Pro 14 inch 2026 15CPU 16GPU 24GB 1TB | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "24GB",
+        "storage": "1TB",
+        "screen": "14 inch"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "M5 Pro 14-inch with 15CPU/16GPU, 24GB/1TB has no exact model/configuration in the catalog snapshot.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 13,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "102820",
+      "name": "MacBook Air M4 13 inch 2025 10CPU 10GPU 24GB 512GB Sạc 70W | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "24GB",
+        "storage": "512GB",
+        "screen": "13 inch"
+      },
+      "label": "exact_existing_product",
+      "productId": 2042,
+      "confidence": "high",
+      "rationale": "Full M4 13-inch, CPU/GPU, RAM, storage and included charger wording match catalog product 2042.",
+      "evidenceCatalogProduct": "MacBook Air M4 13 inch 2025 10CPU 10GPU 24GB 512GB Sạc 70W | Chính hãng Apple Việt Nam",
+      "ambiguity": null
+    },
+    {
+      "queueId": 14,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "135147",
+      "name": "MacBook Air M5 13 inch 2026 10CPU 10GPU 16GB 512GB Sạc 30W | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "13 inch"
+      },
+      "label": "exact_existing_product",
+      "productId": 2049,
+      "confidence": "high",
+      "rationale": "Full M5 13-inch model, CPU/GPU, RAM/storage and 30W charger match catalog product 2049.",
+      "evidenceCatalogProduct": "MacBook Air M5 13 inch 2026 10CPU 10GPU 16GB 512GB Sạc 30W | Chính hãng Apple Việt Nam",
+      "ambiguity": null
+    },
+    {
+      "queueId": 20,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "125708",
+      "name": "MacBook Air M5 13 inch 2026 10CPU 10GPU 16GB 1TB | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "1TB",
+        "screen": "13 inch"
+      },
+      "label": "exact_existing_product",
+      "productId": 2052,
+      "confidence": "high",
+      "rationale": "Full M5 13-inch, CPU/GPU, RAM and storage match catalog product 2052.",
+      "evidenceCatalogProduct": "MacBook Air M5 13 inch 2026 10CPU 10GPU 16GB 1TB | Chính hãng Apple Việt Nam",
+      "ambiguity": null
+    },
+    {
+      "queueId": 21,
+      "sourceKey": "cellphones",
+      "sourceName": "CellphoneS",
+      "shopName": "CellphoneS",
+      "externalSku": "129222",
+      "name": "MacBook Air M5 13 inch 2026 10CPU 8GPU 16GB 512GB Sạc 70W | Chính hãng Apple Việt Nam",
+      "brand": "Apple",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "13 inch"
+      },
+      "label": "exact_existing_product",
+      "productId": 2046,
+      "confidence": "high",
+      "rationale": "Full M5 13-inch, 8GPU, 16GB/512GB and 70W charger match catalog product 2046.",
+      "evidenceCatalogProduct": "MacBook Air M5 13 inch 2026 10CPU 8GPU 16GB 512GB Sạc 70W | Chính hãng Apple Việt Nam",
+      "ambiguity": null
+    },
+    {
+      "queueId": 25,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "122980",
+      "name": "Laptop ASUS VivoBook 14 X1407CA-LY008W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "14 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 26,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "137234",
+      "name": "Laptop ASUS Zenbook 14 UX3405CA-ST1713W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "14 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 27,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "131477",
+      "name": "Laptop ASUS TUF Gaming A15 FA506NCG-HN329W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "15.6 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 28,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "119277",
+      "name": "Laptop ASUS Vivobook 14 X1404VA-EB355W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "14 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 29,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "131951",
+      "name": "Laptop ASUS Vivobook 15 X1504MA-BQ632W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "8GB",
+        "storage": "512GB",
+        "screen": "15.6 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 30,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "134917",
+      "name": "Laptop ASUS Vivobook 14 X1404MA-EB027W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "8GB",
+        "storage": "512GB",
+        "screen": "14 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 31,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "142517",
+      "name": "Laptop ASUS TUF Gaming A15 FA506NCG-HN396W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "8GB",
+        "storage": "512GB",
+        "screen": "15.6 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 32,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "137288",
+      "name": "Laptop ASUS TUF Gaming F16 FX607VJR-TU320W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "16 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 33,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "139036",
+      "name": "Laptop ASUS Gaming V16 V3607VU-TK416W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "16 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 34,
+      "sourceKey": "cellphones-asus",
+      "sourceName": "CellphoneS Asus",
+      "shopName": "CellphoneS",
+      "externalSku": "142530",
+      "name": "Laptop ASUS Vivobook S16 S5608QA-MB354W",
+      "brand": "Asus",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "16 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Asus laptop model/SKU is explicit, and the full catalog snapshot has no Asus product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 45,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "144020",
+      "name": "Laptop Lenovo LOQ 15IRH11E 83Y9003VVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "8GB",
+        "storage": "512GB",
+        "screen": "15.3 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 46,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "132629",
+      "name": "Laptop Lenovo IdeaPad Slim 3 14IPH11 83UQ003NVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "14 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 47,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "117291",
+      "name": "Laptop Lenovo Legion 5 15IRX10 83LY00HRVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "15.3 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 48,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "135164",
+      "name": "Laptop Lenovo IdeaPad Slim 3 14IWC11 83RQ002PVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "8GB",
+        "storage": "512GB",
+        "screen": "14 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 49,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "144026",
+      "name": "Laptop Lenovo IdeaPad Slim 3 14AHP10 83K9004RVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "8GB",
+        "storage": "512GB",
+        "screen": "14 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 50,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "136352",
+      "name": "Laptop Lenovo IdeaPad Slim 3 16IWC11 83RS002KVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "8GB",
+        "storage": "512GB",
+        "screen": "16 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 51,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "110663",
+      "name": "Laptop Lenovo LOQ 15IRX9 83DV01ALVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "15.6 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 52,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "126953",
+      "name": "Laptop Lenovo LOQ 15ARP10E 83S000DEVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "15.6 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 53,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "118484",
+      "name": "Laptop Lenovo LOQ 15ARP10E 83S0007AVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "15.6 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    },
+    {
+      "queueId": 54,
+      "sourceKey": "cellphones-lenovo",
+      "sourceName": "CellphoneS Lenovo",
+      "shopName": "CellphoneS",
+      "externalSku": "126949",
+      "name": "Laptop Lenovo ThinkBook 16 G9 IRL 21US008FVN",
+      "brand": "Lenovo",
+      "specifications": {
+        "memory": "16GB",
+        "storage": "512GB",
+        "screen": "16 inches"
+      },
+      "label": "likely_new_product",
+      "productId": null,
+      "confidence": "medium",
+      "rationale": "Lenovo laptop model/SKU is explicit, and the full catalog snapshot has no Lenovo product; CPU/GPU are not supplied in the source facts, so this is a catalog-absence label rather than a configuration equivalence claim.",
+      "evidenceCatalogProduct": null,
+      "ambiguity": null
+    }
+  ],
+  "rankMetrics": {
+    "top1Accuracy": null,
+    "top5HitRate": null,
+    "falseHighScoreCountAtOrAbove75Pct": null,
+    "availability": "unavailable: approved snapshot has no candidate IDs or rank scores; no values inferred."
+  },
+  "evidenceNotes": [
+    {
+      "queueIds": [
+        2,
+        21
+      ],
+      "note": "M5 Air rows share core 13-inch/16GB/512GB/8GPU facts but distinguish charger bundle wording; catalog records separate IDs 2053 and 2046. Keep accessory/bundle evidence when matching."
+    },
+    {
+      "queueIds": [
+        25,
+        45
+      ],
+      "note": "ASUS and Lenovo rows identify model/SKU and RAM/storage/screen, but source SpecificationsJson has no CPU/GPU; the snapshot catalog contains no ASUS or Lenovo products. New-product label is based on catalog absence, not guessed specifications."
+    },
+    {
+      "queueIds": [
+        6,
+        7
+      ],
+      "note": "Mac mini items appear in a laptop-category queue but are desktop form factors; explicitly skipped."
+    },
+    {
+      "queueIds": [
+        2,
+        3,
+        25,
+        45
+      ],
+      "note": "No candidate IDs/rank scores are present, so no ranking error, top-1/top-5 outcome, or high-score false positive can be evaluated."
+    },
+    {
+      "queueIds": [],
+      "note": "All 67 rows show the same CellphoneS shop and no existing ProductId; cross-shop product grouping is not measurable from this snapshot."
+    }
+  ]
+}

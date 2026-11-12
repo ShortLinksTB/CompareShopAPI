@@ -7,7 +7,9 @@ using System.Security.Cryptography;
 using CompareShopAPI.Api.Auth;
 using CompareShopAPI.Api.Health;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
@@ -21,7 +23,7 @@ using CompareShopAPI.Domain.UserCommerce;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
-public sealed class ApiFactory(string environment = "Production", Dictionary<string,string?>? settings = null, bool signing = false, TimeProvider? timeProvider = null, Action<IServiceCollection>? configureServices = null, bool authSigning = false) : WebApplicationFactory<Program>
+public sealed class ApiFactory(string environment = "Production", Dictionary<string,string?>? settings = null, bool signing = false, TimeProvider? timeProvider = null, Action<IServiceCollection>? configureServices = null, bool authSigning = false, IDocumentRetriever? authDocumentRetriever = null) : WebApplicationFactory<Program>
 {
     public static readonly SymmetricSecurityKey Key = new(Encoding.UTF8.GetBytes("test-only-signing-key-at-least-32-bytes-long"));
     public static readonly RSA AuthRsa = RSA.Create(2048);
@@ -58,7 +60,7 @@ public sealed class ApiFactory(string environment = "Production", Dictionary<str
                 ["AuthAPI:Issuer"] = "https://auth-test-issuer",
                 ["AuthAPI:Audience"] = "compareshop-api"
             }).Build();
-            AuthApiJwtBearerOptions.Configure(options, configuration, AuthJwksRetriever);
+            AuthApiJwtBearerOptions.Configure(options, configuration, authDocumentRetriever ?? AuthJwksRetriever);
         }));
     }
     private static string CreateAuthJwks()
@@ -109,13 +111,14 @@ public sealed class ApiFactory(string environment = "Production", Dictionary<str
 
 internal sealed class StaticDocumentRetriever(string document) : IDocumentRetriever
 {
+    public string Document { get; } = document;
     public int Requests { get; private set; }
 
     public Task<string> GetDocumentAsync(string address, CancellationToken cancel)
     {
         Requests++;
         Assert.EndsWith("/api/v1/auth/jwks", address, StringComparison.Ordinal);
-        return Task.FromResult(document);
+        return Task.FromResult(Document);
     }
 }
 
@@ -156,8 +159,17 @@ public sealed class SkeletonTests
     [Fact]
     public async Task Public_commerce_requires_verified_RS256_AuthAPI_token_and_ignores_Keycloak_scheme()
     {
+        var jwksRequests = 0;
+        using var jwksServer = new TestServer(new WebHostBuilder().Configure(app => app.Run(async context =>
+        {
+            Interlocked.Increment(ref jwksRequests);
+            Assert.Equal("/api/v1/auth/jwks", context.Request.Path);
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(ApiFactory.AuthJwksRetriever.Document);
+        })));
+        var documentRetriever = new HttpDocumentRetriever(new HttpClient(jwksServer.CreateHandler())) { RequireHttps = true };
         await using var app = new ApiFactory(authSigning: true, configureServices: services =>
-            services.AddSingleton<IUserCommerceRepository, EmptyUserCommerceRepository>());
+            services.AddSingleton<IUserCommerceRepository, EmptyUserCommerceRepository>(), authDocumentRetriever: documentRetriever);
         using var client = app.CreateClient();
 
         client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.AuthToken());
@@ -178,7 +190,7 @@ public sealed class SkeletonTests
             client.DefaultRequestHeaders.Authorization = new("Bearer", token);
             Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/wishlist")).StatusCode);
         }
-        Assert.True(ApiFactory.AuthJwksRetriever.Requests > 0);
+        Assert.True(Volatile.Read(ref jwksRequests) > 0);
     }
 
     [Fact]

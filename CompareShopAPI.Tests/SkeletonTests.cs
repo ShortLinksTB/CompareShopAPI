@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
+using System.Security.Cryptography;
 using CompareShopAPI.Api.Auth;
 using CompareShopAPI.Api.Health;
 using Microsoft.AspNetCore.Authorization;
@@ -15,12 +16,15 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using CompareShopAPI.Application.UserCommerce;
+using CompareShopAPI.Domain.UserCommerce;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
-public sealed class ApiFactory(string environment = "Production", Dictionary<string,string?>? settings = null, bool signing = false, TimeProvider? timeProvider = null, Action<IServiceCollection>? configureServices = null) : WebApplicationFactory<Program>
+public sealed class ApiFactory(string environment = "Production", Dictionary<string,string?>? settings = null, bool signing = false, TimeProvider? timeProvider = null, Action<IServiceCollection>? configureServices = null, bool authSigning = false) : WebApplicationFactory<Program>
 {
     public static readonly SymmetricSecurityKey Key = new(Encoding.UTF8.GetBytes("test-only-signing-key-at-least-32-bytes-long"));
+    public static readonly RSA AuthRsa = RSA.Create(2048);
+    private static readonly RSA OtherAuthRsa = RSA.Create(2048);
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(environment);
@@ -44,6 +48,15 @@ public sealed class ApiFactory(string environment = "Production", Dictionary<str
             options.TokenValidationParameters.ValidAudience = "compareshop-api";
             options.TokenValidationParameters.IssuerSigningKey = Key;
         }));
+        if (authSigning) builder.ConfigureTestServices(services => services.PostConfigure<JwtBearerOptions>("CompareShopAuthAPI", options =>
+        {
+            var publicKey = new RsaSecurityKey(AuthRsa.ExportParameters(false));
+            options.Configuration = new Microsoft.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectConfiguration { Issuer = "https://auth-test-issuer" };
+            options.Configuration.SigningKeys.Add(publicKey);
+            options.TokenValidationParameters.ValidIssuer = "https://auth-test-issuer";
+            options.TokenValidationParameters.ValidAudience = "compareshop-api";
+            options.TokenValidationParameters.IssuerSigningKey = publicKey;
+        }));
     }
     public static string Token(string? roles = null, string issuer = "https://test-issuer", string audience = "compareshop-api", bool expired = false, string subject = "test-user", bool includeSubject = true)
     {
@@ -54,6 +67,22 @@ public sealed class ApiFactory(string environment = "Production", Dictionary<str
             expires: expired ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddMinutes(5),
             signingCredentials: new SigningCredentials(Key, SecurityAlgorithms.HmacSha256)));
     }
+
+    public static string AuthToken(bool emailVerified = true, string issuer = "https://auth-test-issuer", string audience = "compareshop-api", bool expired = false, string subject = "auth-user")
+    {
+        var claims = new[] { new Claim("sub", subject), new Claim("email_verified", emailVerified ? "true" : "false") };
+        return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(issuer, audience, claims,
+            expires: expired ? DateTime.UtcNow.AddHours(-1) : DateTime.UtcNow.AddMinutes(5),
+            signingCredentials: new SigningCredentials(new RsaSecurityKey(AuthRsa), SecurityAlgorithms.RsaSha256)));
+    }
+
+    public static string WrongSignatureAuthToken()
+    {
+        var claims = new[] { new Claim("sub", "auth-user"), new Claim("email_verified", "true") };
+        return new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken("https://auth-test-issuer", "compareshop-api", claims,
+            expires: DateTime.UtcNow.AddMinutes(5),
+            signingCredentials: new SigningCredentials(new RsaSecurityKey(OtherAuthRsa), SecurityAlgorithms.RsaSha256)));
+    }
 }
 
 internal sealed class InMemoryUserProvisioning : IUserProvisioning
@@ -63,6 +92,9 @@ internal sealed class InMemoryUserProvisioning : IUserProvisioning
 
     public Task<int> GetOrCreate(string keycloakSubject, CancellationToken ct) =>
         Task.FromResult(_users.GetOrAdd(keycloakSubject, _ => Interlocked.Increment(ref _nextId)));
+
+    public Task<int> GetOrCreateForAuth(string authSubject, CancellationToken ct) =>
+        Task.FromResult(_users.GetOrAdd($"auth:{authSubject}", _ => Interlocked.Increment(ref _nextId)));
 
     public Task<UserProvisioningResult> GetOrCreateForAdmin(string keycloakSubject, CancellationToken ct)
     {
@@ -76,6 +108,50 @@ internal sealed class InMemoryUserProvisioning : IUserProvisioning
 
 public sealed class SkeletonTests
 {
+    [Fact]
+    public async Task Public_commerce_requires_verified_RS256_AuthAPI_token_and_ignores_Keycloak_scheme()
+    {
+        await using var app = new ApiFactory(authSigning: true, configureServices: services =>
+            services.AddSingleton<IUserCommerceRepository, EmptyUserCommerceRepository>());
+        using var client = app.CreateClient();
+
+        client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.AuthToken());
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/wishlist")).StatusCode);
+
+        client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.AuthToken(emailVerified: false));
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/wishlist")).StatusCode);
+
+        foreach (var token in new[]
+        {
+            ApiFactory.AuthToken(issuer: "https://wrong-issuer"),
+            ApiFactory.AuthToken(audience: "other-api"),
+            ApiFactory.AuthToken(expired: true),
+            ApiFactory.WrongSignatureAuthToken(),
+            ApiFactory.Token()
+        })
+        {
+            client.DefaultRequestHeaders.Authorization = new("Bearer", token);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/wishlist")).StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task Missing_AuthSubject_schema_returns_503_without_commerce_side_effects()
+    {
+        var repository = new CountingUserCommerceRepository();
+        await using var app = new ApiFactory(authSigning: true, configureServices: services =>
+        {
+            services.RemoveAll<IUserProvisioning>();
+            services.AddSingleton<IUserProvisioning, UnavailableUserProvisioning>();
+            services.AddSingleton<IUserCommerceRepository>(repository);
+        });
+        using var client = app.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.AuthToken());
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/api/v1/wishlist")).StatusCode);
+        Assert.Equal(0, repository.WishlistReads);
+    }
+
     [Fact]
     public async Task Missing_configuration_keeps_liveness_and_denies_admin()
     {
@@ -188,5 +264,33 @@ public sealed class SkeletonTests
         var client = app.CreateClient();
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/health")).StatusCode);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, (await client.GetAsync("/health/ready")).StatusCode);
+    }
+}
+
+internal class EmptyUserCommerceRepository : IUserCommerceRepository
+{
+    public Task<bool> IsActiveProduct(int productId, CancellationToken ct) => Task.FromResult(true);
+    public virtual Task<IReadOnlyList<WishlistItemDto>> Wishlist(int userId, CancellationToken ct) => Task.FromResult<IReadOnlyList<WishlistItemDto>>([]);
+    public Task AddWishlist(int userId, int productId, DateTime nowUtc, CancellationToken ct) => Task.CompletedTask;
+    public Task RemoveWishlist(int userId, int productId, CancellationToken ct) => Task.CompletedTask;
+    public Task<IReadOnlyList<PriceAlertDto>> PriceAlerts(int userId, CancellationToken ct) => Task.FromResult<IReadOnlyList<PriceAlertDto>>([]);
+    public Task<PriceAlertDto> AddPriceAlert(int userId, int productId, int targetPrice, DateTime nowUtc, CancellationToken ct) => throw new NotImplementedException();
+    public Task<bool> DeletePriceAlert(int userId, int alertId, CancellationToken ct) => Task.FromResult(true);
+}
+
+internal sealed class UnavailableUserProvisioning : IUserProvisioning
+{
+    public Task<int> GetOrCreate(string keycloakSubject, CancellationToken ct) => throw new InvalidOperationException();
+    public Task<int> GetOrCreateForAuth(string authSubject, CancellationToken ct) => throw new AuthSubjectUnavailableException();
+    public Task<UserProvisioningResult> GetOrCreateForAdmin(string keycloakSubject, CancellationToken ct) => throw new InvalidOperationException();
+}
+
+internal sealed class CountingUserCommerceRepository : EmptyUserCommerceRepository
+{
+    public int WishlistReads { get; private set; }
+    public override Task<IReadOnlyList<WishlistItemDto>> Wishlist(int userId, CancellationToken ct)
+    {
+        WishlistReads++;
+        return Task.FromResult<IReadOnlyList<WishlistItemDto>>([]);
     }
 }

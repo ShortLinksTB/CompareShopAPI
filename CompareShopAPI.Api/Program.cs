@@ -10,6 +10,7 @@ using CompareShopAPI.Api.UserCommerce;
 using CompareShopAPI.Application.UserCommerce;
 using CompareShopAPI.Infrastructure.UserCommerce;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Protocols;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
@@ -101,24 +102,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
     // With no issuer/audience/signing keys configured all bearer tokens fail closed.
 }).AddJwtBearer(AuthApiAuthenticationDefaults.Scheme, options =>
 {
-    var authority = builder.Configuration["AuthAPI:Authority"];
-    var issuer = builder.Configuration["AuthAPI:Issuer"];
-    var audience = builder.Configuration["AuthAPI:Audience"];
-    options.MapInboundClaims = false;
-    options.RequireHttpsMetadata = true;
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidIssuer = string.IsNullOrWhiteSpace(issuer) ? null : issuer,
-        ValidateAudience = true,
-        ValidAudience = string.IsNullOrWhiteSpace(audience) ? null : audience,
-        ValidateLifetime = true,
-        RequireExpirationTime = true,
-        ValidateIssuerSigningKey = true,
-        ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
-        NameClaimType = "sub"
-    };
-    if (!string.IsNullOrWhiteSpace(authority)) options.Authority = authority;
+    AuthApiJwtBearerOptions.Configure(options, builder.Configuration, new HttpDocumentRetriever { RequireHttps = true });
 });
 builder.Services.AddAuthorization(options =>
 {

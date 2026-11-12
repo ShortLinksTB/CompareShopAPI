@@ -270,7 +270,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         if (matching is null || !matching.TryApprove(productId)) return (null, null, null);
         await data.SaveMatching(matching, t);
         await data.SaveMatchingDecision(id, "approved", null, null, s!, Clock.GetUtcNow().UtcDateTime, t);
-        return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved, matching.ExternalSku, matching.DataSourceId), before, new { productId });
+        return (new AdminMatching(matching.Id, matching.Name, matching.Brand, matching.ProductId, matching.CreatedAtUtc, matching.IsApproved, matching.ExternalSku, matching.DataSourceId) { Status = matching.Status }, before, new { productId });
     }, ct);
     public async Task<AdminMatching> SkipMatching(string? s, int id, string reason, string? note, CancellationToken ct)
     {

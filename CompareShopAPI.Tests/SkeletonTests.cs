@@ -159,6 +159,20 @@ public sealed class SkeletonTests
     }
 
     [Fact]
+    public void AuthAPI_options_keep_authority_when_issuer_is_not_configured()
+    {
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AuthAPI:Authority"] = "https://auth-test-issuer"
+        }).Build();
+        var options = new JwtBearerOptions();
+
+        AuthApiJwtBearerOptions.Configure(options, configuration, new StaticDocumentRetriever("{}"));
+
+        Assert.Equal("https://auth-test-issuer", options.Authority);
+    }
+
+    [Fact]
     public async Task AuthAPI_bearer_uses_production_registration_to_fetch_JWKS_over_HTTP_and_accept_valid_token()
     {
         var rsa = ApiFactory.AuthRsa.ExportParameters(false);

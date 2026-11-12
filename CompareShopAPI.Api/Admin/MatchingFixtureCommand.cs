@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Catalog;
@@ -41,7 +42,9 @@ public static class MatchingFixtureCommand
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CompareShopDbContext>();
         if (!await db.Database.CanConnectAsync()) throw new InvalidOperationException("CompareShop is unreachable; no fixture operation was performed.");
-        await using var transaction = await db.Database.BeginTransactionAsync();
+        await using var transaction = args[0] == "cleanup-matching-fixtures"
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable)
+            : await db.Database.BeginTransactionAsync();
         var before = await Counts(db);
         var ids = args[0] == "seed-matching-fixtures" ? await Seed(db) : await Cleanup(db);
         await transaction.CommitAsync();
@@ -54,7 +57,7 @@ public static class MatchingFixtureCommand
     {
         products = await db.Products.CountAsync(), categories = await db.Categories.CountAsync(), matchings = await db.ProductMatchings.CountAsync(),
         offers = await db.ProductOffers.CountAsync(), mappings = await db.SourceItemMappings.CountAsync(), dataSources = await db.DataSources.CountAsync(),
-        shops = await db.PartnerShops.CountAsync(), groups = await FixtureGroupCount(db),
+        shops = await db.PartnerShops.CountAsync(), syncJobs = await db.SyncJobs.CountAsync(), groups = await FixtureGroupCount(db),
         fixtureMatchingRows = await db.ProductMatchings.Where(x => x.Name.StartsWith(Owner)).CountAsync()
     };
 
@@ -216,11 +219,36 @@ public static class MatchingFixtureCommand
         var createdProductIds = creationAudits.Select(ParseCreatedProduct)
             .Where(x => x.HasValue && x.Value.MatchingIds.Any(matchingIds.Contains))
             .Select(x => x!.Value.ProductId);
-        manifest = manifest with { ProductIds = manifest.ProductIds.Concat(createdProductIds).Distinct().ToArray() };
+        var syncJobs = await DiscoverFixtureSyncJobs(db, manifest);
+        var recordedSyncJobIds = manifest.SyncJobIds ?? [];
+        if (recordedSyncJobIds.Any(x => x <= 0) || recordedSyncJobIds.Distinct().Count() != recordedSyncJobIds.Length ||
+            (manifest.SyncJobIds is not null && !recordedSyncJobIds.ToHashSet().SetEquals(syncJobs.Select(x => x.Id))))
+            throw new InvalidOperationException("QC-SL1815 SyncJob manifest does not match the complete fixture-source retry-chain closure; refusing cleanup.");
+        var discoveredJobIds = syncJobs.Select(x => x.Id).ToArray();
+        var beforeNonFixtureJobIds = await db.SyncJobs.AsNoTracking()
+            .Where(x => !discoveredJobIds.Contains(x.Id)).Select(x => x.Id).ToArrayAsync();
+
+        var unmanifestedMappings = await db.SourceItemMappings.AsNoTracking()
+            .Where(x => manifest.DataSourceIds.Contains(x.DataSourceId) && !manifest.MappingIds.Contains(x.Id))
+            .Select(x => x.Id).ToArrayAsync();
+        if (unmanifestedMappings.Length > 0)
+            throw new InvalidOperationException("QC-SL1815 DataSources have mappings outside the exact ownership manifest; refusing cleanup.");
+
+        var syncJobIds = syncJobs.Select(x => x.Id).Order().ToArray();
+        manifest = manifest with
+        {
+            ProductIds = manifest.ProductIds.Concat(createdProductIds).Distinct().ToArray(),
+            SyncJobIds = syncJobIds
+        };
+
+        // Persist the verified exact job closure to append-only manifest history in the same
+        // serializable transaction before deleting any owned row. Any later failure rolls this back.
         await WriteManifest(db, ManifestActionSeeded, manifest);
 
         // Delete only IDs captured by this command's append-only ownership manifest.
         // Keep audit/history rows, including the manifest events themselves.
+        foreach (var syncJobId in SyncJobDeletionOrder(syncJobs))
+            await db.SyncJobs.Where(x => x.Id == syncJobId && syncJobIds.Contains(x.Id)).ExecuteDeleteAsync();
         await db.SourceItemMappings.Where(x => manifest.MappingIds.Contains(x.Id)).ExecuteDeleteAsync();
         await db.ProductMatchings.Where(x => manifest.MatchingIds.Contains(x.Id)).ExecuteDeleteAsync();
         await db.ProductOffers.Where(x => manifest.OfferIds.Contains(x.Id)).ExecuteDeleteAsync();
@@ -228,8 +256,98 @@ public static class MatchingFixtureCommand
         await db.DataSources.Where(x => manifest.DataSourceIds.Contains(x.Id)).ExecuteDeleteAsync();
         await db.PartnerShops.Where(x => manifest.ShopIds.Contains(x.Id)).ExecuteDeleteAsync();
         await db.Categories.Where(x => manifest.CategoryIds.Contains(x.Id)).ExecuteDeleteAsync();
+
+        var remainingJobs = await db.SyncJobs.AsNoTracking()
+            .Where(x => syncJobIds.Contains(x.Id) || manifest.DataSourceIds.Contains(x.DataSourceId))
+            .Select(x => x.Id).ToArrayAsync();
+        if (remainingJobs.Length > 0)
+            throw new InvalidOperationException("QC-SL1815 cleanup left SyncJobs related to manifest-owned DataSources; refusing to commit.");
+        var afterNonFixtureJobIds = await db.SyncJobs.AsNoTracking()
+            .Where(x => !syncJobIds.Contains(x.Id)).Select(x => x.Id).ToArrayAsync();
+        if (!beforeNonFixtureJobIds.ToHashSet().SetEquals(afterNonFixtureJobIds))
+            throw new InvalidOperationException("QC-SL1815 cleanup changed SyncJobs outside the exact fixture ownership manifest; refusing to commit.");
+        var remainingSources = await db.DataSources.AsNoTracking().Where(x => manifest.DataSourceIds.Contains(x.Id)).Select(x => x.Id).ToArrayAsync();
+        if (remainingSources.Length > 0)
+            throw new InvalidOperationException("QC-SL1815 cleanup left manifest-owned DataSources; refusing to commit.");
         await WriteManifest(db, ManifestActionCleaned, manifest);
         return new { alreadyClean = false, manifest };
+    }
+
+    private static async Task<IReadOnlyList<SyncJob>> DiscoverFixtureSyncJobs(CompareShopDbContext db, FixtureManifest manifest)
+    {
+        var sourceIds = manifest.DataSourceIds.Distinct().ToArray();
+        if (sourceIds.Length != manifest.DataSourceIds.Length || sourceIds.Any(x => x <= 0))
+            throw new InvalidOperationException("QC-SL1815 DataSource manifest is invalid; refusing cleanup.");
+
+        var jobs = new Dictionary<int, SyncJob>();
+        var directJobs = await db.SyncJobs.AsNoTracking().Where(x => sourceIds.Contains(x.DataSourceId)).ToListAsync();
+        foreach (var job in directJobs) AddInactiveFixtureJob(jobs, job, sourceIds);
+
+        var inspectedParents = new HashSet<int>();
+        while (true)
+        {
+            var pendingParents = jobs.Values.Where(x => x.RetryOfJobId.HasValue)
+                .Select(x => x.RetryOfJobId!.Value).Where(x => !inspectedParents.Contains(x)).Distinct().ToArray();
+            if (pendingParents.Length == 0) break;
+            var parents = await db.SyncJobs.AsNoTracking().Where(x => pendingParents.Contains(x.Id)).ToListAsync();
+            if (parents.Count != pendingParents.Length)
+                throw new InvalidOperationException("QC-SL1815 retry chain references a missing SyncJob; refusing cleanup.");
+            foreach (var parent in parents) AddInactiveFixtureJob(jobs, parent, sourceIds);
+            inspectedParents.UnionWith(pendingParents);
+        }
+
+        var inspectedChildren = new HashSet<int>();
+        while (true)
+        {
+            var candidateParents = jobs.Keys.Where(x => !inspectedChildren.Contains(x)).ToArray();
+            if (candidateParents.Length == 0) break;
+            var children = await db.SyncJobs.AsNoTracking().Where(x => x.RetryOfJobId.HasValue && candidateParents.Contains(x.RetryOfJobId.Value)).ToListAsync();
+            foreach (var child in children) AddInactiveFixtureJob(jobs, child, sourceIds);
+            inspectedChildren.UnionWith(candidateParents);
+        }
+
+        var exactIds = jobs.Keys.ToHashSet();
+        if (jobs.Values.Any(x => x.RetryOfJobId.HasValue && !exactIds.Contains(x.RetryOfJobId.Value)))
+            throw new InvalidOperationException("QC-SL1815 retry chain is not fully contained in the exact fixture ownership closure; refusing cleanup.");
+        return jobs.Values.ToArray();
+    }
+
+    private static void AddInactiveFixtureJob(IDictionary<int, SyncJob> jobs, SyncJob job, int[] sourceIds)
+    {
+        if (!sourceIds.Contains(job.DataSourceId))
+            throw new InvalidOperationException("QC-SL1815 retry chain crosses into a non-fixture DataSource; refusing cleanup.");
+        if (job.State is not (SyncJobState.Success or SyncJobState.Partial or SyncJobState.Failed))
+            throw new InvalidOperationException("QC-SL1815 fixture DataSource has an active or non-terminal SyncJob; refusing cleanup before writes.");
+        jobs[job.Id] = job;
+    }
+
+    private static IReadOnlyList<int> SyncJobDeletionOrder(IReadOnlyList<SyncJob> jobs)
+    {
+        var byId = jobs.ToDictionary(x => x.Id);
+        var remainingChildren = jobs.ToDictionary(x => x.Id, _ => 0);
+        foreach (var job in jobs)
+        {
+            if (job.RetryOfJobId is int parentId)
+            {
+                if (!byId.ContainsKey(parentId))
+                    throw new InvalidOperationException("QC-SL1815 retry chain is not fully contained in its ownership manifest; refusing cleanup.");
+                remainingChildren[parentId]++;
+            }
+        }
+
+        var leaves = new SortedSet<int>(remainingChildren.Where(x => x.Value == 0).Select(x => x.Key));
+        var ordered = new List<int>(jobs.Count);
+        while (leaves.Count > 0)
+        {
+            var leafId = leaves.Min;
+            leaves.Remove(leafId);
+            ordered.Add(leafId);
+            if (byId[leafId].RetryOfJobId is int parentId && --remainingChildren[parentId] == 0)
+                leaves.Add(parentId);
+        }
+        if (ordered.Count != jobs.Count)
+            throw new InvalidOperationException("QC-SL1815 retry chain contains a cycle; refusing cleanup.");
+        return ordered;
     }
 
     private static async Task<(string Action, FixtureManifest Manifest)?> LatestManifest(CompareShopDbContext db)
@@ -279,5 +397,5 @@ public static class MatchingFixtureCommand
             : server;
     }
 
-    private sealed record FixtureManifest(int[] CategoryIds, int[] ShopIds, int[] ProductIds, int[] DataSourceIds, int[] OfferIds, int[] MappingIds, int[] MatchingIds, int Version = 1);
+    private sealed record FixtureManifest(int[] CategoryIds, int[] ShopIds, int[] ProductIds, int[] DataSourceIds, int[] OfferIds, int[] MappingIds, int[] MatchingIds, int Version = 1, int[]? SyncJobIds = null);
 }

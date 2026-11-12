@@ -2,7 +2,7 @@
 set -euo pipefail
 
 image="compareshop-api-workers:runtime-check"
-docker build --file Dockerfile.workers --tag "$image" .
+docker image inspect "$image" >/dev/null
 
 runtimes="$(docker run --rm --entrypoint dotnet "$image" --list-runtimes)"
 printf '%s\n' "$runtimes"

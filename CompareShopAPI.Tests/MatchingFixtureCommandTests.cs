@@ -98,12 +98,29 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
         await using (var db = new CompareShopDbContext(options))
         {
             await db.Database.MigrateAsync();
-            await Assert.ThrowsAsync<MatchingLaptopCategoryUnavailableException>(() => MatchingFixtureCommand.TryRunAsync(
-                ["seed-matching-fixtures"], Environment("Development"), config, services));
-            Assert.DoesNotContain(await db.Categories.ToListAsync(), x => x.Name.Contains("laptop", StringComparison.OrdinalIgnoreCase) || x.Slug.Contains("laptop", StringComparison.OrdinalIgnoreCase));
-            Assert.False(await db.PartnerShops.AnyAsync(x => x.Slug.StartsWith("qc-sl1815-")));
-            Assert.False(await db.ProductMatchings.AnyAsync(x => x.Name.StartsWith("QC-SL1815")));
-            laptopCategoryId = (await CategoryTestData.AddLeafAsync(db, "laptop", "Laptop")).Id;
+            var staleMappings = await db.SourceItemMappings.Where(x => x.ExternalSku.StartsWith("QC-SL1815-")).Select(x => x.Id).ToArrayAsync();
+            await db.SourceItemMappings.Where(x => staleMappings.Contains(x.Id)).ExecuteDeleteAsync();
+            await db.ProductMatchings.Where(x => x.Name.StartsWith("QC-SL1815 ")).ExecuteDeleteAsync();
+            await db.ProductOffers.Where(x => x.PartnerShop.Slug.StartsWith("qc-sl1815-") || x.Product.Slug.StartsWith("qc-sl1815-")).ExecuteDeleteAsync();
+            await db.Products.Where(x => x.Slug.StartsWith("qc-sl1815-")).ExecuteDeleteAsync();
+            await db.DataSources.Where(x => x.Key.StartsWith("qc-sl1815-")).ExecuteDeleteAsync();
+            await db.PartnerShops.Where(x => x.Slug.StartsWith("qc-sl1815-")).ExecuteDeleteAsync();
+            await db.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture").ExecuteDeleteAsync();
+            var sharedLaptop = await db.Categories.SingleOrDefaultAsync(x => x.Id == 4008);
+            if (sharedLaptop is null)
+            {
+                Assert.DoesNotContain(await db.Categories.ToListAsync(), x => x.Name.Contains("laptop", StringComparison.OrdinalIgnoreCase) || x.Slug.Contains("laptop", StringComparison.OrdinalIgnoreCase));
+                await Assert.ThrowsAsync<MatchingLaptopCategoryUnavailableException>(() => MatchingFixtureCommand.TryRunAsync(
+                    ["seed-matching-fixtures"], Environment("Development"), config, services));
+                Assert.False(await db.PartnerShops.AnyAsync(x => x.Slug.StartsWith("qc-sl1815-")));
+                Assert.False(await db.ProductMatchings.AnyAsync(x => x.Name.StartsWith("QC-SL1815")));
+                var laptopParent = new Category { Slug = "test-laptop-parent", Name = "Test laptop parent", Level = 1 };
+                db.Categories.Add(laptopParent);
+                await db.SaveChangesAsync();
+                await db.Database.ExecuteSqlInterpolatedAsync($"SET IDENTITY_INSERT [Categories] ON; INSERT INTO [Categories] ([Id], [Slug], [Name], [IsActive], [Level], [SortOrder], [ParentCategoryId]) VALUES (4008, N'laptop', N'Laptop', 1, 2, 0, {laptopParent.Id}); SET IDENTITY_INSERT [Categories] OFF;");
+            }
+            else Assert.True(sharedLaptop.Name.Contains("laptop", StringComparison.OrdinalIgnoreCase) || sharedLaptop.Slug.Contains("laptop", StringComparison.OrdinalIgnoreCase));
+            laptopCategoryId = 4008;
         }
 
         try
@@ -145,6 +162,63 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
 
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
             Assert.Equal(firstSeedCounts, await FixtureCounts(services));
+
+            int[] v2MatchingIds;
+            int[] v2MappingIds;
+            int[] v2ShopIds;
+            int[] v2SourceIds;
+            using var v2Snapshot = await ReadLatestManifest(options);
+            v2MatchingIds = v2Snapshot.RootElement.GetProperty("MatchingIds").EnumerateArray().Select(x => x.GetInt32()).ToArray();
+            v2MappingIds = v2Snapshot.RootElement.GetProperty("MappingIds").EnumerateArray().Select(x => x.GetInt32()).ToArray();
+            v2ShopIds = v2Snapshot.RootElement.GetProperty("ShopIds").EnumerateArray().Select(x => x.GetInt32()).ToArray();
+            v2SourceIds = v2Snapshot.RootElement.GetProperty("DataSourceIds").EnumerateArray().Select(x => x.GetInt32()).ToArray();
+            Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
+            var v3Counts = await FixtureCounts(services);
+            Assert.Equal((2, 3, 4, 3, 8, 11, 2), v3Counts);
+            await using (var verifyV3 = new CompareShopDbContext(options))
+            {
+                var latest = await verifyV3.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+                    .OrderByDescending(x => x.Id).FirstAsync();
+                using var manifest = JsonDocument.Parse(latest.AfterJson!);
+                var root = manifest.RootElement;
+                Assert.Equal(3, root.GetProperty("Version").GetInt32());
+                Assert.Equal(v2MatchingIds, root.GetProperty("MatchingIds").EnumerateArray().Select(x => x.GetInt32()).Take(v2MatchingIds.Length));
+                Assert.Equal(v2MappingIds, root.GetProperty("MappingIds").EnumerateArray().Select(x => x.GetInt32()).Take(v2MappingIds.Length));
+                Assert.Equal(v2ShopIds, root.GetProperty("ShopIds").EnumerateArray().Select(x => x.GetInt32()).Take(v2ShopIds.Length));
+                Assert.Equal(v2SourceIds, root.GetProperty("DataSourceIds").EnumerateArray().Select(x => x.GetInt32()).Take(v2SourceIds.Length));
+                var v3MatchingId = Assert.Single(root.GetProperty("V3MatchingIds").EnumerateArray()).GetInt32();
+                var row = await verifyV3.ProductMatchings.SingleAsync(x => x.Id == v3MatchingId);
+                Assert.Equal("pending", row.Status);
+                Assert.False(row.IsApproved);
+                Assert.Null(row.ProductId);
+                Assert.Equal(4008, (await verifyV3.Products.SingleAsync(x => x.Id == Assert.Single(root.GetProperty("V3ProductIds").EnumerateArray()).GetInt32())).CategoryId);
+                var createdFromV3 = new Product { Slug = "qc-sl1815-v3-created-product", Name = "Created from v3 matching", CategoryId = 4008 };
+                verifyV3.Products.Add(createdFromV3);
+                await verifyV3.SaveChangesAsync();
+                verifyV3.AdminAuditLogs.Add(new AdminAuditLog { ActorSubject = "qc-test", Action = "create_from_matching", ResourceType = "product",
+                    ResourceId = createdFromV3.Id.ToString(), CreatedAtUtc = DateTime.UtcNow,
+                    AfterJson = JsonSerializer.Serialize(new { productId = createdFromV3.Id, matchingIds = new[] { v3MatchingId } }) });
+                await verifyV3.SaveChangesAsync();
+                Assert.True(await verifyV3.Products.AnyAsync(x => x.Id == createdFromV3.Id));
+            }
+            Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
+            Assert.Equal((v3Counts.Products + 1, v3Counts.Shops, v3Counts.DataSources, v3Counts.Offers, v3Counts.Mappings, v3Counts.Matchings, v3Counts.Groups), await FixtureCounts(services));
+            Assert.True(await MatchingFixtureCommand.TryRunAsync(["cleanup-matching-fixtures"], Environment("Development"), config, services));
+            Assert.Equal(firstSeedCounts, await FixtureCounts(services));
+            await using (var verifyV2 = new CompareShopDbContext(options))
+            {
+                Assert.False(await verifyV2.Products.AnyAsync(x => x.Slug == "qc-sl1815-v3-created-product"));
+                Assert.All(v2MatchingIds, id => Assert.True(verifyV2.ProductMatchings.Any(x => x.Id == id)));
+                Assert.All(v2MappingIds, id => Assert.True(verifyV2.SourceItemMappings.Any(x => x.Id == id)));
+                Assert.All(v2ShopIds, id => Assert.True(verifyV2.PartnerShops.Any(x => x.Id == id)));
+                Assert.All(v2SourceIds, id => Assert.True(verifyV2.DataSources.Any(x => x.Id == id)));
+                var v2Manifest = JsonNode.Parse(v2Snapshot.RootElement.GetRawText())!.AsObject();
+                v2Manifest["Version"] = 2;
+                foreach (var key in new[] { "V3ShopIds", "V3DataSourceIds", "V3OfferIds", "V3MappingIds", "V3MatchingIds", "V3ProductIds" }) v2Manifest.Remove(key);
+                verifyV2.AdminAuditLogs.Add(new AdminAuditLog { ActorSubject = "QC-SL1815", Action = "fixture.manifest.seeded",
+                    ResourceType = "QC-SL1815-MatchingFixture", ResourceId = "QC-SL1815", CreatedAtUtc = DateTime.UtcNow, AfterJson = v2Manifest.ToJsonString() });
+                await verifyV2.SaveChangesAsync();
+            }
             await using (var verifyUpgrade = new CompareShopDbContext(options))
             {
                 var upgradedRow = await verifyUpgrade.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
@@ -154,11 +228,8 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
                 Assert.Equal(2, upgraded.GetProperty("Version").GetInt32());
                 Assert.All(originalMappingIds, id => Assert.Contains(id, upgraded.GetProperty("MappingIds").EnumerateArray().Select(x => x.GetInt32())));
                 Assert.All(originalMatchingIds, id => Assert.Contains(id, upgraded.GetProperty("MatchingIds").EnumerateArray().Select(x => x.GetInt32())));
-                Assert.Equal(7, upgraded.GetProperty("MappingIds").GetArrayLength());
+                Assert.Equal(originalMappingIds.Length + 3, upgraded.GetProperty("MappingIds").GetArrayLength());
             }
-
-            Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
-            Assert.Equal(firstSeedCounts, await FixtureCounts(services));
 
             // Exercise the same application service used by the HTTP API: no-image creation
             // reports the standard-image warning, and an invalid source mapping rolls back all writes.
@@ -435,6 +506,14 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
             await db.ProductOffers.CountAsync(x => x.Product.Slug.StartsWith("qc-sl1815-") || x.PartnerShop.Slug.StartsWith("qc-sl1815-")),
             await db.SourceItemMappings.CountAsync(x => x.ExternalSku.StartsWith("QC-SL1815")),
             await db.ProductMatchings.CountAsync(x => x.Name.StartsWith("QC-SL1815")), groupKeys);
+    }
+
+    private static async Task<JsonDocument> ReadLatestManifest(DbContextOptions<CompareShopDbContext> options)
+    {
+        await using var db = new CompareShopDbContext(options);
+        var json = await db.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+            .OrderByDescending(x => x.Id).Select(x => x.AfterJson).FirstAsync();
+        return JsonDocument.Parse(json!);
     }
 
     private static async Task FinishJob(CompareShopDbContext db, int jobId, SyncJobState finalState)

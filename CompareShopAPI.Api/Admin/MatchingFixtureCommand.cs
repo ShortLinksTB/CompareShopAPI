@@ -20,7 +20,7 @@ public static class MatchingFixtureCommand
     private const string ManifestActionSeeded = "fixture.manifest.seeded";
     private const string ManifestActionCleaned = "fixture.manifest.cleaned";
     private const string ManifestResourceType = "QC-SL1815-MatchingFixture";
-    private const int CurrentManifestVersion = 2;
+    private const int CurrentManifestVersion = 3;
     private static readonly DateTime FixtureTime = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     public static bool IsRequested(string[] args) => args.Length == 1 && args[0] is "seed-matching-fixtures" or "cleanup-matching-fixtures";
@@ -89,7 +89,12 @@ public static class MatchingFixtureCommand
             if (latest.Value.Manifest.Version >= CurrentManifestVersion)
                 return new { alreadySeeded = true, manifest = latest.Value.Manifest };
 
-            var expanded = await ExpandFixtures(db, latest.Value.Manifest);
+            var wasV2Manifest = latest.Value.Manifest.Version >= 2;
+            var expanded = latest.Value.Manifest.Version < 2
+                ? await ExpandFixtures(db, latest.Value.Manifest)
+                : latest.Value.Manifest;
+            if (wasV2Manifest && expanded.Version < 3)
+                expanded = await ExpandFixturesV3(db, expanded);
             await WriteManifest(db, ManifestActionSeeded, expanded);
             return new { alreadySeeded = false, expanded = true, manifest = expanded };
         }
@@ -157,7 +162,7 @@ public static class MatchingFixtureCommand
 
     private static async Task<FixtureManifest> ExpandFixtures(CompareShopDbContext db, FixtureManifest manifest)
     {
-        if (manifest.Version >= CurrentManifestVersion) return manifest;
+        if (manifest.Version >= 2) return manifest;
         var sourceId = manifest.DataSourceIds.FirstOrDefault();
         if (sourceId <= 0 || !await db.DataSources.AnyAsync(x => x.Id == sourceId))
             throw new InvalidOperationException("QC-SL1815 manifest has no usable data source for additive fixture expansion.");
@@ -200,7 +205,60 @@ public static class MatchingFixtureCommand
         {
             MappingIds = manifest.MappingIds.Concat(mappings.Select(x => x.Id)).ToArray(),
             MatchingIds = manifest.MatchingIds.Concat(matchings.Select(x => x.Id)).ToArray(),
-            Version = CurrentManifestVersion
+            Version = 2
+        };
+    }
+
+    private static async Task<FixtureManifest> ExpandFixturesV3(CompareShopDbContext db, FixtureManifest manifest)
+    {
+        // Laptop 4008 is shared catalog data. Validate it before creating any v3-owned rows.
+        if (!await db.Categories.AsNoTracking().AnyAsync(x => x.Id == 4008 && x.Level == 2 &&
+            (x.Slug.Contains("laptop") || x.Name.Contains("laptop"))))
+            throw new InvalidOperationException("QC-SL1815 v3 requires existing Laptop category 4008; no v3 fixture writes were made.");
+
+        const string v3Owner = Owner + "-v3";
+        const string sku = Owner + "-v3-create-product";
+        if (await db.DataSources.AnyAsync(x => x.Key == v3Owner + "-source")
+            || await db.PartnerShops.AnyAsync(x => x.Slug == v3Owner + "-shop")
+            || await db.SourceItemMappings.AnyAsync(x => x.ExternalSku == sku)
+            || await db.ProductMatchings.AnyAsync(x => x.ExternalSku == sku))
+            throw new InvalidOperationException("QC-SL1815 v3 namespace is occupied by records absent from its ownership manifest; refusing to seed.");
+
+        var shop = new PartnerShop { Slug = v3Owner + "-shop", Name = v3Owner + " Shop", WebsiteUrl = "https://v3-shop.example.test", IsActive = true };
+        db.PartnerShops.Add(shop);
+        await db.SaveChangesAsync();
+        var source = new DataSource(Prefix + "v3-source", v3Owner + " Shop", "/qc-sl1815/laptop", shop.Id, FixtureTime);
+        db.DataSources.Add(source);
+        await db.SaveChangesAsync();
+        const string name = "QC-SL1815 ASUS VivoBook 15 X1504ZA Core i5-13420H RTX 4050 8GB RAM 512GB SSD 15.6 inch";
+        var catalogProduct = new Product { Slug = v3Owner + "-existing-product", Name = name, Brand = "ASUS", CategoryId = 4008, IsActive = true };
+        db.Products.Add(catalogProduct);
+        await db.SaveChangesAsync();
+        var offer = new ProductOffer { ProductId = catalogProduct.Id, PartnerShopId = shop.Id, PriceVnd = 15990000, OriginalPriceVnd = 16990000,
+            Url = "https://v3-shop.example.test/qc-sl1815-v3", ImageUrl = "https://v3-shop.example.test/qc-sl1815-v3.jpg",
+            SpecificationsJson = "{\"ram\":\"8GB\",\"ssd\":\"512GB\"}", StockStatus = "in_stock", UpdatedAtUtc = FixtureTime, IsActive = true };
+        db.ProductOffers.Add(offer);
+        await db.SaveChangesAsync();
+        var mapping = new SourceItemMapping(source.Id, sku, name, "ASUS");
+        mapping.SetOffer(offer.Id);
+        mapping.UpdateSnapshot(name, "ASUS", new ScrapedOffer(sku, name, "ASUS", offer.PriceVnd, offer.Url!, offer.ImageUrl,
+            offer.OriginalPriceVnd, new Dictionary<string, string> { ["ram"] = "8GB", ["ssd"] = "512GB" }, "in_stock"));
+        var matching = ProductMatching.ForSourceItem(name, "ASUS", FixtureTime, source.Id, sku);
+        db.SourceItemMappings.Add(mapping);
+        db.ProductMatchings.Add(matching);
+        await db.SaveChangesAsync();
+
+        return manifest with
+        {
+            ShopIds = manifest.ShopIds.Append(shop.Id).ToArray(),
+            DataSourceIds = manifest.DataSourceIds.Append(source.Id).ToArray(),
+            OfferIds = manifest.OfferIds.Append(offer.Id).ToArray(),
+            ProductIds = manifest.ProductIds.Append(catalogProduct.Id).ToArray(),
+            MappingIds = manifest.MappingIds.Append(mapping.Id).ToArray(),
+            MatchingIds = manifest.MatchingIds.Append(matching.Id).ToArray(),
+            Version = 3,
+            V3ShopIds = [shop.Id], V3DataSourceIds = [source.Id], V3OfferIds = [offer.Id],
+            V3MappingIds = [mapping.Id], V3MatchingIds = [matching.Id], V3ProductIds = [catalogProduct.Id]
         };
     }
 
@@ -210,55 +268,68 @@ public static class MatchingFixtureCommand
         if (!latest.HasValue || latest.Value.Action != ManifestActionSeeded)
             return new { alreadyClean = true, manifest = (FixtureManifest?)null };
         var manifest = latest.Value.Manifest;
+        var cleanupManifest = manifest;
+        // v3 cleanup owns only its isolated append; the v2 snapshot remains usable by QC.
+        if (manifest.Version >= 3 && manifest.V3MatchingIds is not null)
+            cleanupManifest = manifest with
+            {
+                CategoryIds = [], ProductIds = manifest.V3ProductIds ?? [],
+                ShopIds = manifest.V3ShopIds ?? [], DataSourceIds = manifest.V3DataSourceIds ?? [],
+                OfferIds = manifest.V3OfferIds ?? [], MappingIds = manifest.V3MappingIds ?? [], MatchingIds = manifest.V3MatchingIds
+            };
         // Products created later through the matching endpoint are owned only when its audit event
         // names one of the exact matching IDs in this command's append-only manifest.
         var creationAudits = await db.AdminAuditLogs.AsNoTracking()
             .Where(x => x.Action == "create_from_matching" && x.ResourceType == "product" && x.AfterJson != null)
             .Select(x => x.AfterJson).ToListAsync();
-        var matchingIds = manifest.MatchingIds.ToHashSet();
+        var matchingIds = cleanupManifest.MatchingIds.ToHashSet();
         var createdProductIds = creationAudits.Select(ParseCreatedProduct)
             .Where(x => x.HasValue && x.Value.MatchingIds.Any(matchingIds.Contains))
             .Select(x => x!.Value.ProductId);
-        var syncJobs = await DiscoverFixtureSyncJobs(db, manifest);
-        var recordedSyncJobIds = manifest.SyncJobIds ?? [];
+        var syncJobs = await DiscoverFixtureSyncJobs(db, cleanupManifest);
+        var recordedSyncJobIds = cleanupManifest.SyncJobIds ?? [];
         if (recordedSyncJobIds.Any(x => x <= 0) || recordedSyncJobIds.Distinct().Count() != recordedSyncJobIds.Length ||
-            (manifest.SyncJobIds is not null && !recordedSyncJobIds.ToHashSet().SetEquals(syncJobs.Select(x => x.Id))))
+            (cleanupManifest.SyncJobIds is not null && !recordedSyncJobIds.ToHashSet().SetEquals(syncJobs.Select(x => x.Id))))
             throw new InvalidOperationException("QC-SL1815 SyncJob manifest does not match the complete fixture-source retry-chain closure; refusing cleanup.");
         var discoveredJobIds = syncJobs.Select(x => x.Id).ToArray();
         var beforeNonFixtureJobIds = await db.SyncJobs.AsNoTracking()
             .Where(x => !discoveredJobIds.Contains(x.Id)).Select(x => x.Id).ToArrayAsync();
 
         var unmanifestedMappings = await db.SourceItemMappings.AsNoTracking()
-            .Where(x => manifest.DataSourceIds.Contains(x.DataSourceId) && !manifest.MappingIds.Contains(x.Id))
+            .Where(x => cleanupManifest.DataSourceIds.Contains(x.DataSourceId) && !cleanupManifest.MappingIds.Contains(x.Id))
             .Select(x => x.Id).ToArrayAsync();
         if (unmanifestedMappings.Length > 0)
             throw new InvalidOperationException("QC-SL1815 DataSources have mappings outside the exact ownership manifest; refusing cleanup.");
 
         var syncJobIds = syncJobs.Select(x => x.Id).Order().ToArray();
-        manifest = manifest with
+        cleanupManifest = cleanupManifest with
         {
-            ProductIds = manifest.ProductIds.Concat(createdProductIds).Distinct().ToArray(),
+            ProductIds = cleanupManifest.ProductIds.Concat(createdProductIds).Distinct().ToArray(),
             SyncJobIds = syncJobIds
         };
 
         // Persist the verified exact job closure to append-only manifest history in the same
         // serializable transaction before deleting any owned row. Any later failure rolls this back.
+        if (manifest.Version >= 3)
+            manifest = manifest with { V3ProductIds = cleanupManifest.ProductIds };
+        else
+            manifest = cleanupManifest;
         await WriteManifest(db, ManifestActionSeeded, manifest);
 
         // Delete only IDs captured by this command's append-only ownership manifest.
         // Keep audit/history rows, including the manifest events themselves.
         foreach (var syncJobId in SyncJobDeletionOrder(syncJobs))
             await db.SyncJobs.Where(x => x.Id == syncJobId && syncJobIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.SourceItemMappings.Where(x => manifest.MappingIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.ProductMatchings.Where(x => manifest.MatchingIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.ProductOffers.Where(x => manifest.OfferIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.Products.Where(x => manifest.ProductIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.DataSources.Where(x => manifest.DataSourceIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.PartnerShops.Where(x => manifest.ShopIds.Contains(x.Id)).ExecuteDeleteAsync();
-        await db.Categories.Where(x => manifest.CategoryIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.SourceItemMappings.Where(x => cleanupManifest.MappingIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.ProductMatchings.Where(x => cleanupManifest.MatchingIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.ProductOffers.Where(x => cleanupManifest.OfferIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.Products.Where(x => cleanupManifest.ProductIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.DataSources.Where(x => cleanupManifest.DataSourceIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.PartnerShops.Where(x => cleanupManifest.ShopIds.Contains(x.Id)).ExecuteDeleteAsync();
+        await db.Categories.Where(x => cleanupManifest.CategoryIds.Contains(x.Id)).ExecuteDeleteAsync();
 
         var remainingJobs = await db.SyncJobs.AsNoTracking()
-            .Where(x => syncJobIds.Contains(x.Id) || manifest.DataSourceIds.Contains(x.DataSourceId))
+            .Where(x => syncJobIds.Contains(x.Id) || cleanupManifest.DataSourceIds.Contains(x.DataSourceId))
             .Select(x => x.Id).ToArrayAsync();
         if (remainingJobs.Length > 0)
             throw new InvalidOperationException("QC-SL1815 cleanup left SyncJobs related to manifest-owned DataSources; refusing to commit.");
@@ -266,7 +337,7 @@ public static class MatchingFixtureCommand
             .Where(x => !syncJobIds.Contains(x.Id)).Select(x => x.Id).ToArrayAsync();
         if (!beforeNonFixtureJobIds.ToHashSet().SetEquals(afterNonFixtureJobIds))
             throw new InvalidOperationException("QC-SL1815 cleanup changed SyncJobs outside the exact fixture ownership manifest; refusing to commit.");
-        var remainingSources = await db.DataSources.AsNoTracking().Where(x => manifest.DataSourceIds.Contains(x.Id)).Select(x => x.Id).ToArrayAsync();
+        var remainingSources = await db.DataSources.AsNoTracking().Where(x => cleanupManifest.DataSourceIds.Contains(x.Id)).Select(x => x.Id).ToArrayAsync();
         if (remainingSources.Length > 0)
             throw new InvalidOperationException("QC-SL1815 cleanup left manifest-owned DataSources; refusing to commit.");
         await WriteManifest(db, ManifestActionCleaned, manifest);
@@ -397,5 +468,6 @@ public static class MatchingFixtureCommand
             : server;
     }
 
-    private sealed record FixtureManifest(int[] CategoryIds, int[] ShopIds, int[] ProductIds, int[] DataSourceIds, int[] OfferIds, int[] MappingIds, int[] MatchingIds, int Version = 1, int[]? SyncJobIds = null);
+    private sealed record FixtureManifest(int[] CategoryIds, int[] ShopIds, int[] ProductIds, int[] DataSourceIds, int[] OfferIds, int[] MappingIds, int[] MatchingIds, int Version = 1, int[]? SyncJobIds = null,
+        int[]? V3ShopIds = null, int[]? V3DataSourceIds = null, int[]? V3OfferIds = null, int[]? V3MappingIds = null, int[]? V3MatchingIds = null, int[]? V3ProductIds = null);
 }

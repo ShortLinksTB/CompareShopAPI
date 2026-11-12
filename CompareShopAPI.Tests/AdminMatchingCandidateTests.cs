@@ -248,7 +248,14 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             var approve = await db.AdminPermissions.SingleAsync(x => x.Key == AdminPermissions.MatchingApprove);
             db.AdminRolePermissions.Add(new() { RoleId = role.Id, PermissionId = approve.Id });
             await db.SaveChangesAsync();
-            Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/admin/matching/{first.Id}/approve", new { productId = fallback.Id })).StatusCode);
+            var approvalResponse = await client.PostAsJsonAsync($"/admin/matching/{first.Id}/approve", new { productId = fallback.Id });
+            Assert.Equal(HttpStatusCode.OK, approvalResponse.StatusCode);
+            using (var approvalJson = JsonDocument.Parse(await approvalResponse.Content.ReadAsStringAsync()))
+            {
+                Assert.Equal("approved", approvalJson.RootElement.GetProperty("status").GetString());
+                Assert.Equal(fallback.Id, approvalJson.RootElement.GetProperty("productId").GetInt32());
+                Assert.True(approvalJson.RootElement.GetProperty("isApproved").GetBoolean());
+            }
             await db.Entry(first).ReloadAsync();
             Assert.True(first.IsApproved);
             Assert.Equal(fallback.Id, first.ProductId);

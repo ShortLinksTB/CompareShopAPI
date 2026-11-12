@@ -2,11 +2,13 @@ using CompareShopAPI.Api.Admin;
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Catalog;
+using CompareShopAPI.Domain.Ingestion;
 using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Infrastructure.Admin;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -217,13 +219,154 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
                 db.ProductMatchings.Add(unowned);
                 await db.SaveChangesAsync();
             }
+            var beforeCleanupCounts = await FixtureCounts(services);
+
+            int sourceId;
+            int rootJobId;
+            int runningJobId;
+            int retryJobId;
+            int finalRetryJobId;
+            int unrelatedJobId;
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var sharedSourceId = (await db.DataSources.SingleAsync(x => x.Key == "bhx")).Id;
+                var unrelated = new SyncJob(sharedSourceId, DateTime.UtcNow);
+                db.SyncJobs.Add(unrelated);
+                await db.SaveChangesAsync();
+                unrelatedJobId = unrelated.Id;
+                await FinishJob(db, unrelatedJobId, SyncJobState.Success);
+            }
+            await using (var db = new CompareShopDbContext(options))
+            {
+                sourceId = (await db.DataSources.SingleAsync(x => x.Key == "qc-sl1815-shop-a")).Id;
+                var queued = new SyncJob(sourceId, DateTime.UtcNow);
+                db.SyncJobs.Add(queued);
+                await db.SaveChangesAsync();
+                rootJobId = queued.Id;
+            }
+
+            var activeFailure = await Assert.ThrowsAsync<InvalidOperationException>(() => MatchingFixtureCommand.TryRunAsync(
+                ["cleanup-matching-fixtures"], Environment("Development"), config, services));
+            Assert.Contains("active or non-terminal", activeFailure.Message);
+            Assert.Equal(beforeCleanupCounts, await FixtureCounts(services));
+            await using (var db = new CompareShopDbContext(options))
+            {
+                Assert.True(await db.DataSources.AnyAsync(x => x.Id == sourceId));
+                Assert.True(await db.SyncJobs.AnyAsync(x => x.Id == rootJobId));
+                await FinishJob(db, rootJobId, SyncJobState.Success);
+                var runningSourceId = (await db.DataSources.SingleAsync(x => x.Key == "qc-sl1815-shop-b")).Id;
+                var running = new SyncJob(runningSourceId, DateTime.UtcNow);
+                var now = DateTime.UtcNow;
+                Assert.True(running.Start(now, "fixture-running-" + Guid.NewGuid().ToString("N"), now.AddMinutes(SyncJob.LeaseDurationMinutes)));
+                db.SyncJobs.Add(running);
+                await db.SaveChangesAsync();
+                runningJobId = running.Id;
+                var runningFailure = await Assert.ThrowsAsync<InvalidOperationException>(() => MatchingFixtureCommand.TryRunAsync(
+                    ["cleanup-matching-fixtures"], Environment("Development"), config, services));
+                Assert.Contains("active or non-terminal", runningFailure.Message);
+                await FinishJob(db, runningJobId, SyncJobState.Success);
+                var retry = new SyncJob(sourceId, DateTime.UtcNow, rootJobId);
+                db.SyncJobs.Add(retry);
+                await db.SaveChangesAsync();
+                retryJobId = retry.Id;
+                await FinishJob(db, retryJobId, SyncJobState.Failed);
+                var finalRetry = new SyncJob(sourceId, DateTime.UtcNow, retryJobId);
+                db.SyncJobs.Add(finalRetry);
+                await db.SaveChangesAsync();
+                finalRetryJobId = finalRetry.Id;
+                await FinishJob(db, finalRetryJobId, SyncJobState.Partial);
+            }
+
+            // A retry child on a non-manifest source makes the ownership closure ambiguous.
+            var outsiderKey = "qc-sl1815-unmanifested-" + Guid.NewGuid().ToString("N");
+            int outsiderSourceId;
+            int outsiderJobId;
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var outsider = new DataSource(outsiderKey, "Unmanifested source", "/qc-sl1815/laptop", null, DateTime.UtcNow);
+                db.DataSources.Add(outsider);
+                await db.SaveChangesAsync();
+                outsiderSourceId = outsider.Id;
+                var outsiderJob = new SyncJob(outsiderSourceId, DateTime.UtcNow, finalRetryJobId);
+                db.SyncJobs.Add(outsiderJob);
+                await db.SaveChangesAsync();
+                outsiderJobId = outsiderJob.Id;
+                await FinishJob(db, outsiderJobId, SyncJobState.Success);
+            }
+            var countsWithOutsider = await FixtureCounts(services);
+
+            var ownershipFailure = await Assert.ThrowsAsync<InvalidOperationException>(() => MatchingFixtureCommand.TryRunAsync(
+                ["cleanup-matching-fixtures"], Environment("Development"), config, services));
+            Assert.Contains("non-fixture DataSource", ownershipFailure.Message);
+            Assert.Equal(countsWithOutsider, await FixtureCounts(services));
+            await using (var db = new CompareShopDbContext(options))
+            {
+                Assert.True(await db.Products.AnyAsync(x => x.Slug == "qc-sl1815-existing-product"));
+                Assert.True(await db.SyncJobs.AnyAsync(x => x.Id == rootJobId));
+                var latestSeed = await db.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+                    .OrderByDescending(x => x.Id).FirstAsync();
+                using var json = JsonDocument.Parse(latestSeed.AfterJson!);
+                Assert.True(!json.RootElement.TryGetProperty("SyncJobIds", out var jobIds) || jobIds.ValueKind == JsonValueKind.Null);
+                await db.SyncJobs.Where(x => x.Id == outsiderJobId).ExecuteDeleteAsync();
+                await db.DataSources.Where(x => x.Id == outsiderSourceId).ExecuteDeleteAsync();
+            }
+
+            long malformedManifestAuditId;
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var latestSeed = await db.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+                    .OrderByDescending(x => x.Id).FirstAsync();
+                var malformed = JsonNode.Parse(latestSeed.AfterJson!)!.AsObject();
+                malformed["SyncJobIds"] = JsonSerializer.SerializeToNode(new[] { rootJobId, retryJobId, finalRetryJobId, int.MaxValue });
+                var row = new AdminAuditLog
+                {
+                    ActorSubject = "QC-SL1815", Action = "fixture.manifest.seeded", ResourceType = "QC-SL1815-MatchingFixture",
+                    ResourceId = "QC-SL1815", CreatedAtUtc = DateTime.UtcNow, AfterJson = malformed.ToJsonString()
+                };
+                db.AdminAuditLogs.Add(row);
+                await db.SaveChangesAsync();
+                malformedManifestAuditId = row.Id;
+            }
+            var manifestFailure = await Assert.ThrowsAsync<InvalidOperationException>(() => MatchingFixtureCommand.TryRunAsync(
+                ["cleanup-matching-fixtures"], Environment("Development"), config, services));
+            Assert.Contains("manifest does not match", manifestFailure.Message);
+            await using (var db = new CompareShopDbContext(options))
+                await db.AdminAuditLogs.Where(x => x.Id == malformedManifestAuditId).ExecuteDeleteAsync();
+
+            var rollbackServices = new ServiceCollection()
+                .AddDbContext<CompareShopDbContext>(builder => builder.UseSqlServer(connection).AddInterceptors(new FailCleanedManifestInterceptor()))
+                .BuildServiceProvider();
+            try
+            {
+                var injectedFailure = await Assert.ThrowsAsync<InvalidOperationException>(() => MatchingFixtureCommand.TryRunAsync(
+                    ["cleanup-matching-fixtures"], Environment("Development"), config, rollbackServices));
+                Assert.Contains("injected cleanup commit failure", injectedFailure.Message);
+            }
+            finally { await rollbackServices.DisposeAsync(); }
+
+            Assert.Equal(beforeCleanupCounts, await FixtureCounts(services));
+            await using (var db = new CompareShopDbContext(options))
+            {
+                Assert.Equal(4, await db.SyncJobs.CountAsync(x => x.Id == rootJobId || x.Id == runningJobId || x.Id == retryJobId || x.Id == finalRetryJobId));
+                Assert.True(await db.DataSources.AnyAsync(x => x.Id == sourceId));
+                var latestSeed = await db.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+                    .OrderByDescending(x => x.Id).FirstAsync();
+                using var json = JsonDocument.Parse(latestSeed.AfterJson!);
+                Assert.True(!json.RootElement.TryGetProperty("SyncJobIds", out var jobIds) || jobIds.ValueKind == JsonValueKind.Null);
+            }
 
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["cleanup-matching-fixtures"], Environment("Development"), config, services));
             Assert.Equal((0, 0, 0, 0, 0, 1, 0), await FixtureCounts(services));
             await using (var db = new CompareShopDbContext(new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options))
             {
                 Assert.False(await db.Products.AnyAsync(x => x.Id == createdProductId));
+                Assert.False(await db.SyncJobs.AnyAsync(x => x.Id == rootJobId || x.Id == runningJobId || x.Id == retryJobId || x.Id == finalRetryJobId));
+                Assert.True(await db.SyncJobs.AnyAsync(x => x.Id == unrelatedJobId));
                 Assert.True(await db.AdminAuditLogs.AnyAsync(x => x.Action == "create_from_matching" && x.AfterJson!.Contains($"\"productId\":{createdProductId}")));
+                var cleanupManifest = await db.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+                    .OrderByDescending(x => x.Id).FirstAsync();
+                using var cleanupJson = JsonDocument.Parse(cleanupManifest.AfterJson!);
+                Assert.Equal(new[] { rootJobId, runningJobId, retryJobId, finalRetryJobId }.Order(), cleanupJson.RootElement.GetProperty("SyncJobIds").EnumerateArray().Select(x => x.GetInt32()).Order());
                 db.ProductMatchings.Remove(unowned);
                 await db.SaveChangesAsync();
             }
@@ -232,7 +375,8 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
         }
         finally
         {
-            await MatchingFixtureCommand.TryRunAsync(["cleanup-matching-fixtures"], Environment("Development"), config, services);
+            try { await MatchingFixtureCommand.TryRunAsync(["cleanup-matching-fixtures"], Environment("Development"), config, services); }
+            catch (InvalidOperationException cleanupFailure) { Console.Error.WriteLine($"Fixture test cleanup deferred: {cleanupFailure.Message}"); }
             await services.DisposeAsync();
         }
     }
@@ -263,6 +407,29 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
             await db.ProductOffers.CountAsync(x => x.Product.Slug.StartsWith("qc-sl1815-") || x.PartnerShop.Slug.StartsWith("qc-sl1815-")),
             await db.SourceItemMappings.CountAsync(x => x.ExternalSku.StartsWith("QC-SL1815")),
             await db.ProductMatchings.CountAsync(x => x.Name.StartsWith("QC-SL1815")), groupKeys);
+    }
+
+    private static async Task FinishJob(CompareShopDbContext db, int jobId, SyncJobState finalState)
+    {
+        var job = await db.SyncJobs.SingleAsync(x => x.Id == jobId);
+        var now = DateTime.UtcNow;
+        if (job.State == SyncJobState.Queued)
+            Assert.True(job.Start(now, "fixture-test-" + Guid.NewGuid().ToString("N"), now.AddMinutes(SyncJob.LeaseDurationMinutes)));
+        else
+            Assert.Equal(SyncJobState.Running, job.State);
+        job.Finish(finalState, now.AddSeconds(1), 0, 0, 0);
+        await db.SaveChangesAsync();
+    }
+
+    private sealed class FailCleanedManifestInterceptor : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData,
+            InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<AdminAuditLog>().Any(x => x.State == EntityState.Added && x.Entity.Action == "fixture.manifest.cleaned") == true)
+                throw new InvalidOperationException("injected cleanup commit failure");
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 
     private sealed class TestEnvironment(string environmentName) : IHostEnvironment

@@ -1,5 +1,7 @@
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Domain.UserCommerce;
+using CompareShopAPI.Domain.Admin;
+using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Infrastructure.Admin;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +17,88 @@ namespace CompareShopAPI.Tests;
 [Collection(SqlServerTestCollection.Name)]
 public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
 {
+    [Fact]
+    public async Task ProductSlugAvailabilityUsesCreatePermissionsCanonicalSlugAndPostSlug()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"SlugAvailability_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var authorizedSubject = $"slug-authorized-{Guid.NewGuid():N}";
+        var partialSubject = $"slug-partial-{Guid.NewGuid():N}";
+        int matchingId;
+        int categoryId;
+        try
+        {
+            await using (var db = new CompareShopDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                var laptopParent = new Category { Slug = $"laptop-parent-{Guid.NewGuid():N}", Name = "Laptop", Level = 1 };
+                db.Categories.Add(laptopParent);
+                await db.SaveChangesAsync();
+                var category = new Category { Slug = "slug-availability", Name = "Slug availability", ParentCategoryId = laptopParent.Id, Level = 2 };
+                db.Categories.Add(category);
+                await db.SaveChangesAsync();
+                categoryId = category.Id;
+                db.Products.Add(new Product { Slug = "duplicate-slug", Name = "Inactive duplicate", CategoryId = category.Id, IsActive = false });
+                var matching = new ProductMatching("Slug create candidate", "Brand", DateTime.UtcNow);
+                db.ProductMatchings.Add(matching);
+                var authorized = new User(authorizedSubject, DateTime.UtcNow);
+                var partial = new User(partialSubject, DateTime.UtcNow);
+                var fullRole = new AdminRole { Name = $"slug-full-{Guid.NewGuid():N}" };
+                var partialRole = new AdminRole { Name = $"slug-partial-{Guid.NewGuid():N}" };
+                db.Users.AddRange(authorized, partial);
+                db.AdminRoles.AddRange(fullRole, partialRole);
+                await db.SaveChangesAsync();
+                var required = await db.AdminPermissions.Where(x => x.Key == AdminPermissions.MatchingApprove || x.Key == AdminPermissions.ProductsCreate).ToListAsync();
+                db.AdminRolePermissions.AddRange(required.Select(x => new AdminRolePermission { RoleId = fullRole.Id, PermissionId = x.Id }));
+                db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = partialRole.Id, PermissionId = required.Single(x => x.Key == AdminPermissions.MatchingApprove).Id });
+                db.AdminUserRoles.AddRange(new AdminUserRole { UserId = authorized.Id, RoleId = fullRole.Id }, new AdminUserRole { UserId = partial.Id, RoleId = partialRole.Id });
+                await db.SaveChangesAsync();
+                matchingId = matching.Id;
+            }
+
+            await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection }, signing: true);
+            using var client = app.CreateClient();
+            Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/admin/products/slug-availability?slug=duplicate-slug")).StatusCode);
+            const string roles = "{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}";
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token(roles, subject: partialSubject));
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/products/slug-availability?slug=duplicate-slug")).StatusCode);
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token(roles, subject: authorizedSubject));
+
+            using (var duplicate = await client.GetAsync("/admin/products/slug-availability?slug=Duplicate%20Slug"))
+            {
+                Assert.Equal(HttpStatusCode.OK, duplicate.StatusCode);
+                var result = await duplicate.Content.ReadFromJsonAsync<ProductSlugAvailability>();
+                Assert.Equal(new ProductSlugAvailability("duplicate-slug", true), result);
+            }
+            var available = await client.GetFromJsonAsync<ProductSlugAvailability>("/admin/products/slug-availability?slug=Brand%20New");
+            Assert.Equal(new ProductSlugAvailability("brand-new", false), available);
+
+            using (var conflict = await client.PostAsJsonAsync($"/admin/matching/{matchingId}/create-product", new MatchingProductCreate("Display name", "Brand", null, categoryId, null, "none", Slug: "duplicate-slug")))
+            {
+                Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+                using var body = System.Text.Json.JsonDocument.Parse(await conflict.Content.ReadAsStringAsync());
+                Assert.Equal("slug_conflict", body.RootElement.GetProperty("code").GetString());
+                Assert.Equal("duplicate-slug", body.RootElement.GetProperty("slug").GetString());
+            }
+            await using (var verifyConflict = new CompareShopDbContext(options))
+            {
+                Assert.Equal("pending", (await verifyConflict.ProductMatchings.SingleAsync(x => x.Id == matchingId)).Status);
+                Assert.Equal(1, await verifyConflict.Products.CountAsync());
+            }
+            using (var created = await client.PostAsJsonAsync($"/admin/matching/{matchingId}/create-product", new MatchingProductCreate("Display name", "Brand", null, categoryId, null, "none", Slug: "Chosen Slug")))
+            {
+                Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+                var product = await created.Content.ReadFromJsonAsync<AdminProduct>();
+                Assert.Equal("chosen-slug", product!.Slug);
+            }
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
     private async Task<(CompareShopDbContext Db, AdminService Service)> CreateService()
     {
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(fixture.ConnectionString).Options;

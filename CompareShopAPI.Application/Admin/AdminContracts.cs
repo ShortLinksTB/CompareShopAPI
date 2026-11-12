@@ -61,7 +61,8 @@ public sealed record AdminMatchingCandidate(int ProductId, string Name, string? 
 public sealed record AdminMatchingCounts(int All, int Pending, int Skipped, int Confident, int Review, int LikelyNew, int LikelySkip);
 public sealed record AdminMatchingPage(IReadOnlyList<AdminMatching> Items, int Page, int PageSize, int TotalItems, AdminMatchingCounts Counts);
 public sealed record AdminMatchingQuery(string? Status = null, string? Verdict = null, string? Q = null, int Page = 1, int PageSize = 25);
-public sealed record MatchingProductCreate(string Name, string? Brand, string? Description, int CategoryId, string? ImageUrl, string ImageChoice, IReadOnlyList<int>? ApplyToIds = null);
+public sealed record MatchingProductCreate(string Name, string? Brand, string? Description, int CategoryId, string? ImageUrl, string ImageChoice, IReadOnlyList<int>? ApplyToIds = null, string? Slug = null);
+public sealed record ProductSlugAvailability(string Slug, bool Exists);
 public sealed record AdminAuditEntry(long Id, string Actor, string Action, string ResourceType, string? ResourceId, DateTime CreatedAtUtc, JsonElement? Before, JsonElement? After);
 public sealed record AdminDashboard(int Products, int Offers, int Articles, bool ArticlesAvailable);
 public sealed record AdminPriceAlert(int Id, int UserId, int ProductId, string ProductSlug, string ProductName, int TargetPrice, bool IsActive, DateTime CreatedAtUtc);
@@ -190,6 +191,14 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     public async Task DeleteShop(string? s, int id, CancellationToken ct) { var actor = await Authorize(s, AdminPermissions.ShopsDelete, ct); await data.ExecuteAudited<bool>(actor, "delete", "shop", id.ToString(), async t => { var old = await data.Shop(id, t); if (old is null || !await data.DeleteShop(id, t)) throw new KeyNotFoundException(); return (true, old, null); }, ct); }
 
     public async Task<Page<AdminProduct>> Products(string? subject, int page, int size, bool? isActive, CancellationToken ct) { await Authorize(subject, AdminPermissions.ProductsRead, ct); ValidatePage(page, size); return await data.Products(page, size, isActive, ct); }
+    public async Task<ProductSlugAvailability> ProductSlugAvailability(string? subject, string? slug, CancellationToken ct)
+    {
+        var actor = await Authorize(subject, AdminPermissions.MatchingApprove, ct);
+        if (!await data.HasPermission(actor, AdminPermissions.ProductsCreate, ct)) throw new AdminForbiddenException();
+        var canonicalSlug = CanonicalizeSlug(slug ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(canonicalSlug) || canonicalSlug.Length > 200) throw new ArgumentException("Slug must produce a valid product slug.");
+        return new(canonicalSlug, await data.ProductSlugExists(canonicalSlug, ct));
+    }
     public async Task<AdminProduct?> Product(string? subject, int id, CancellationToken ct) { await Authorize(subject, AdminPermissions.ProductsRead, ct); return await data.Product(id, ct); }
     public Task<AdminProduct> CreateProduct(string? s, ProductInput i, CancellationToken ct) => Write<AdminProduct>(s, AdminPermissions.ProductsCreate, "create", "product", null, async t => (await data.SaveProduct(null, Validate(i), t), null, i), ct);
     public Task<AdminProduct> UpdateProduct(string? s, int id, ProductInput i, CancellationToken ct) => Write(s, AdminPermissions.ProductsUpdate, "update", "product", id.ToString(), async t => { var before = await data.Product(id, t); return before is null ? (null, null, null) : (await data.SaveProduct(id, Validate(i), t), before, i); }, ct);
@@ -328,8 +337,8 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         if (string.IsNullOrWhiteSpace(input.Name) || input.Name.Trim().Length > 300 || input.Brand?.Length > 200 || input.Description?.Length > 10000 || input.CategoryId <= 0 || input.ImageChoice is not ("files" or "shop" or "none")) throw new ArgumentException("Invalid matching product fields.");
         var ids = input.ApplyToIds?.ToArray() ?? [id];
         if (!ids.Contains(id) || ids.Length is < 1 or > 100 || ids.Any(x => x <= 0) || ids.Distinct().Count() != ids.Length) throw new ArgumentException("Apply-to matching IDs must be unique and include the source item.");
-        var slug = Slug(input.Name);
-        if (string.IsNullOrWhiteSpace(slug) || slug.Length > 200) throw new ArgumentException("Product name cannot produce a valid slug.");
+        var slug = CanonicalizeSlug(input.Slug ?? input.Name);
+        if (string.IsNullOrWhiteSpace(slug) || slug.Length > 200) throw new ArgumentException("Product slug cannot produce a valid slug.");
         if (!await data.IsLaptopCategory(input.CategoryId, ct)) throw new MatchingLaptopCategoryUnavailableException();
         if (await data.ProductSlugExists(slug, ct)) throw new MatchingProductSlugConflictException(slug);
         var imageUrl = input.ImageChoice == "none" ? null : input.ImageUrl;
@@ -351,7 +360,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
             return (product with { NeedsStandardImage = needsStandardImage }, null, new { productId = product.Id, matchingIds = ids, input.ImageChoice, needsStandardImage });
         }, ct);
     }
-    private static string Slug(string value)
+    private static string CanonicalizeSlug(string value)
     {
         var folded = string.Concat(value.Normalize(System.Text.NormalizationForm.FormD).Where(c => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c) != System.Globalization.UnicodeCategory.NonSpacingMark)).ToLowerInvariant();
         return System.Text.RegularExpressions.Regex.Replace(folded, "[^a-z0-9]+", "-").Trim('-');

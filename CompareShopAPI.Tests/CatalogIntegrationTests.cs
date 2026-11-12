@@ -330,6 +330,8 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.DeleteAsync($"/api/v1/price-alerts/{alertId}")).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.NoContent, (await client.PostAsync("/api/v1/wishlist", System.Net.Http.Json.JsonContent.Create(new { productId = sample.Id, operation = "remove" }))).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.PostAsync("/api/v1/price-alerts", System.Net.Http.Json.JsonContent.Create(new { productId = int.MaxValue, targetPrice = 100 }))).StatusCode);
+            db.Users.RemoveRange(await db.Users.ToListAsync());
+            await db.SaveChangesAsync();
             await db.Database.MigrateAsync("20261017070000_AddCatalog");
             Assert.Equal(0, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.tables WHERE name = N'PriceHistoryPoints'").SingleAsync());
             Assert.Equal(6, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM sys.tables WHERE name IN (N'Categories', N'PartnerShops', N'Products', N'ProductOffers', N'SpecificationGroups', N'SpecificationItems')").SingleAsync());

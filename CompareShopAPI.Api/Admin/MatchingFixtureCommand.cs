@@ -2,6 +2,7 @@ using System.Text.Json;
 using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Domain.Ingestion;
+using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -52,8 +53,29 @@ public static class MatchingFixtureCommand
     {
         products = await db.Products.CountAsync(), categories = await db.Categories.CountAsync(), matchings = await db.ProductMatchings.CountAsync(),
         offers = await db.ProductOffers.CountAsync(), mappings = await db.SourceItemMappings.CountAsync(), dataSources = await db.DataSources.CountAsync(),
-        shops = await db.PartnerShops.CountAsync(), fixtureMatchingRows = await db.ProductMatchings.Where(x => x.Name.StartsWith(Owner)).CountAsync()
+        shops = await db.PartnerShops.CountAsync(), groups = await FixtureGroupCount(db),
+        fixtureMatchingRows = await db.ProductMatchings.Where(x => x.Name.StartsWith(Owner)).CountAsync()
     };
+
+    private static async Task<int> FixtureGroupCount(CompareShopDbContext db)
+    {
+        var rows = await db.ProductMatchings.AsNoTracking().Where(x => x.Name.StartsWith(Owner))
+            .Select(x => new { x.Name, x.Brand, x.DataSourceId, x.ExternalSku }).ToListAsync();
+        var identities = rows.Where(x => x.DataSourceId.HasValue && x.ExternalSku != null).Select(x => new { SourceId = x.DataSourceId!.Value, Sku = x.ExternalSku! }).ToArray();
+        var sourceIds = identities.Select(x => x.SourceId).Distinct().ToArray();
+        var skus = identities.Select(x => x.Sku).Distinct().ToArray();
+        var mappings = await db.SourceItemMappings.AsNoTracking().Where(x => sourceIds.Contains(x.DataSourceId) && skus.Contains(x.ExternalSku))
+            .Select(x => new { x.DataSourceId, x.ExternalSku, x.SpecificationsJson }).ToListAsync();
+        return rows.Select(row =>
+            {
+                var mapping = mappings.FirstOrDefault(x => x.DataSourceId == row.DataSourceId && x.ExternalSku == row.ExternalSku);
+                var attrs = LaptopMatchingAttributeParser.Parse(row.Name, row.Brand, mapping?.SpecificationsJson);
+                return attrs.Brand is not null && attrs.Line is not null && attrs.Chip is not null && attrs.Gpu is not null && attrs.RamGb.HasValue &&
+                    attrs.SsdGb.HasValue && attrs.Screen is not null && attrs.IsAccessory == false
+                    ? string.Join('|', attrs.Brand.ToLowerInvariant(), attrs.Line.ToLowerInvariant(), attrs.Chip.ToLowerInvariant(), attrs.Gpu.ToLowerInvariant(), attrs.RamGb.Value, attrs.SsdGb.Value, attrs.Screen.ToLowerInvariant())
+                    : null;
+            }).Where(x => x is not null).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+    }
 
     private static async Task<object> Seed(CompareShopDbContext db)
     {
@@ -67,13 +89,18 @@ public static class MatchingFixtureCommand
             || await db.Products.AnyAsync(x => x.Slug.StartsWith(Prefix)))
             throw new InvalidOperationException("QC-SL1815 namespace is already occupied without an ownership manifest; refusing to seed.");
 
-        var category = new Category { Slug = Prefix + "laptop", Name = Owner + " disposable laptop category", IsActive = true };
+        // A matching fixture must never create or alter a shared catalog category.
+        var category = await db.Categories.AsNoTracking().FirstOrDefaultAsync(x => x.Level == 2 &&
+            (x.Slug.Contains("laptop") || x.Name.Contains("laptop") || db.Categories.Any(parent => parent.Id == x.ParentCategoryId &&
+                (parent.Slug.Contains("laptop") || parent.Name.Contains("laptop")))));
+        if (category is null) throw new MatchingLaptopCategoryUnavailableException();
         var shopA = new PartnerShop { Slug = Prefix + "shop-a", Name = Owner + " Shop A", WebsiteUrl = "https://shop-a.example.test", IsActive = true };
         var shopB = new PartnerShop { Slug = Prefix + "shop-b", Name = Owner + " Shop B", WebsiteUrl = "https://shop-b.example.test", IsActive = true };
-        db.AddRange(category, shopA, shopB);
+        db.AddRange(shopA, shopB);
         await db.SaveChangesAsync();
 
-        var product = new Product { Slug = Prefix + "existing-product", Name = "ASUS VivoBook 15 X1504ZA Intel Core i5 8GB RAM 512GB SSD", Brand = "ASUS", CategoryId = category.Id, IsActive = true };
+        const string fixtureLaptopName = "ASUS VivoBook 15 X1504ZA Core i5-13420H RTX 4050 8GB RAM 512GB SSD 15.6 inch";
+        var product = new Product { Slug = Prefix + "existing-product", Name = fixtureLaptopName, Brand = "ASUS", CategoryId = category.Id, IsActive = true };
         db.Products.Add(product);
         var sourceA = new DataSource(Prefix + "shop-a", Owner + " Shop A", "/qc-sl1815/laptop", shopA.Id, FixtureTime);
         var sourceB = new DataSource(Prefix + "shop-b", Owner + " Shop B", "/qc-sl1815/laptop", shopB.Id, FixtureTime);
@@ -98,18 +125,18 @@ public static class MatchingFixtureCommand
         var skuLinked = Owner + "-linked";
         var mappingLinked = new SourceItemMapping(sourceA.Id, skuLinked, product.Name, "ASUS"); mappingLinked.AssignProduct(product.Id);
         db.SourceItemMappings.AddRange(mappingA, mappingB, mappingNoOffer, mappingLinked);
-        var mA = ProductMatching.ForSourceItem(product.Name, "ASUS", FixtureTime, sourceA.Id, skuA);
-        var mB = ProductMatching.ForSourceItem(product.Name, "ASUS", FixtureTime, sourceB.Id, skuB);
+        var mA = ProductMatching.ForSourceItem(Owner + " " + product.Name, "ASUS", FixtureTime, sourceA.Id, skuA);
+        var mB = ProductMatching.ForSourceItem(Owner + " " + product.Name, "ASUS", FixtureTime, sourceB.Id, skuB);
         var nullable = new ProductMatching(Owner + " unlinked nullable relation case", null, FixtureTime);
         var missingMapping = ProductMatching.ForSourceItem(Owner + " missing mapping ASUS VivoBook 15 X1504ZA Intel Core i5 8GB RAM 512GB SSD", "ASUS", FixtureTime, sourceA.Id, Owner + "-missing-mapping");
         var linked = ProductMatching.ForSourceItem(Owner + " linked ASUS VivoBook 15 X1504ZA Intel Core i5 8GB RAM 512GB SSD", "ASUS", FixtureTime, sourceA.Id, skuLinked);
         linked.TryApprove(product.Id);
-        var missingShopMatching = ProductMatching.ForSourceItem(product.Name, "ASUS", FixtureTime, sourceNoShop.Id, skuNoShop);
+        var missingShopMatching = ProductMatching.ForSourceItem(Owner + " " + product.Name, "ASUS", FixtureTime, sourceNoShop.Id, skuNoShop);
         var likelyNew = new ProductMatching(Owner + " NOVEL LAPTOP AuroraBook Z1 with 16GB RAM and 1TB SSD", "Aurora", FixtureTime);
         db.ProductMatchings.AddRange(mA, mB, nullable, missingMapping, linked, missingShopMatching, likelyNew);
         await db.SaveChangesAsync();
         var manifest = new FixtureManifest(
-            [category.Id], [shopA.Id, shopB.Id], [product.Id], [sourceA.Id, sourceB.Id, sourceNoShop.Id],
+            [], [shopA.Id, shopB.Id], [product.Id], [sourceA.Id, sourceB.Id, sourceNoShop.Id],
             [offerA.Id, offerB.Id], [mappingA.Id, mappingB.Id, mappingNoOffer.Id, mappingLinked.Id],
             [mA.Id, mB.Id, nullable.Id, missingMapping.Id, linked.Id, missingShopMatching.Id, likelyNew.Id]);
         await WriteManifest(db, ManifestActionSeeded, manifest);
@@ -122,6 +149,17 @@ public static class MatchingFixtureCommand
         if (!latest.HasValue || latest.Value.Action != ManifestActionSeeded)
             return new { alreadyClean = true, manifest = (FixtureManifest?)null };
         var manifest = latest.Value.Manifest;
+        // Products created later through the matching endpoint are owned only when its audit event
+        // names one of the exact matching IDs in this command's append-only manifest.
+        var creationAudits = await db.AdminAuditLogs.AsNoTracking()
+            .Where(x => x.Action == "create_from_matching" && x.ResourceType == "product" && x.AfterJson != null)
+            .Select(x => x.AfterJson).ToListAsync();
+        var matchingIds = manifest.MatchingIds.ToHashSet();
+        var createdProductIds = creationAudits.Select(ParseCreatedProduct)
+            .Where(x => x.HasValue && x.Value.MatchingIds.Any(matchingIds.Contains))
+            .Select(x => x!.Value.ProductId);
+        manifest = manifest with { ProductIds = manifest.ProductIds.Concat(createdProductIds).Distinct().ToArray() };
+        await WriteManifest(db, ManifestActionSeeded, manifest);
 
         // Delete only IDs captured by this command's append-only ownership manifest.
         // Keep audit/history rows, including the manifest events themselves.
@@ -156,6 +194,20 @@ public static class MatchingFixtureCommand
             CreatedAtUtc = DateTime.UtcNow, AfterJson = JsonSerializer.Serialize(manifest)
         });
         await db.SaveChangesAsync();
+    }
+
+    private static (int ProductId, int[] MatchingIds)? ParseCreatedProduct(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("productId", out var productId) || !productId.TryGetInt32(out var id) || id <= 0 ||
+                !root.TryGetProperty("matchingIds", out var ids) || ids.ValueKind != JsonValueKind.Array) return null;
+            return (id, ids.EnumerateArray().Where(x => x.TryGetInt32(out _)).Select(x => x.GetInt32()).ToArray());
+        }
+        catch (JsonException) { return null; }
     }
 
     private static string NormalizeServer(string server)

@@ -117,9 +117,13 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     {
         var query = db.Products.AsNoTracking();
         if (isActive.HasValue) query = query.Where(x => x.IsActive == isActive.Value);
-        return PageOf(query.OrderBy(x => x.Id).Select(ProductDto), page, size, ct);
+        return ProductsPage(query.OrderBy(x => x.Id), page, size, ct);
     }
-    public Task<AdminProduct?> Product(int id, CancellationToken ct) => db.Products.AsNoTracking().Where(x => x.Id == id).Select(ProductDto).SingleOrDefaultAsync(ct);
+    public async Task<AdminProduct?> Product(int id, CancellationToken ct)
+    {
+        var product = await db.Products.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        return product is null ? null : ToDto(product);
+    }
     public async Task<AdminProduct> SaveProduct(int? id, ProductInput input, CancellationToken ct)
     {
         if (!await db.Categories.AnyAsync(x => x.Id == input.CategoryId && x.Level == 2, ct)) throw new ArgumentException("Category does not exist or is not a Level 2 category.");
@@ -396,7 +400,11 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         await db.AffiliateLinks.SumAsync(x => (long?)x.ConversionCount, ct) ?? 0,
         await db.AffiliateLinks.SumAsync(x => (decimal?)x.Revenue, ct) ?? 0m);
 
-    public Task<AdminProduct?> SeoProduct(int id, CancellationToken ct) => db.Products.AsNoTracking().Where(x => x.Id == id).Select(ProductDto).SingleOrDefaultAsync(ct);
+    public async Task<AdminProduct?> SeoProduct(int id, CancellationToken ct)
+    {
+        var product = await db.Products.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        return product is null ? null : ToDto(product);
+    }
     public async Task<AdminProduct?> SaveSeoProduct(int id, SeoInput input, CancellationToken ct)
     {
         var item = await db.Products.SingleOrDefaultAsync(x => x.Id == id, ct); if (item is null) return null;
@@ -501,8 +509,18 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         }
     }
     private static System.Text.Json.JsonElement? Parse(string? value) { if (string.IsNullOrWhiteSpace(value)) return null; using var doc = JsonDocument.Parse(value); return doc.RootElement.Clone(); }
-    private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl);
-    private static readonly System.Linq.Expressions.Expression<Func<Product, AdminProduct>> ProductDto = x => new AdminProduct(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl);
+    private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl)
+    {
+        NeedsStandardImage = !System.Text.RegularExpressions.Regex.IsMatch(x.ImageUrl ?? string.Empty, @"^/files/[0-9a-fA-F-]{36}$")
+    };
+    private static async Task<Page<AdminProduct>> ProductsPage(IQueryable<Product> query, int page, int size, CancellationToken ct)
+    {
+        var actualPage = Math.Max(1, page);
+        var actualSize = BoundSize(size);
+        var total = await query.CountAsync(ct);
+        var products = await query.Skip(Offset(actualPage, actualSize)).Take(actualSize).ToListAsync(ct);
+        return new(products.Select(ToDto).ToList(), actualPage, actualSize, total);
+    }
     private static readonly System.Linq.Expressions.Expression<Func<CompareShopAPI.Domain.Admin.ProductMatching, AdminMatching>> MatchingDto = x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId) { Status = x.Status };
     private static int BoundSize(int size) => Math.Clamp(size, 1, 100);
     private static int Offset(int page, int size) => (int)Math.Min(int.MaxValue, ((long)Math.Max(1, page) - 1) * BoundSize(size));

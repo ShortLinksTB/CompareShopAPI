@@ -333,7 +333,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
             return item with { Attributes = attrs, Source = source?.DisplayName, GroupKey = group,
                 SourceDetail = new AdminMatchingSourceDetail(specs, imageUrl, offer?.PriceVnd, mapping?.OriginalPriceVnd,
                     source?.Id, source?.DisplayName, partnerShopId, partnerShopName),
-                NeedsStandardImage = !System.Text.RegularExpressions.Regex.IsMatch(imageUrl ?? string.Empty, @"^/files/[0-9a-fA-F-]{36}$") };
+                NeedsStandardImage = !IsFilesImageUrl(imageUrl) };
         }).ToArray();
     }
     public async Task<IReadOnlyList<AdminAttachedMatching>> MatchingsForProduct(int productId, CancellationToken ct) => await db.ProductMatchings.AsNoTracking()
@@ -511,8 +511,11 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     private static System.Text.Json.JsonElement? Parse(string? value) { if (string.IsNullOrWhiteSpace(value)) return null; using var doc = JsonDocument.Parse(value); return doc.RootElement.Clone(); }
     private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl)
     {
-        NeedsStandardImage = !System.Text.RegularExpressions.Regex.IsMatch(x.ImageUrl ?? string.Empty, @"^/files/[0-9a-fA-F-]{36}$")
+        NeedsStandardImage = !IsFilesImageUrl(x.ImageUrl)
     };
+    private static bool IsFilesImageUrl(string? imageUrl) =>
+        imageUrl is not null && imageUrl.StartsWith("/files/", StringComparison.Ordinal) &&
+        Guid.TryParseExact(imageUrl["/files/".Length..], "D", out _);
     private static async Task<Page<AdminProduct>> ProductsPage(IQueryable<Product> query, int page, int size, CancellationToken ct)
     {
         var actualPage = Math.Max(1, page);

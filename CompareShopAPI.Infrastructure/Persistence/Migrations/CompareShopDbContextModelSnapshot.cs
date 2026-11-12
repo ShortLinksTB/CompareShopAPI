@@ -959,15 +959,23 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("AuthSubject")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("KeycloakSubject")
-                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
                     b.HasKey("Id");
 
                     b.HasIndex("KeycloakSubject")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[KeycloakSubject] IS NOT NULL");
+
+                    b.HasIndex("AuthSubject")
+                        .IsUnique()
+                        .HasFilter("[AuthSubject] IS NOT NULL");
 
                     b.ToTable("Users");
                 });

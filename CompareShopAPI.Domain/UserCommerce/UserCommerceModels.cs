@@ -13,8 +13,19 @@ public sealed class User
         CreatedAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);
     }
 
+    private User(string? keycloakSubject, string authSubject, DateTime createdAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(authSubject)) throw new ArgumentException("An AuthAPI subject is required.", nameof(authSubject));
+        KeycloakSubject = keycloakSubject;
+        AuthSubject = authSubject;
+        CreatedAtUtc = DateTime.SpecifyKind(createdAtUtc, DateTimeKind.Utc);
+    }
+
+    public static User ForAuthSubject(string authSubject, DateTime createdAtUtc) => new(null, authSubject, createdAtUtc);
+
     public int Id { get; private set; }
-    public string KeycloakSubject { get; private set; } = string.Empty;
+    public string? KeycloakSubject { get; private set; } = string.Empty;
+    public string? AuthSubject { get; private set; }
     public DateTime CreatedAtUtc { get; private set; }
 }
 

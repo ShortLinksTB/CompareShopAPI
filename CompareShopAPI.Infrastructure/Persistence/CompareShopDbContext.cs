@@ -78,8 +78,10 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<AffiliateClick>().HasOne(x => x.AffiliateLink).WithMany().HasForeignKey(x => x.AffiliateLinkId).OnDelete(DeleteBehavior.Cascade);
 
         model.Entity<User>().HasKey(x => x.Id);
-        model.Entity<User>().HasIndex(x => x.KeycloakSubject).IsUnique();
-        model.Entity<User>().Property(x => x.KeycloakSubject).HasMaxLength(200).IsRequired();
+        model.Entity<User>().HasIndex(x => x.KeycloakSubject).IsUnique().HasFilter("[KeycloakSubject] IS NOT NULL");
+        model.Entity<User>().Property(x => x.KeycloakSubject).HasMaxLength(200);
+        model.Entity<User>().Property(x => x.AuthSubject).HasMaxLength(200);
+        model.Entity<User>().HasIndex(x => x.AuthSubject).IsUnique().HasFilter("[AuthSubject] IS NOT NULL");
         model.Entity<User>().Property(x => x.CreatedAtUtc).IsRequired();
         model.Entity<WishlistItem>().HasKey(x => x.Id);
         model.Entity<WishlistItem>().HasIndex(x => new { x.UserId, x.ProductId }).IsUnique();

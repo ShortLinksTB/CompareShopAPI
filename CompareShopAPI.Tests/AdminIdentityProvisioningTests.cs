@@ -46,6 +46,7 @@ public sealed class AdminIdentityProvisioningTests
         public string? LastSubject { get; private set; }
 
         public Task<int> GetOrCreate(string keycloakSubject, CancellationToken ct) => Task.FromResult(1);
+        public Task<int> GetOrCreateForAuth(string authSubject, CancellationToken ct) => Task.FromResult(2);
 
         public Task<UserProvisioningResult> GetOrCreateForAdmin(string keycloakSubject, CancellationToken ct)
         {

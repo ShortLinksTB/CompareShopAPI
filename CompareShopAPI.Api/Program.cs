@@ -99,12 +99,34 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJw
         options.Audience = audience;
     }
     // With no issuer/audience/signing keys configured all bearer tokens fail closed.
+}).AddJwtBearer(AuthApiAuthenticationDefaults.Scheme, options =>
+{
+    var authority = builder.Configuration["AuthAPI:Authority"];
+    var issuer = builder.Configuration["AuthAPI:Issuer"];
+    var audience = builder.Configuration["AuthAPI:Audience"];
+    options.MapInboundClaims = false;
+    options.RequireHttpsMetadata = true;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidIssuer = string.IsNullOrWhiteSpace(issuer) ? null : issuer,
+        ValidateAudience = true,
+        ValidAudience = string.IsNullOrWhiteSpace(audience) ? null : audience,
+        ValidateLifetime = true,
+        RequireExpirationTime = true,
+        ValidateIssuerSigningKey = true,
+        ValidAlgorithms = [SecurityAlgorithms.RsaSha256],
+        NameClaimType = "sub"
+    };
+    if (!string.IsNullOrWhiteSpace(authority)) options.Authority = authority;
 });
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("Admin", policy => policy.RequireAuthenticatedUser().AddRequirements(new AdminClientRoleRequirement()));
-    options.AddPolicy("AuthenticatedUser", policy => policy.RequireAuthenticatedUser()
-        .RequireAssertion(context => !string.IsNullOrWhiteSpace(context.User.FindFirst("sub")?.Value)));
+    options.AddPolicy("AuthenticatedUser", policy => policy.AddAuthenticationSchemes(AuthApiAuthenticationDefaults.Scheme)
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context => !string.IsNullOrWhiteSpace(context.User.FindFirst("sub")?.Value)
+            && string.Equals(context.User.FindFirst("email_verified")?.Value, "true", StringComparison.OrdinalIgnoreCase)));
 });
 builder.Services.AddSingleton<IAuthorizationHandler, AdminClientRoleHandler>();
 builder.Services.AddOpenApi();

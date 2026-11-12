@@ -6,11 +6,16 @@ namespace CompareShopAPI.Api.UserCommerce;
 public sealed record WishlistChangeRequest(int ProductId, string Operation);
 public sealed record CreatePriceAlertRequest(int ProductId, int TargetPrice);
 
+public static class AuthApiAuthenticationDefaults
+{
+    public const string Scheme = "CompareShopAuthAPI";
+}
+
 public static class UserCommerceEndpoints
 {
     public static RouteGroupBuilder MapUserCommerceEndpoints(this RouteGroupBuilder api)
     {
-        var userApi = api.MapGroup("").RequireAuthorization("AuthenticatedUser");
+        var userApi = api.MapGroup("").RequireAuthorization("AuthenticatedUser").AddEndpointFilter<AuthSubjectUnavailableFilter>();
         userApi.MapGet("/wishlist", async (ClaimsPrincipal principal, WishlistService service, CancellationToken ct) =>
             Results.Ok(new { items = await service.List(principal.FindFirstValue("sub")!, ct) }));
         userApi.MapPost("/wishlist", async (WishlistChangeRequest request, ClaimsPrincipal principal, WishlistService service, TimeProvider clock, CancellationToken ct) =>
@@ -36,5 +41,18 @@ public static class UserCommerceEndpoints
         userApi.MapDelete("/price-alerts/{id:int}", async (int id, ClaimsPrincipal principal, PriceAlertService service, CancellationToken ct) =>
             await service.Delete(principal.FindFirstValue("sub")!, id, ct) ? Results.NoContent() : Results.NotFound());
         return api;
+    }
+}
+
+public sealed class AuthSubjectUnavailableFilter(ILogger<AuthSubjectUnavailableFilter> logger) : IEndpointFilter
+{
+    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        try { return await next(context); }
+        catch (AuthSubjectUnavailableException exception)
+        {
+            logger.LogError(exception, "AuthAPI subject storage is unavailable; public user request was not provisioned.");
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "Authentication service temporarily unavailable.");
+        }
     }
 }

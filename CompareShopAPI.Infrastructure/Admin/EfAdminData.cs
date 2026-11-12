@@ -409,7 +409,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var users = await q.Skip(Offset(page, size)).Take(BoundSize(size)).Select(x => new { x.Id, x.CreatedAtUtc, x.KeycloakSubject }).ToListAsync(ct);
         var ids = users.Select(x => x.Id).ToArray();
         var roles = await db.AdminUserRoles.AsNoTracking().Where(x => ids.Contains(x.UserId)).Join(db.AdminRoles, ur => ur.RoleId, r => r.Id, (ur, r) => new { ur.UserId, r.Name }).ToListAsync(ct);
-        return new(users.Select(x => new AdminUser(x.Id, x.CreatedAtUtc, roles.Where(r => r.UserId == x.Id).Select(r => r.Name).Order().ToArray()) { KeycloakSubject = x.KeycloakSubject }).ToArray(), page, BoundSize(size), total);
+        return new(users.Select(x => new AdminUser(x.Id, x.CreatedAtUtc, roles.Where(r => r.UserId == x.Id).Select(r => r.Name).Order().ToArray()) { KeycloakSubject = x.KeycloakSubject ?? string.Empty }).ToArray(), page, BoundSize(size), total);
     }
     public async Task<AdminUser?> User(int id, CancellationToken ct)
     {
@@ -426,7 +426,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         if (roleIds.Count > 0 && await db.AdminRoles.CountAsync(x => roleIds.Contains(x.Id), ct) != roleIds.Distinct().Count()) throw new ArgumentException("A role does not exist.");
         var currentPermissions = await PermissionKeys(currentRoleIds, ct);
         var requestedPermissions = await PermissionKeys(roleIds, ct);
-        return new(user.KeycloakSubject, currentRoleIds, currentPermissions, requestedPermissions);
+        return new(user.KeycloakSubject ?? string.Empty, currentRoleIds, currentPermissions, requestedPermissions);
     }
 
     public async Task<IReadOnlyList<string>?> ReplaceUserRoles(string actor, int userId, IReadOnlyList<int> roleIds, IReadOnlyList<int> expectedCurrentRoleIds, CancellationToken ct)

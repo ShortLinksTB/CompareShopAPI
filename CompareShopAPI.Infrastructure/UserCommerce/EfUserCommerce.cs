@@ -3,6 +3,7 @@ using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Infrastructure.Persistence;
 using CompareShopAPI.Infrastructure.Catalog;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 
 namespace CompareShopAPI.Infrastructure.UserCommerce;
 
@@ -32,6 +33,40 @@ public sealed class EfUserProvisioning(CompareShopDbContext db, TimeProvider clo
             var winner = await db.Users.AsNoTracking().Where(x => x.KeycloakSubject == keycloakSubject).Select(x => (int?)x.Id).SingleOrDefaultAsync(ct);
             if (winner.HasValue) return winner.Value;
             throw;
+        }
+    }
+
+    public async Task<int> GetOrCreateForAuth(string authSubject, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(authSubject)) throw new ArgumentException("An AuthAPI subject is required.", nameof(authSubject));
+        try
+        {
+            var existing = await FindAuthUserId(authSubject, ct);
+            if (existing.HasValue) return existing.Value;
+
+            var user = User.ForAuthSubject(authSubject, clock.GetUtcNow().UtcDateTime);
+            db.Users.Add(user);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return user.Id;
+            }
+            catch (DbUpdateException ex)
+            {
+                db.Entry(user).State = EntityState.Detached;
+                var winner = await FindAuthUserId(authSubject, ct);
+                if (winner.HasValue) return winner.Value;
+                if (IsMissingAuthSubjectSchema(ex)) throw new AuthSubjectUnavailableException(ex);
+                throw;
+            }
+        }
+        catch (SqlException ex) when (IsMissingAuthSubjectSchema(ex))
+        {
+            throw new AuthSubjectUnavailableException(ex);
+        }
+        catch (DbUpdateException ex) when (IsMissingAuthSubjectSchema(ex))
+        {
+            throw new AuthSubjectUnavailableException(ex);
         }
     }
 
@@ -79,6 +114,13 @@ public sealed class EfUserProvisioning(CompareShopDbContext db, TimeProvider clo
 
     private Task<int?> FindUserId(string subject, CancellationToken ct) => db.Users.AsNoTracking()
         .Where(x => x.KeycloakSubject == subject).Select(x => (int?)x.Id).SingleOrDefaultAsync(ct);
+
+    private Task<int?> FindAuthUserId(string subject, CancellationToken ct) => db.Users.AsNoTracking()
+        .Where(x => x.AuthSubject == subject).Select(x => (int?)x.Id).SingleOrDefaultAsync(ct);
+
+    private static bool IsMissingAuthSubjectSchema(Exception exception) =>
+        exception is SqlException { Number: 207 or 208 } ||
+        exception.InnerException is not null && IsMissingAuthSubjectSchema(exception.InnerException);
 }
 
 public sealed class EfUserCommerceRepository(CompareShopDbContext db) : IUserCommerceRepository

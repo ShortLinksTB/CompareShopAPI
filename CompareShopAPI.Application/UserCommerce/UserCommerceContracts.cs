@@ -8,8 +8,12 @@ public sealed record PriceAlertDto(int Id, int ProductId, string Slug, string Na
 public interface IUserProvisioning
 {
     Task<int> GetOrCreate(string keycloakSubject, CancellationToken ct);
+    Task<int> GetOrCreateForAuth(string authSubject, CancellationToken ct);
     Task<UserProvisioningResult> GetOrCreateForAdmin(string keycloakSubject, CancellationToken ct);
 }
+
+public sealed class AuthSubjectUnavailableException(Exception? innerException = null)
+    : Exception("AuthAPI user identity storage is unavailable.", innerException);
 
 public sealed record UserProvisioningResult(int UserId, bool Created);
 
@@ -35,17 +39,17 @@ public interface IUserCommerceRepository
 
 public sealed class WishlistService(IUserProvisioning users, IUserCommerceRepository commerce)
 {
-    public async Task<IReadOnlyList<WishlistItemDto>> List(string subject, CancellationToken ct)
+    public async Task<IReadOnlyList<WishlistItemDto>> List(string authSubject, CancellationToken ct)
     {
-        var userId = await users.GetOrCreate(subject, ct);
+        var userId = await users.GetOrCreateForAuth(authSubject, ct);
         return await commerce.Wishlist(userId, ct);
     }
 
-    public async Task<bool> Change(string subject, int productId, string operation, DateTime nowUtc, CancellationToken ct)
+    public async Task<bool> Change(string authSubject, int productId, string operation, DateTime nowUtc, CancellationToken ct)
     {
         if (productId <= 0) throw new ArgumentOutOfRangeException(nameof(productId));
         if (operation is not ("add" or "remove")) throw new ArgumentException("Operation must be add or remove.", nameof(operation));
-        var userId = await users.GetOrCreate(subject, ct);
+        var userId = await users.GetOrCreateForAuth(authSubject, ct);
         if (!await commerce.IsActiveProduct(productId, ct)) return false;
         if (operation == "add") await commerce.AddWishlist(userId, productId, nowUtc, ct);
         else await commerce.RemoveWishlist(userId, productId, ct);
@@ -55,25 +59,25 @@ public sealed class WishlistService(IUserProvisioning users, IUserCommerceReposi
 
 public sealed class PriceAlertService(IUserProvisioning users, IUserCommerceRepository commerce)
 {
-    public async Task<IReadOnlyList<PriceAlertDto>> List(string subject, CancellationToken ct)
+    public async Task<IReadOnlyList<PriceAlertDto>> List(string authSubject, CancellationToken ct)
     {
-        var userId = await users.GetOrCreate(subject, ct);
+        var userId = await users.GetOrCreateForAuth(authSubject, ct);
         return await commerce.PriceAlerts(userId, ct);
     }
 
-    public async Task<PriceAlertDto?> Create(string subject, int productId, int targetPrice, DateTime nowUtc, CancellationToken ct)
+    public async Task<PriceAlertDto?> Create(string authSubject, int productId, int targetPrice, DateTime nowUtc, CancellationToken ct)
     {
         if (productId <= 0) throw new ArgumentOutOfRangeException(nameof(productId));
         if (targetPrice <= 0) throw new ArgumentOutOfRangeException(nameof(targetPrice));
-        var userId = await users.GetOrCreate(subject, ct);
+        var userId = await users.GetOrCreateForAuth(authSubject, ct);
         if (!await commerce.IsActiveProduct(productId, ct)) return null;
         return await commerce.AddPriceAlert(userId, productId, targetPrice, nowUtc, ct);
     }
 
-    public async Task<bool> Delete(string subject, int alertId, CancellationToken ct)
+    public async Task<bool> Delete(string authSubject, int alertId, CancellationToken ct)
     {
         if (alertId <= 0) return false;
-        var userId = await users.GetOrCreate(subject, ct);
+        var userId = await users.GetOrCreateForAuth(authSubject, ct);
         return await commerce.DeletePriceAlert(userId, alertId, ct);
     }
 }

@@ -34,6 +34,28 @@ public sealed class UserCommerceTests
     }
 
     [Fact]
+    public async Task AuthAPI_provisioning_is_lazy_subject_only_and_keeps_Keycloak_identity_separate()
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options;
+        await using var db = new CompareShopDbContext(options);
+        var legacy = new User("legacy-keycloak-subject", DateTime.UtcNow);
+        db.Users.Add(legacy);
+        await db.SaveChangesAsync();
+        var provisioning = new EfUserProvisioning(db, TimeProvider.System);
+
+        var firstId = await provisioning.GetOrCreateForAuth("stable-auth-subject", default);
+        var secondId = await provisioning.GetOrCreateForAuth("stable-auth-subject", default);
+
+        Assert.Equal(firstId, secondId);
+        Assert.NotEqual(legacy.Id, firstId);
+        var authUser = await db.Users.SingleAsync(user => user.Id == firstId);
+        Assert.Null(authUser.KeycloakSubject);
+        Assert.Equal("stable-auth-subject", authUser.AuthSubject);
+        Assert.Equal("legacy-keycloak-subject", (await db.Users.SingleAsync(user => user.Id == legacy.Id)).KeycloakSubject);
+        Assert.Equal(2, await db.Users.CountAsync());
+    }
+
+    [Fact]
     public async Task Wishlist_keeps_a_dangling_product_reference_with_null_catalog_fields()
     {
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options;

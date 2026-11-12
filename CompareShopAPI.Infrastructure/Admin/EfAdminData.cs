@@ -113,13 +113,18 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
     public async Task<bool> DeleteShop(int id, CancellationToken ct) { var rows = await db.PartnerShops.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 
-    public Task<Page<AdminProduct>> Products(int page, int size, bool? isActive, CancellationToken ct)
+    public async Task<Page<AdminProduct>> Products(int page, int size, bool? isActive, CancellationToken ct)
     {
         var query = db.Products.AsNoTracking();
         if (isActive.HasValue) query = query.Where(x => x.IsActive == isActive.Value);
-        return PageOf(query.OrderBy(x => x.Id).Select(ProductDto), page, size, ct);
+        var result = await PageOf(query.OrderBy(x => x.Id).Select(ProductDto), page, size, ct);
+        return result with { Items = result.Items.Select(WithProductImageRequirement).ToArray() };
     }
-    public Task<AdminProduct?> Product(int id, CancellationToken ct) => db.Products.AsNoTracking().Where(x => x.Id == id).Select(ProductDto).SingleOrDefaultAsync(ct);
+    public async Task<AdminProduct?> Product(int id, CancellationToken ct)
+    {
+        var product = await db.Products.AsNoTracking().Where(x => x.Id == id).Select(ProductDto).SingleOrDefaultAsync(ct);
+        return product is null ? null : WithProductImageRequirement(product);
+    }
     public async Task<AdminProduct> SaveProduct(int? id, ProductInput input, CancellationToken ct)
     {
         if (!await db.Categories.AnyAsync(x => x.Id == input.CategoryId && x.Level == 2, ct)) throw new ArgumentException("Category does not exist or is not a Level 2 category.");
@@ -501,6 +506,10 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         }
     }
     private static System.Text.Json.JsonElement? Parse(string? value) { if (string.IsNullOrWhiteSpace(value)) return null; using var doc = JsonDocument.Parse(value); return doc.RootElement.Clone(); }
+    private static AdminProduct WithProductImageRequirement(AdminProduct product) => product with
+    {
+        NeedsStandardImage = !Regex.IsMatch(product.ImageUrl ?? string.Empty, @"^/files/[0-9a-fA-F-]{36}$", RegexOptions.CultureInvariant)
+    };
     private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl);
     private static readonly System.Linq.Expressions.Expression<Func<Product, AdminProduct>> ProductDto = x => new AdminProduct(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl);
     private static readonly System.Linq.Expressions.Expression<Func<CompareShopAPI.Domain.Admin.ProductMatching, AdminMatching>> MatchingDto = x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId) { Status = x.Status };

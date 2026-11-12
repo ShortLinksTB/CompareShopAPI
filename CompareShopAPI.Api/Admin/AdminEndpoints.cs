@@ -15,6 +15,7 @@ public static class AdminEndpoints
             return Results.Ok(new { status = "bootstrapped" });
         }));
         admin.MapGet("/products", (HttpContext c, int? page, int? pageSize, bool? isActive, AdminService s, CancellationToken ct) => Run(() => s.Products(Subject(c), page ?? 1, pageSize ?? 20, isActive, ct)));
+        admin.MapGet("/products/slug-availability", (HttpContext c, string? slug, AdminService s, CancellationToken ct) => Run(() => s.ProductSlugAvailability(Subject(c), slug, ct)));
         admin.MapGet("/products/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => await s.Product(Subject(c), id, ct) is { } x ? Results.Ok(x) : Results.NotFound()));
         admin.MapPost("/products", (HttpContext c, ProductInput input, AdminService s, CancellationToken ct) => Run(() => s.CreateProduct(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapPut("/products/{id:int}", (HttpContext c, int id, ProductInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateProduct(Subject(c), id, input, ct)));

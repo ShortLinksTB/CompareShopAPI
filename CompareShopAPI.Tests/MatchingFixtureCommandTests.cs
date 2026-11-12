@@ -11,6 +11,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -106,11 +108,51 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
         {
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
             var firstSeedCounts = await FixtureCounts(services);
-            Assert.Equal((1, 2, 3, 2, 4, 7, 1), firstSeedCounts);
+            Assert.Equal((1, 2, 3, 2, 7, 10, 2), firstSeedCounts);
             await using (var verify = new CompareShopDbContext(options))
             {
                 Assert.Equal(3, await verify.Categories.CountAsync());
                 Assert.All(await verify.Products.ToListAsync(), x => Assert.Equal(laptopCategoryId, x.CategoryId));
+            }
+
+            int[] originalMappingIds;
+            int[] originalMatchingIds;
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var manifestRow = await db.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+                    .OrderByDescending(x => x.Id).FirstAsync();
+                var manifestJson = JsonNode.Parse(manifestRow.AfterJson!)!.AsObject();
+                var allMappingIds = manifestJson["MappingIds"]!.AsArray().Select(x => x!.GetValue<int>()).ToArray();
+                var allMatchingIds = manifestJson["MatchingIds"]!.AsArray().Select(x => x!.GetValue<int>()).ToArray();
+                originalMappingIds = allMappingIds[..^3];
+                originalMatchingIds = allMatchingIds[..^3];
+                var appendedMappingIds = allMappingIds.Except(originalMappingIds).ToArray();
+                var appendedMatchingIds = allMatchingIds.Except(originalMatchingIds).ToArray();
+                await db.SourceItemMappings.Where(x => appendedMappingIds.Contains(x.Id)).ExecuteDeleteAsync();
+                await db.ProductMatchings.Where(x => appendedMatchingIds.Contains(x.Id)).ExecuteDeleteAsync();
+                manifestJson["MappingIds"] = JsonSerializer.SerializeToNode(originalMappingIds);
+                manifestJson["MatchingIds"] = JsonSerializer.SerializeToNode(originalMatchingIds);
+                manifestJson.Remove("Version"); // PR #80 manifests are unversioned.
+                db.AdminAuditLogs.Add(new AdminAuditLog
+                {
+                    ActorSubject = "QC-SL1815", Action = "fixture.manifest.seeded", ResourceType = "QC-SL1815-MatchingFixture",
+                    ResourceId = "QC-SL1815", CreatedAtUtc = DateTime.UtcNow, AfterJson = manifestJson.ToJsonString()
+                });
+                await db.SaveChangesAsync();
+            }
+
+            Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
+            Assert.Equal(firstSeedCounts, await FixtureCounts(services));
+            await using (var verifyUpgrade = new CompareShopDbContext(options))
+            {
+                var upgradedRow = await verifyUpgrade.AdminAuditLogs.Where(x => x.ActorSubject == "QC-SL1815" && x.ResourceType == "QC-SL1815-MatchingFixture")
+                    .OrderByDescending(x => x.Id).FirstAsync();
+                using var upgradedJson = JsonDocument.Parse(upgradedRow.AfterJson!);
+                var upgraded = upgradedJson.RootElement;
+                Assert.Equal(2, upgraded.GetProperty("Version").GetInt32());
+                Assert.All(originalMappingIds, id => Assert.Contains(id, upgraded.GetProperty("MappingIds").EnumerateArray().Select(x => x.GetInt32())));
+                Assert.All(originalMatchingIds, id => Assert.Contains(id, upgraded.GetProperty("MatchingIds").EnumerateArray().Select(x => x.GetInt32())));
+                Assert.Equal(7, upgraded.GetProperty("MappingIds").GetArrayLength());
             }
 
             Assert.True(await MatchingFixtureCommand.TryRunAsync(["seed-matching-fixtures"], Environment("Development"), config, services));
@@ -149,7 +191,7 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
                 await service.ApproveMatching(subject, single.Id, existingProductId, default);
                 Assert.True(await db.AdminAuditLogs.AnyAsync(x => x.Action == "approve" && x.ResourceType == "matching" && x.ResourceId == single.Id.ToString()));
 
-                var matching = await db.ProductMatchings.SingleAsync(x => x.ExternalSku == "QC-SL1815-missing-shop-laptop");
+                var matching = await db.ProductMatchings.SingleAsync(x => x.ExternalSku == "QC-SL1815-v2-create-product");
                 var created = await service.CreateMatchingProduct(subject, matching.Id,
                     new MatchingProductCreate("QC Created From Matching", "ASUS", null, laptopCategoryId, null, "none"), default);
                 Assert.True(created.NeedsStandardImage);

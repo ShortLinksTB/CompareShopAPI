@@ -22,6 +22,40 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("CompareShopAPI.Domain.HomeShowcase.HomeShowcasePreviewToken", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+                    b.Property<string>("ActorSubject").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<DateTime?>("ConsumedAtUtc").HasColumnType("datetime2");
+                    b.Property<DateTime>("CreatedAtUtc").HasColumnType("datetime2");
+                    b.Property<DateTime>("ExpiresAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("TokenHash").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
+                    b.HasKey("Id");
+                    b.HasIndex("TokenHash").IsUnique();
+                    b.HasIndex("ActorSubject", "CreatedAtUtc");
+                    b.ToTable("HomeShowcasePreviewTokens");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.HomeShowcase.HomeShowcaseSlot", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+                    b.Property<int?>("ProductId").HasColumnType("int");
+                    b.Property<int>("Section").HasColumnType("int");
+                    b.Property<int>("SlotIndex").HasColumnType("int");
+                    b.Property<int>("Snapshot").HasColumnType("int");
+                    b.HasKey("Id");
+                    b.HasIndex("Snapshot", "Section", "ProductId").IsUnique().HasFilter("[ProductId] IS NOT NULL");
+                    b.HasIndex("Snapshot", "Section", "SlotIndex").IsUnique();
+                    b.ToTable("HomeShowcaseSlots", t =>
+                        {
+                            t.HasCheckConstraint("CK_HomeShowcaseSlots_Section", "[Section] IN (0, 1)");
+                            t.HasCheckConstraint("CK_HomeShowcaseSlots_SlotIndex", "[SlotIndex] BETWEEN 1 AND 15");
+                            t.HasCheckConstraint("CK_HomeShowcaseSlots_Snapshot", "[Snapshot] IN (0, 1)");
+                        });
+                });
+
             modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminAuditLog", b =>
                 {
                     b.Property<long>("Id")

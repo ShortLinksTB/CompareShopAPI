@@ -21,6 +21,10 @@ public sealed class IngestionServiceTests
     [InlineData("https://user:pass@shop.example/private?token=secret", "token=secret")]
     [InlineData("http://10.0.0.5/private", "10.0.0.5")]
     [InlineData("connection string: Server=db.internal;User ID=api;Password=secret", "Password=secret")]
+    [InlineData("navigation failed at https://admin.localhost/catalog", "admin.localhost")]
+    [InlineData("navigation failed at https://admin.localhost./catalog", "admin.localhost")]
+    [InlineData("navigation failed at https://api.service.home.arpa/catalog", "api.service.home.arpa")]
+    [InlineData("navigation failed at https://preview.example/catalog", "preview.example")]
     public void LogSanitizerRedactsCredentialsAndSensitiveUrlParts(string input, string forbidden)
     {
         Assert.DoesNotContain(forbidden, SyncJobLogSanitizer.Clean(input, 2000), StringComparison.OrdinalIgnoreCase);

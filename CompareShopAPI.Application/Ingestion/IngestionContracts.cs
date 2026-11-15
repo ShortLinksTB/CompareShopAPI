@@ -51,8 +51,10 @@ public static class SyncJobLogSanitizer
     private static string SafeHostOnly(string raw)
     {
         if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) return "[url]";
-        var host = uri.Host;
-        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || new[] { ".local", ".internal", ".lan", ".corp", ".home", ".intranet", ".test" }.Any(suffix => host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) || !host.Contains('.') || System.Net.IPAddress.TryParse(host, out _)) return "[url]";
+        var host = uri.Host.TrimEnd('.');
+        var localOrReservedDomains = new[] { "localhost", "local", "internal", "lan", "corp", "home", "intranet", "test", "invalid", "example", "onion", "alt", "home.arpa" };
+        if (localOrReservedDomains.Any(domain => host.Equals(domain, StringComparison.OrdinalIgnoreCase) || host.EndsWith($".{domain}", StringComparison.OrdinalIgnoreCase))
+            || !host.Contains('.') || System.Net.IPAddress.TryParse(host, out _)) return "[url]";
         return $"{uri.Scheme}://{host}/[redacted]";
     }
 }

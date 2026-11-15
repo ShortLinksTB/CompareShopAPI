@@ -5,6 +5,7 @@ using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Articles;
 using CompareShopAPI.Domain.Ingestion;
 using CompareShopAPI.Domain.Files;
+using CompareShopAPI.Domain.HomeShowcase;
 namespace CompareShopAPI.Infrastructure.Persistence;
 public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> options) : DbContext(options)
 {
@@ -40,6 +41,8 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<SyncJobLogEntry> SyncJobLogEntries => Set<SyncJobLogEntry>();
     public DbSet<SourceItemMapping> SourceItemMappings => Set<SourceItemMapping>();
     public DbSet<FileAsset> Files => Set<FileAsset>();
+    public DbSet<HomeShowcaseSlot> HomeShowcaseSlots => Set<HomeShowcaseSlot>();
+    public DbSet<HomeShowcasePreviewToken> HomeShowcasePreviewTokens => Set<HomeShowcasePreviewToken>();
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
@@ -52,6 +55,22 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<PartnerShop>().HasKey(x => x.Id); model.Entity<PartnerShop>().HasIndex(x => x.Slug).IsUnique(); model.Entity<PartnerShop>().HasIndex(x => x.IsActive);
         model.Entity<PartnerShop>().Property(x => x.Slug).HasMaxLength(160); model.Entity<PartnerShop>().Property(x => x.Name).HasMaxLength(200);
         model.Entity<PartnerShop>().Property(x => x.ShowOnHome).HasDefaultValue(false);
+        model.Entity<HomeShowcaseSlot>().HasKey(x => x.Id);
+        model.Entity<HomeShowcaseSlot>().Property(x => x.Snapshot).HasConversion<int>();
+        model.Entity<HomeShowcaseSlot>().Property(x => x.Section).HasConversion<int>();
+        model.Entity<HomeShowcaseSlot>().ToTable(table =>
+        {
+            table.HasCheckConstraint("CK_HomeShowcaseSlots_Snapshot", "[Snapshot] IN (0, 1)");
+            table.HasCheckConstraint("CK_HomeShowcaseSlots_Section", "[Section] IN (0, 1)");
+            table.HasCheckConstraint("CK_HomeShowcaseSlots_SlotIndex", "[SlotIndex] BETWEEN 1 AND 15");
+        });
+        model.Entity<HomeShowcaseSlot>().HasIndex(x => new { x.Snapshot, x.Section, x.SlotIndex }).IsUnique();
+        model.Entity<HomeShowcaseSlot>().HasIndex(x => new { x.Snapshot, x.Section, x.ProductId }).IsUnique().HasFilter("[ProductId] IS NOT NULL");
+        model.Entity<HomeShowcasePreviewToken>().HasKey(x => x.Id);
+        model.Entity<HomeShowcasePreviewToken>().Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+        model.Entity<HomeShowcasePreviewToken>().Property(x => x.ActorSubject).HasMaxLength(200).IsRequired();
+        model.Entity<HomeShowcasePreviewToken>().HasIndex(x => x.TokenHash).IsUnique();
+        model.Entity<HomeShowcasePreviewToken>().HasIndex(x => new { x.ActorSubject, x.CreatedAtUtc });
         model.Entity<Product>().HasKey(x => x.Id); model.Entity<Product>().HasIndex(x => x.Slug).IsUnique();
         model.Entity<Product>().HasIndex(x => new { x.IsActive, x.CategoryId }); model.Entity<Product>().Property(x => x.Slug).HasMaxLength(200);
         model.Entity<Product>().Property(x => x.Name).HasMaxLength(300); model.Entity<Product>().Property(x => x.Brand).HasMaxLength(200); model.Entity<Product>().Property(x => x.ImageUrl).HasMaxLength(2048);

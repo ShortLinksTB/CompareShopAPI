@@ -27,6 +27,9 @@ using CompareShopAPI.Infrastructure.Ingestion;
 using CompareShopAPI.Api.Files;
 using CompareShopAPI.Application.Files;
 using CompareShopAPI.Infrastructure.Files;
+using CompareShopAPI.Api.HomeShowcase;
+using CompareShopAPI.Application.HomeShowcase;
+using CompareShopAPI.Infrastructure.HomeShowcase;
 
 var seedCatalogRequested = CatalogSeedCommand.IsRequested(args);
 var matchingFixtureRequested = MatchingFixtureCommand.IsRequested(args);
@@ -34,6 +37,10 @@ var builder = WebApplication.CreateBuilder(seedCatalogRequested || matchingFixtu
 builder.Services.AddDbContext<CompareShopDbContext>(options => options.UseSqlServer(
     builder.Configuration.GetConnectionString("CompareShopDb") ?? "", sql => sql.CommandTimeout(5)));
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<IHomeShowcaseStore, EfHomeShowcaseStore>();
+builder.Services.AddScoped<IHomeShowcaseAudit, EfHomeShowcaseAudit>();
+builder.Services.AddScoped<HomeShowcaseService>();
 builder.Services.AddScoped<ICatalogQueries, EfCatalogQueries>();
 builder.Services.AddScoped<IPriceHistoryStore, EfPriceHistoryStore>();
 builder.Services.AddScoped<CatalogService>();
@@ -139,7 +146,9 @@ app.UseAuthorization();
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminEndpoints();
+app.MapGroup("/admin").RequireAuthorization("Admin").MapHomeShowcaseEndpoints();
 app.MapGroup("/api/v1").MapCatalogEndpoints();
+app.MapGroup("/api/v1").MapPublicHomeShowcaseEndpoints();
 app.MapGroup("/api/v1").MapUserCommerceEndpoints();
 app.MapGroup("/api/v1").MapArticleBlogEndpoints();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminArticleBlogEndpoints();

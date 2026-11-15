@@ -45,6 +45,7 @@ public sealed record DerivativeVariant(int Width, int Height, string Fit, double
 public sealed record ProcessedDerivative(byte[] Bytes, int Width, int Height, string ContentType, string Extension, IReadOnlyList<string> Warnings);
 public interface IImageDerivativeProcessor
 {
+    string? DetectSourceContentType(ReadOnlyMemory<byte> source);
     ProcessedDerivative Process(ReadOnlyMemory<byte> source, string requestedFormat, int width, int height, string fit,
         double focalX, double focalY, string background, int quality);
 }
@@ -187,6 +188,13 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
                 await buffer.WriteAsync(chunk.AsMemory(0, read), ct);
             }
             sourceBytes = buffer.ToArray();
+        }
+        var detectedContentType = imageProcessor?.DetectSourceContentType(sourceBytes);
+        if (detectedContentType is null)
+        {
+            foreach (var (variant, index) in request.Variants.Select((value, index) => (value, index)))
+                await TryAuditDerivative(actor, id, index, variant, "unsupported_source_type", ct);
+            return request.Variants.Select((_, i) => new DerivativeVariantOutcome(i, null, null, "unsupported_source_type", [])).ToArray();
         }
         var results = new List<DerivativeVariantOutcome>(request.Variants.Count);
         for (var i = 0; i < request.Variants.Count; i++)

@@ -9,6 +9,20 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
 {
     private const long MaxPixels = 24_000_000;
 
+    public string? DetectSourceContentType(ReadOnlyMemory<byte> source)
+    {
+        using var data = SKData.CreateCopy(source.Span);
+        using var codec = SKCodec.Create(data);
+        return codec?.EncodedFormat switch
+        {
+            SKEncodedImageFormat.Jpeg => "image/jpeg",
+            SKEncodedImageFormat.Png => "image/png",
+            SKEncodedImageFormat.Webp => "image/webp",
+            SKEncodedImageFormat.Gif => "image/gif",
+            _ => null
+        };
+    }
+
     public ProcessedDerivative Process(ReadOnlyMemory<byte> source, string requestedFormat, int width, int height,
         string fit, double focalX, double focalY, string background, int quality)
     {

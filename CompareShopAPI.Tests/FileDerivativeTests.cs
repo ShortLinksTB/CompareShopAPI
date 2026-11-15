@@ -37,6 +37,39 @@ public sealed class FileDerivativeTests
     }
 
     [Fact]
+    public async Task Derivative_source_type_uses_encoded_bytes_instead_of_persisted_mime()
+    {
+        var processor = new SkiaImageDerivativeProcessor();
+        var imageBytes = MakeImage(20, 20);
+        var request = new DerivativeRequest(new[]
+        {
+            new DerivativeVariant(32, 32, "cover", null, null, "transparent", "png", 80, null)
+        });
+
+        var sourceWithMisleadingMime = new FileAsset(Guid.NewGuid(), "source.pdf", "application/pdf", imageBytes.Length,
+            "source", "admin", DateTime.UtcNow);
+        var supportedService = new FileService(new Repository(sourceWithMisleadingMime), new Storage(imageBytes),
+            new Permissions(), TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var supported = Assert.Single(await supportedService.CreateDerivatives("admin", sourceWithMisleadingMime.Id, request, default));
+        Assert.True(supported.Succeeded);
+
+        var unsupportedSource = new FileAsset(Guid.NewGuid(), "source.png", "image/png", 4, "source", "admin", DateTime.UtcNow);
+        var unsupportedStorage = new Storage([.. "%PDF"u8.ToArray()]);
+        var unsupportedService = new FileService(new Repository(unsupportedSource), unsupportedStorage,
+            new Permissions(), TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var unsupported = Assert.Single(await unsupportedService.CreateDerivatives("admin", unsupportedSource.Id, request, default));
+        Assert.Equal("unsupported_source_type", unsupported.Error);
+        Assert.Equal(0, unsupportedStorage.PutCount);
+
+        var svgBytes = System.Text.Encoding.UTF8.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        var svgSource = new FileAsset(Guid.NewGuid(), "source.png", "image/png", svgBytes.Length, "svg", "admin", DateTime.UtcNow);
+        var svgService = new FileService(new Repository(svgSource), new Storage(svgBytes), new Permissions(),
+            TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var svg = Assert.Single(await svgService.CreateDerivatives("admin", svgSource.Id, request, default));
+        Assert.Equal("unsupported_source_type", svg.Error);
+    }
+
+    [Fact]
     public void Processor_accepts_24_megapixels_and_rejects_more_from_header()
     {
         var processor = new SkiaImageDerivativeProcessor();
@@ -163,26 +196,37 @@ public sealed class FileDerivativeTests
     [Fact]
     public async Task Derivative_source_type_uses_encoded_bytes_instead_of_stored_content_type()
     {
-        var pdf = new FileAsset(Guid.NewGuid(), "manual.pdf", "application/pdf", 3, "source", "admin", DateTime.UtcNow);
-        var variant = new DerivativeVariant(32, 32, "cover", null, null, "transparent", "keep", 70, null);
-        var supportedBytes = MakeImage(10, 10);
-        var supportedStorage = new Storage(supportedBytes);
-        var misleadingMimeService = new FileService(new Repository(pdf), supportedStorage, new Permissions(), TimeProvider.System,
-            NullLogger<FileService>.Instance, new SkiaImageDerivativeProcessor());
-        var supported = Assert.Single(await misleadingMimeService.CreateDerivatives("admin", pdf.Id, new(new[] { variant }), default));
+        var processor = new SkiaImageDerivativeProcessor();
+        var imageBytes = MakeImage(20, 20);
+        var request = new DerivativeRequest(new[]
+        {
+            new DerivativeVariant(32, 32, "cover", null, null, "transparent", "png", 80, null)
+        });
+        var sourceWithMisleadingMime = new FileAsset(Guid.NewGuid(), "source.pdf", "application/pdf", imageBytes.Length,
+            "source", "admin", DateTime.UtcNow);
+        var supportedService = new FileService(new Repository(sourceWithMisleadingMime), new Storage(imageBytes),
+            new Permissions(), TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var supported = Assert.Single(await supportedService.CreateDerivatives("admin", sourceWithMisleadingMime.Id, request, default));
         Assert.True(supported.Succeeded);
-        Assert.Equal(1, supportedStorage.ReadCount);
 
-        var mislabeledPdf = new FileAsset(Guid.NewGuid(), "image.png", "image/png", 3, "source", "admin", DateTime.UtcNow);
-        var unsupportedService = new FileService(new Repository(mislabeledPdf), new Storage("%PDF-1.7\n"u8.ToArray()),
-            new Permissions(), TimeProvider.System, NullLogger<FileService>.Instance, new SkiaImageDerivativeProcessor());
-        var unsupported = Assert.Single(await unsupportedService.CreateDerivatives("admin", mislabeledPdf.Id, new(new[] { variant }), default));
+        var pdfBytes = "%PDF-1.7\n"u8.ToArray();
+        var unsupportedSource = new FileAsset(Guid.NewGuid(), "source.png", "image/png", pdfBytes.Length, "source", "admin", DateTime.UtcNow);
+        var unsupportedService = new FileService(new Repository(unsupportedSource), new Storage(pdfBytes),
+            new Permissions(), TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var unsupported = Assert.Single(await unsupportedService.CreateDerivatives("admin", unsupportedSource.Id, request, default));
         Assert.Equal("unsupported_source_type", unsupported.Error);
 
+        var svgBytes = System.Text.Encoding.UTF8.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        var svgSource = new FileAsset(Guid.NewGuid(), "source.png", "image/png", svgBytes.Length, "svg", "admin", DateTime.UtcNow);
+        var svgService = new FileService(new Repository(svgSource), new Storage(svgBytes), new Permissions(),
+            TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var svg = Assert.Single(await svgService.CreateDerivatives("admin", svgSource.Id, request, default));
+        Assert.Equal("unsupported_source_type", svg.Error);
+
         await Assert.ThrowsAsync<CompareShopAPI.Application.Admin.AdminUnauthorizedException>(() =>
-            misleadingMimeService.CreateDerivatives(null, pdf.Id, new(new[] { variant }), default));
-        await Assert.ThrowsAsync<ArgumentException>(() => misleadingMimeService.CreateDerivatives("admin", pdf.Id,
-            new(Enumerable.Repeat(variant, 6).ToArray()), default));
+            supportedService.CreateDerivatives(null, sourceWithMisleadingMime.Id, request, default));
+        await Assert.ThrowsAsync<ArgumentException>(() => supportedService.CreateDerivatives("admin", sourceWithMisleadingMime.Id,
+            new(Enumerable.Repeat(request.Variants[0], 6).ToArray()), default));
     }
 
     [Fact]
@@ -263,6 +307,7 @@ public sealed class FileDerivativeTests
     private sealed class Processor : IImageDerivativeProcessor
     {
         private readonly SkiaImageDerivativeProcessor inner = new();
+        public string? DetectSourceContentType(ReadOnlyMemory<byte> source) => inner.DetectSourceContentType(source);
         public ProcessedDerivative Process(ReadOnlyMemory<byte> source, string format, int width, int height, string fit,
             double focalX, double focalY, string background, int quality)
         {

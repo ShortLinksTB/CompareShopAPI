@@ -343,6 +343,7 @@ public sealed class FileServiceTests
 
     private sealed class TestDerivativeProcessor : IImageDerivativeProcessor
     {
+        public string? DetectSourceContentType(ReadOnlyMemory<byte> source) => "image/png";
         public ProcessedDerivative Process(ReadOnlyMemory<byte> source, string requestedFormat, int width, int height,
             string fit, double focalX, double focalY, string background, int quality) =>
             new([1, 2, 3], width, height, "image/png", "png", []);

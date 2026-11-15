@@ -37,6 +37,22 @@ public sealed class IngestionDomainTests
     }
 
     [Fact]
+    public void SourceConfigurationEnforcesIntervalAndDoesNotReactivateErrorSources()
+    {
+        var source = new DataSource("bhx", "BHX", "/bia", null, DateTime.UtcNow);
+        source.Configure(DataSourceState.Paused, 1, null);
+        Assert.Equal(DataSourceState.Paused, source.State);
+        Assert.Equal(1, source.IntervalHours);
+        source.Configure(DataSourceState.Active, 720, 4);
+        Assert.Equal(4, source.PartnerShopId);
+        Assert.Throws<ArgumentOutOfRangeException>(() => source.Configure(DataSourceState.Active, 721, null));
+        source.MarkError();
+        Assert.Throws<InvalidOperationException>(() => source.Configure(DataSourceState.Active, 72, null));
+        source.Configure(DataSourceState.Paused, 72, null);
+        Assert.Equal(DataSourceState.Paused, source.State);
+    }
+
+    [Fact]
     public void PausedSourceIsNotDueUntilExplicitlyReactivated()
     {
         var now = DateTime.UtcNow;

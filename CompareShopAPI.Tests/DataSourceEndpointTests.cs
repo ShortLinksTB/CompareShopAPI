@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Net.Http.Json;
 using CompareShopAPI.Domain.Ingestion;
 using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Infrastructure.Persistence;
@@ -85,6 +86,31 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
                 Assert.Equal(sourceId, job.GetProperty("dataSourceId").GetInt32());
                 Assert.Equal("SL-1452 Test Source", job.GetProperty("dataSource").GetString());
             }
+
+            var configureResponse = await client.PatchAsJsonAsync($"/admin/data-sources/{sourceId}", new { state = "Paused", intervalHours = 24, partnerShopId = (int?)null });
+            Assert.Equal(HttpStatusCode.OK, configureResponse.StatusCode);
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var configured = await db.DataSources.SingleAsync(x => x.Id == sourceId);
+                Assert.Equal(DataSourceState.Paused, configured.State);
+                Assert.Equal(24, configured.IntervalHours);
+                var audit = await db.AdminAuditLogs.SingleAsync(x => x.ResourceType == "data_source" && x.ResourceId == sourceId.ToString());
+                Assert.Equal(operatorSubject, audit.ActorSubject);
+                Assert.DoesNotContain("credential", audit.BeforeJson!, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("credential", audit.AfterJson!, StringComparison.OrdinalIgnoreCase);
+                db.SyncJobs.RemoveRange(db.SyncJobs);
+                await db.SaveChangesAsync();
+            }
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(roles, subject: viewerSubject));
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.PatchAsJsonAsync($"/admin/data-sources/{sourceId}", new { state = "Active", intervalHours = 24, partnerShopId = (int?)null })).StatusCode);
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(roles, subject: operatorSubject));
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/admin/data-sources/{sourceId}/sync", content: null)).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PatchAsJsonAsync($"/admin/data-sources/{sourceId}", new { state = "Active", intervalHours = 721, partnerShopId = (int?)null })).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.PatchAsJsonAsync($"/admin/data-sources/{sourceId}", new { state = "Active", intervalHours = 24, partnerShopId = (int?)null })).StatusCode);
+            Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsync($"/admin/data-sources/{sourceId}/sync", content: null)).StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/admin/data-sources/{sourceId}/sync", content: null)).StatusCode);
+            using (var queuedJobs = JsonDocument.Parse(await (await client.GetAsync("/admin/sync-jobs")).Content.ReadAsStringAsync()))
+                Assert.Contains(queuedJobs.RootElement.EnumerateArray(), item => item.GetProperty("dataSourceId").GetInt32() == sourceId && item.GetProperty("state").GetInt32() == (int)SyncJobState.Queued);
 
             await using (var db = new CompareShopDbContext(options))
             {

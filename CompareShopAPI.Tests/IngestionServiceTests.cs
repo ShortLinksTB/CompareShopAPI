@@ -161,6 +161,22 @@ public sealed class IngestionServiceTests
         Assert.Empty(await service.List("admin", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task DataSourceConfigureRequiresExecutePermissionAndValidatesMutableFields()
+    {
+        var now = Now;
+        var expected = new DataSourceSummary(7, "bhx", "BHX", "/bia", null, DataSourceState.Active, 72, now, null, null);
+        var store = new FakeDataSources { Sources = [expected] };
+        var permissions = new FakePermissions { Allowed = false };
+        var service = new DataSourceAdminService(permissions, store);
+        var config = new DataSourceConfiguration(DataSourceState.Paused, 24, null);
+        await Assert.ThrowsAsync<IngestionForbiddenException>(() => service.Configure("admin", 7, config, CancellationToken.None));
+        permissions.Allowed = true;
+        Assert.Equal("sync_jobs.execute", permissions.LastPermission);
+        await Assert.ThrowsAsync<ArgumentException>(() => service.Configure("admin", 7, config with { IntervalHours = 721 }, CancellationToken.None));
+        Assert.Equal(expected, await service.Configure("admin", 7, config, CancellationToken.None));
+    }
+
     private static DataSource Source() => new("bhx", "BHX", "/bia", null, Now);
 
     private sealed class FakeJobs : ISyncJobStore
@@ -185,11 +201,15 @@ public sealed class IngestionServiceTests
         public Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct, bool pauseSource = false) { CompletedState = state; Seen = seen; Imported = imported; Pending = pending; ErrorCode = errorCode; ErrorSummary = errorSummary; SourcePaused = pauseSource; return Task.CompletedTask; }
         public Task<IReadOnlyList<SyncJobSummary>> ListJobs(CancellationToken ct) => Task.FromResult<IReadOnlyList<SyncJobSummary>>([]);
         public Task<SyncJobSummary?> QueueRetry(int jobId, CancellationToken ct) => Task.FromResult(Retry);
+        public Task<ManualQueueResult> QueueManual(int sourceId, DateTime nowUtc, CancellationToken ct) => Task.FromResult(new ManualQueueResult(ManualQueueOutcome.NotFound));
     }
 
     private sealed class FakeDataSources : IDataSourceStore
     {
         public IReadOnlyList<DataSourceSummary> Sources { get; set; } = [];
+        public Task<bool> Exists(int id, CancellationToken ct) => Task.FromResult(Sources.Any(x => x.Id == id));
+        public Task<DataSourceSummary?> Configure(int id, DataSourceConfiguration configuration, string actorSubject, DateTime nowUtc, CancellationToken ct) => Task.FromResult(Sources.SingleOrDefault(x => x.Id == id));
+        public Task<bool> PartnerShopIsUsable(int partnerShopId, CancellationToken ct) => Task.FromResult(partnerShopId > 0);
         public Task<IReadOnlyList<DataSourceSummary>> ListDataSources(CancellationToken ct) => Task.FromResult(Sources);
     }
 

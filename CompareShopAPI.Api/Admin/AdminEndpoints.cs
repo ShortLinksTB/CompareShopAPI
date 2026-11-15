@@ -71,6 +71,28 @@ public static class AdminEndpoints
             try { return Results.Ok(await s.List(Subject(c), ct)); }
             catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
         });
+        admin.MapPatch("/data-sources/{id:int}", async (HttpContext c, int id, DataSourceConfiguration input, DataSourceAdminService s, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await s.Configure(Subject(c), id, input, ct)); }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+            catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
+            catch (InvalidOperationException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+        });
+        admin.MapPost("/data-sources/{id:int}/sync", async (HttpContext c, int id, IngestionAdminService s, CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await s.QueueManual(Subject(c), id, ct);
+                return result.Outcome switch
+                {
+                    ManualQueueOutcome.Queued => Results.Accepted(value: result.Job),
+                    ManualQueueOutcome.NotFound => Results.NotFound(),
+                    _ => Results.Problem("Data source is paused, in error, or already has an active job.", statusCode: StatusCodes.Status409Conflict)
+                };
+            }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+        });
         admin.MapPost("/sync-jobs/{id:int}/retry", async (HttpContext c, int id, IngestionAdminService s, CancellationToken ct) =>
         {
             try { return Results.Accepted(value: await s.Retry(Subject(c), id, ct)); }

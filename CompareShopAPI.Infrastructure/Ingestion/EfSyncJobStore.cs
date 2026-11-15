@@ -22,8 +22,8 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
     public async Task<SyncJob?> TryClaim(int sourceId, DateTime nowUtc, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var source = await db.DataSources.SingleOrDefaultAsync(s => s.Id == sourceId && s.State == DataSourceState.Active, ct);
-        if (source is null) { await tx.RollbackAsync(ct); return null; }
+        var source = await db.DataSources.FromSqlInterpolated($"SELECT * FROM [DataSources] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {sourceId}").SingleOrDefaultAsync(ct);
+        if (source is null || source.State != DataSourceState.Active) { await tx.RollbackAsync(ct); return null; }
         var expiredJobs = await db.SyncJobs.Where(j => j.DataSourceId == sourceId && j.State == SyncJobState.Running
             && (j.LeaseExpiresAtUtc == null || j.LeaseExpiresAtUtc <= nowUtc)).ToListAsync(ct);
         foreach (var expiredJob in expiredJobs)
@@ -152,5 +152,20 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
         db.SyncJobs.Add(retry); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
         var sourceName = await db.DataSources.Where(x => x.Id == retry.DataSourceId).Select(x => x.DisplayName).SingleAsync(ct);
         return new(retry.Id, retry.DataSourceId, sourceName, retry.State, retry.QueuedAtUtc, null, null, 0, 0, 0, null, null, retry.RetryOfJobId);
+    }
+
+    public async Task<ManualQueueResult> QueueManual(int sourceId, DateTime nowUtc, CancellationToken ct)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        // Reading and holding the source row serializes enqueues even when no SyncJobs range exists yet.
+        var source = await db.DataSources.FromSqlInterpolated($"SELECT * FROM [DataSources] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {sourceId}").SingleOrDefaultAsync(ct);
+        if (source is null) { await tx.RollbackAsync(ct); return new(ManualQueueOutcome.NotFound); }
+        if (source.State != DataSourceState.Active || await db.SyncJobs.AnyAsync(x => x.DataSourceId == sourceId && (x.State == SyncJobState.Queued || x.State == SyncJobState.Running), ct))
+        { await tx.RollbackAsync(ct); return new(ManualQueueOutcome.Conflict); }
+        var job = new SyncJob(sourceId, nowUtc);
+        db.SyncJobs.Add(job);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new(ManualQueueOutcome.Queued, new SyncJobSummary(job.Id, sourceId, source.DisplayName, job.State, job.QueuedAtUtc, null, null, 0, 0, 0, null, null, null));
     }
 }

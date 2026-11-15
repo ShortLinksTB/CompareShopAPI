@@ -1,5 +1,6 @@
 using CompareShopAPI.Domain.Ingestion;
 using CompareShopAPI.Application.Admin;
+using System.Text.Json.Serialization;
 
 namespace CompareShopAPI.Application.Ingestion;
 
@@ -19,11 +20,18 @@ public interface ISyncJobStore
     Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct, bool pauseSource = false);
     Task<IReadOnlyList<SyncJobSummary>> ListJobs(CancellationToken ct);
     Task<SyncJobSummary?> QueueRetry(int jobId, CancellationToken ct);
+    Task<ManualQueueResult> QueueManual(int sourceId, DateTime nowUtc, CancellationToken ct);
 }
 public interface IDataSourceStore
 {
     Task<IReadOnlyList<DataSourceSummary>> ListDataSources(CancellationToken ct);
+    Task<bool> Exists(int id, CancellationToken ct);
+    Task<DataSourceSummary?> Configure(int id, DataSourceConfiguration configuration, string actorSubject, DateTime nowUtc, CancellationToken ct);
+    Task<bool> PartnerShopIsUsable(int partnerShopId, CancellationToken ct);
 }
+public sealed record DataSourceConfiguration([property: JsonConverter(typeof(JsonStringEnumConverter))] DataSourceState State, int IntervalHours, int? PartnerShopId);
+public enum ManualQueueOutcome { Queued, NotFound, Conflict }
+public sealed record ManualQueueResult(ManualQueueOutcome Outcome, SyncJobSummary? Job = null);
 public sealed record DataSourceSummary(int Id, string Key, string DisplayName, string CategoryPath, int? PartnerShopId, DataSourceState State, int IntervalHours, DateTime CreatedAtUtc, DateTime? LastCompletedAtUtc, DateTime? NextAttemptAtUtc);
 public sealed record SyncJobSummary(int Id, int DataSourceId, string DataSource, SyncJobState State, DateTime QueuedAtUtc, DateTime? StartedAtUtc, DateTime? FinishedAtUtc, int SeenCount, int ImportedCount, int PendingCount, string? ErrorCode, string? ErrorSummary, int? RetryOfJobId);
 public interface IPriceHistoryRecorder { Task RecordForChangedMinimums(CancellationToken ct); }
@@ -124,6 +132,11 @@ public sealed class IngestionAdminService(IAdminPermissionReader permissions, IS
         if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.execute", ct)) throw new IngestionForbiddenException();
         return await jobs.QueueRetry(id, ct) ?? throw new KeyNotFoundException("A failed or partial job was not found.");
     }
+    public async Task<ManualQueueResult> QueueManual(string? subject, int sourceId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.execute", ct)) throw new IngestionForbiddenException();
+        return await jobs.QueueManual(sourceId, DateTime.UtcNow, ct);
+    }
 }
 public sealed class DataSourceAdminService(IAdminPermissionReader permissions, IDataSourceStore sources)
 {
@@ -131,6 +144,16 @@ public sealed class DataSourceAdminService(IAdminPermissionReader permissions, I
     {
         if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.read", ct)) throw new IngestionForbiddenException();
         return await sources.ListDataSources(ct);
+    }
+    public async Task<DataSourceSummary> Configure(string? subject, int id, DataSourceConfiguration configuration, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.execute", ct)) throw new IngestionForbiddenException();
+        if (id <= 0) throw new ArgumentException("Invalid data source id.");
+        if (configuration.State is not (DataSourceState.Active or DataSourceState.Paused)) throw new ArgumentException("State must be Active or Paused.");
+        if (configuration.IntervalHours is < 1 or > 720) throw new ArgumentException("IntervalHours must be between 1 and 720.");
+        if (!await sources.Exists(id, ct)) throw new KeyNotFoundException("Data source was not found.");
+        if (configuration.PartnerShopId is int shopId && !await sources.PartnerShopIsUsable(shopId, ct)) throw new ArgumentException("PartnerShopId must reference an active partner shop.");
+        return await sources.Configure(id, configuration, subject, DateTime.UtcNow, ct) ?? throw new KeyNotFoundException("Data source was not found.");
     }
 }
 public sealed class IngestionForbiddenException : Exception { }

@@ -48,6 +48,17 @@ public sealed class DataSource
     public void Complete(DateTime atUtc) { LastCompletedAtUtc = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc); NextAttemptAtUtc = null; }
     public void ScheduleFailureRetry(DateTime atUtc) => NextAttemptAtUtc = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc).AddHours(6);
     public void Pause() { State = DataSourceState.Paused; NextAttemptAtUtc = null; }
+    public void Configure(DataSourceState state, int intervalHours, int? partnerShopId)
+    {
+        if (state is not (DataSourceState.Active or DataSourceState.Paused)) throw new ArgumentException("Only Active or Paused is configurable.", nameof(state));
+        if (State == DataSourceState.Error && state == DataSourceState.Active) throw new InvalidOperationException("Error sources cannot be reactivated through configuration.");
+        if (intervalHours is < 1 or > 720) throw new ArgumentOutOfRangeException(nameof(intervalHours));
+        if (partnerShopId is <= 0) throw new ArgumentOutOfRangeException(nameof(partnerShopId));
+        State = state;
+        IntervalHours = intervalHours;
+        PartnerShopId = partnerShopId;
+        if (state == DataSourceState.Paused) NextAttemptAtUtc = null;
+    }
     public void AttachPartnerShop(int partnerShopId) { if (partnerShopId <= 0) throw new ArgumentOutOfRangeException(nameof(partnerShopId)); PartnerShopId = partnerShopId; }
     public void MarkError() => State = DataSourceState.Error;
     public static bool IsSupportedCategory(string key, string categoryPath) =>

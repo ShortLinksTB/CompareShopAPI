@@ -71,6 +71,21 @@ public static class AdminEndpoints
             try { return Results.Ok(await s.List(Subject(c), ct)); }
             catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
         });
+        admin.MapPatch("/data-sources/{id:int}", async (HttpContext c, int id, DataSourceConfigurationRequest request, DataSourceAdminService s, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await s.Configure(Subject(c), id, request.ToInput(), ct)); }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+            catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
+            catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
+        });
+        admin.MapPost("/data-sources/{id:int}/sync", async (HttpContext c, int id, DataSourceAdminService s, CancellationToken ct) =>
+        {
+            try { return Results.Accepted(value: await s.QueueSync(Subject(c), id, ct)); }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+            catch (DataSourceSyncConflictException) { return Results.Problem("Data source is inactive, in Error, or already has an active sync job.", statusCode: StatusCodes.Status409Conflict); }
+            catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
+        });
         admin.MapPost("/sync-jobs/{id:int}/retry", async (HttpContext c, int id, IngestionAdminService s, CancellationToken ct) =>
         {
             try { return Results.Accepted(value: await s.Retry(Subject(c), id, ct)); }
@@ -168,6 +183,15 @@ public static class AdminEndpoints
 }
 
 public sealed record OutlierReasonInput(string? OutlierReason);
+public sealed record DataSourceConfigurationRequest(string State, int IntervalHours, int? PartnerShopId)
+{
+    public DataSourceConfigurationInput ToInput()
+    {
+        if (!Enum.TryParse<CompareShopAPI.Domain.Ingestion.DataSourceState>(State, ignoreCase: true, out var parsed))
+            throw new ArgumentException("State must be Active or Paused.", nameof(State));
+        return new(parsed, IntervalHours, PartnerShopId);
+    }
+}
 
 public sealed record MatchingApproval(int ProductId);
 public sealed record MatchingGroupApproval(IReadOnlyList<int> Ids, int ProductId);

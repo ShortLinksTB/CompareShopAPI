@@ -45,6 +45,17 @@ public sealed class DataSource
     public DateTime? LastCompletedAtUtc { get; private set; }
     public DateTime? NextAttemptAtUtc { get; private set; }
     public bool IsDue(DateTime nowUtc) => State == DataSourceState.Active && (LastCompletedAtUtc is null || nowUtc >= LastCompletedAtUtc.Value.AddHours(IntervalHours)) && (NextAttemptAtUtc is null || nowUtc >= NextAttemptAtUtc.Value);
+    public void Configure(DataSourceState state, int intervalHours, int? partnerShopId)
+    {
+        if (state is not (DataSourceState.Active or DataSourceState.Paused)) throw new ArgumentException("Data source state must be Active or Paused.", nameof(state));
+        if (intervalHours is < 1 or > 720) throw new ArgumentOutOfRangeException(nameof(intervalHours), "Interval must be between 1 and 720 hours.");
+        if (partnerShopId is <= 0) throw new ArgumentOutOfRangeException(nameof(partnerShopId));
+        if (State == DataSourceState.Error && state == DataSourceState.Active) throw new ArgumentException("An Error data source cannot be reactivated through configuration.", nameof(state));
+        State = state;
+        IntervalHours = intervalHours;
+        PartnerShopId = partnerShopId;
+        if (state == DataSourceState.Paused) NextAttemptAtUtc = null;
+    }
     public void Complete(DateTime atUtc) { LastCompletedAtUtc = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc); NextAttemptAtUtc = null; }
     public void ScheduleFailureRetry(DateTime atUtc) => NextAttemptAtUtc = DateTime.SpecifyKind(atUtc, DateTimeKind.Utc).AddHours(6);
     public void Pause() { State = DataSourceState.Paused; NextAttemptAtUtc = null; }

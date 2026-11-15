@@ -146,7 +146,7 @@ public sealed class IngestionServiceTests
         var expected = new DataSourceSummary(7, "bhx", "Bách Hóa Xanh", "/bia", null, DataSourceState.Active, 72, created, lastCompleted, nextAttempt);
         var store = new FakeDataSources { Sources = [expected] };
         var permissions = new FakePermissions { Allowed = true };
-        var service = new DataSourceAdminService(permissions, store);
+        var service = new DataSourceAdminService(permissions, store, TimeProvider.System);
 
         var result = await service.List("admin", CancellationToken.None);
 
@@ -191,6 +191,10 @@ public sealed class IngestionServiceTests
     {
         public IReadOnlyList<DataSourceSummary> Sources { get; set; } = [];
         public Task<IReadOnlyList<DataSourceSummary>> ListDataSources(CancellationToken ct) => Task.FromResult(Sources);
+        public Task<DataSourceSummary?> Configure(int id, DataSourceConfigurationInput input, string actor, CancellationToken ct) => Task.FromResult(Sources.SingleOrDefault(source => source.Id == id));
+        public Task<ManualSyncResult> QueueManualSync(int id, DateTime queuedAtUtc, CancellationToken ct) => Task.FromResult(Sources.Any(source => source.Id == id)
+            ? new ManualSyncResult(ManualSyncResultKind.Unavailable)
+            : new ManualSyncResult(ManualSyncResultKind.Missing));
     }
 
     private sealed class FakeReader : ISourceCatalogReader

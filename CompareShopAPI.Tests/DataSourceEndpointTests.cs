@@ -1,6 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
+using CompareShopAPI.Domain.Admin;
+using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Domain.Ingestion;
 using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Infrastructure.Persistence;
@@ -13,6 +16,127 @@ namespace CompareShopAPI.Tests;
 [Collection(SqlServerTestCollection.Name)]
 public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
 {
+    [Fact]
+    public async Task ConfigureAuditsAtomicallyAndManualSyncQueuesOnlyOneActiveJob()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"CompareShopDataSourceMutations_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var actor = $"source-configurer-{Guid.NewGuid():N}";
+        var viewerSubject = $"source-viewer-{Guid.NewGuid():N}";
+        var sourceKey = $"qc-sl1815-sl2330-{Guid.NewGuid():N}";
+        var createdAt = DateTime.UtcNow;
+        try
+        {
+            int sourceId;
+            int shopId;
+            await using (var db = new CompareShopDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                var shop = new PartnerShop { Slug = $"sl-2330-shop-{Guid.NewGuid():N}", Name = "SL-2330 Test Shop" };
+                var source = new DataSource(sourceKey, "SL-2330 Test Source", "/qc-sl1815/laptop", null, createdAt);
+                var user = new User(actor, createdAt);
+                var viewer = new User(viewerSubject, createdAt);
+                db.PartnerShops.Add(shop);
+                db.DataSources.Add(source);
+                db.Users.AddRange(user, viewer);
+                await db.SaveChangesAsync();
+                shopId = shop.Id;
+                sourceId = source.Id;
+                db.AdminUserRoles.AddRange(new AdminUserRole { UserId = user.Id, RoleId = 2 }, new AdminUserRole { UserId = viewer.Id, RoleId = 4 });
+                await db.SaveChangesAsync();
+            }
+
+            await using var app = new ApiFactory(settings: new Dictionary<string, string?> { ["ConnectionStrings:CompareShopDb"] = connection }, signing: true);
+            using var client = app.CreateClient();
+            var roles = "{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}";
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(roles, subject: viewerSubject));
+            Assert.Equal(HttpStatusCode.Forbidden, (await PatchJsonAsync(client, $"/admin/data-sources/{sourceId}", new { state = "Paused", intervalHours = 24, partnerShopId = (int?)null })).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync($"/admin/data-sources/{sourceId}/sync", null)).StatusCode);
+
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token(roles, subject: actor));
+            Assert.Equal(HttpStatusCode.NotFound, (await PatchJsonAsync(client, $"/admin/data-sources/{sourceId + 10000}", new { state = "Paused", intervalHours = 24, partnerShopId = (int?)null })).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync($"/admin/data-sources/{sourceId + 10000}/sync", null)).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await PatchJsonAsync(client, $"/admin/data-sources/{sourceId}", new { state = "Unknown", intervalHours = 24, partnerShopId = (int?)null })).StatusCode);
+
+            var configure = await PatchJsonAsync(client, $"/admin/data-sources/{sourceId}", new
+            {
+                state = "Paused",
+                intervalHours = 24,
+                partnerShopId = shopId
+            });
+            Assert.Equal(HttpStatusCode.OK, configure.StatusCode);
+            using (var body = JsonDocument.Parse(await configure.Content.ReadAsStringAsync()))
+            {
+                Assert.Equal((int)DataSourceState.Paused, body.RootElement.GetProperty("state").GetInt32());
+                Assert.Equal(24, body.RootElement.GetProperty("intervalHours").GetInt32());
+                Assert.Equal(shopId, body.RootElement.GetProperty("partnerShopId").GetInt32());
+            }
+
+            var invalidShop = await PatchJsonAsync(client, $"/admin/data-sources/{sourceId}", new
+            {
+                state = "Paused",
+                intervalHours = 24,
+                partnerShopId = shopId + 10000
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, invalidShop.StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/admin/data-sources/{sourceId}/sync", null)).StatusCode);
+
+            var activate = await PatchJsonAsync(client, $"/admin/data-sources/{sourceId}", new
+            {
+                state = "Active",
+                intervalHours = 720,
+                partnerShopId = shopId
+            });
+            Assert.Equal(HttpStatusCode.OK, activate.StatusCode);
+            var concurrentRequests = await Task.WhenAll(
+                client.PostAsync($"/admin/data-sources/{sourceId}/sync", null),
+                client.PostAsync($"/admin/data-sources/{sourceId}/sync", null));
+            Assert.Single(concurrentRequests, response => response.StatusCode == HttpStatusCode.Accepted);
+            Assert.Single(concurrentRequests, response => response.StatusCode == HttpStatusCode.Conflict);
+            var queued = concurrentRequests.Single(response => response.StatusCode == HttpStatusCode.Accepted);
+            using (var job = JsonDocument.Parse(await queued.Content.ReadAsStringAsync()))
+            {
+                Assert.Equal(sourceId, job.RootElement.GetProperty("dataSourceId").GetInt32());
+                Assert.Equal((int)SyncJobState.Queued, job.RootElement.GetProperty("state").GetInt32());
+            }
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsync($"/admin/data-sources/{sourceId}/sync", null)).StatusCode);
+
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var source = await db.DataSources.SingleAsync(item => item.Id == sourceId);
+                source.MarkError();
+                await db.SaveChangesAsync();
+            }
+            var reactivateErrorSource = await PatchJsonAsync(client, $"/admin/data-sources/{sourceId}", new
+            {
+                state = "Active",
+                intervalHours = 24,
+                partnerShopId = shopId
+            });
+            Assert.Equal(HttpStatusCode.BadRequest, reactivateErrorSource.StatusCode);
+
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var audits = await db.AdminAuditLogs.Where(log => log.ActorSubject == actor && log.ResourceType == "data_source" && log.ResourceId == sourceId.ToString()).ToListAsync();
+                Assert.Equal(2, audits.Count);
+                Assert.Contains("intervalHours", audits[0].BeforeJson);
+                Assert.DoesNotContain("categoryPath", audits[0].BeforeJson, StringComparison.OrdinalIgnoreCase);
+                Assert.Equal(1, await db.SyncJobs.CountAsync(job => job.DataSourceId == sourceId));
+            }
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    private static async Task<HttpResponseMessage> PatchJsonAsync<T>(HttpClient client, string uri, T body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Patch, uri) { Content = JsonContent.Create(body) };
+        return await client.SendAsync(request);
+    }
+
     [Fact]
     public async Task DataSourcesEndpointReturnsRegistryAndKeepsSyncJobHistorySeparate()
     {

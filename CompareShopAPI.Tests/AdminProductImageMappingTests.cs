@@ -22,7 +22,13 @@ public sealed class AdminProductImageMappingTests
             new Product { Slug = "without-image", Name = "Without image", Category = category, ImageUrl = null },
             new Product { Slug = "external-image", Name = "External image", Category = category, ImageUrl = "https://images.example.test/product.jpg" },
             new Product { Slug = "files-image", Name = "Files image", Category = category, ImageUrl = "/files/01234567-89ab-cdef-0123-456789abcdef" },
-            new Product { Slug = "malformed-files-image", Name = "Malformed Files image", Category = category, ImageUrl = "/files/gggggggg-gggg-gggg-gggg-gggggggggggg" }
+            new Product { Slug = "malformed-files-image", Name = "Malformed Files image", Category = category, ImageUrl = "/files/gggggggg-gggg-gggg-gggg-gggggggggggg" },
+            new Product { Slug = "standard-image", Name = "Standard image", Category = category,
+                ImageUrl = "/files/11111111-1111-1111-1111-111111111111", Images = [new ProductImage
+                {
+                    Id = Guid.NewGuid(), SortOrder = 0, FileId = Guid.NewGuid(), Card600FileId = Guid.NewGuid(),
+                    Detail1000FileId = Guid.NewGuid(), CreatedAtUtc = DateTime.UtcNow, UpdatedAtUtc = DateTime.UtcNow
+                }] }
         };
         db.Products.AddRange(products);
         await db.SaveChangesAsync();
@@ -33,11 +39,12 @@ public sealed class AdminProductImageMappingTests
         Assert.Collection(list.Items,
             item => Assert.True(item.NeedsStandardImage),
             item => Assert.True(item.NeedsStandardImage),
-            item => Assert.False(item.NeedsStandardImage),
-            item => Assert.True(item.NeedsStandardImage));
+            item => Assert.True(item.NeedsStandardImage),
+            item => Assert.True(item.NeedsStandardImage),
+            item => Assert.False(item.NeedsStandardImage));
         var activeList = await data.Products(1, 10, true, default);
-        Assert.Equal(4, activeList.TotalItems);
-        foreach (var (product, expected) in products.Zip(new[] { true, true, false, true }))
+        Assert.Equal(5, activeList.TotalItems);
+        foreach (var (product, expected) in products.Zip(new[] { true, true, true, true, false }))
         {
             var read = await data.Product(product.Id, default);
             Assert.Equal(expected, read!.NeedsStandardImage);

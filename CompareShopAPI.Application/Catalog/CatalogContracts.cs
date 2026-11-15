@@ -9,8 +9,9 @@ public sealed record OfferSummaryDto(int? MinPrice, int? MaxPrice, int OfferCoun
 public sealed record OfferDto(int Id, int Price, string? Url, DateTime UpdatedAt, int ShopId, string ShopSlug, string ShopName, int? OriginalPrice = null, string? ImageUrl = null, string StockStatus = "unknown", IReadOnlyDictionary<string,string>? Specifications = null);
 public sealed record SpecificationItemDto(string Name, string Value);
 public sealed record SpecificationGroupDto(string Name, IReadOnlyList<SpecificationItemDto> Items);
+public sealed record ProductImageDto(string Url1000, string Url600, string? Alt);
 public sealed record ProductListDto(int Id, string Slug, string Name, string? Brand, CategoryDto Category, OfferSummaryDto OfferSummary, string? ImageUrl = null, IReadOnlyDictionary<string,string>? OfferSpecifications = null);
-public sealed record ProductDetailDto(int Id, string Slug, string Name, string? Brand, string? Description, CategoryDto Category, OfferSummaryDto OfferSummary, IReadOnlyList<SpecificationGroupDto> SpecificationGroups, string? ImageUrl = null, IReadOnlyDictionary<string,string>? OfferSpecifications = null);
+public sealed record ProductDetailDto(int Id, string Slug, string Name, string? Brand, string? Description, CategoryDto Category, OfferSummaryDto OfferSummary, IReadOnlyList<SpecificationGroupDto> SpecificationGroups, string? ImageUrl = null, IReadOnlyDictionary<string,string>? OfferSpecifications = null, IReadOnlyList<ProductImageDto>? Images = null);
 public sealed record ShopDto(int Id, string Slug, string Name, string? WebsiteUrl);
 public sealed record HomePartnerDto(string Name, string Slug, string? WebsiteUrl);
 public sealed record ProductSuggestionDto(int Id, string Slug, string Name);

@@ -136,6 +136,24 @@ public sealed class FileDerivativeTests
     }
 
     [Fact]
+    public async Task Repeating_the_same_derivative_request_reuses_the_existing_file()
+    {
+        var source = new FileAsset(Guid.NewGuid(), "original.png", "image/png", 3, "source", "admin", DateTime.UtcNow, 80, 40);
+        var repository = new Repository(source);
+        var storage = new Storage(MakeImage(80, 40));
+        var service = new FileService(repository, storage, new Permissions(), TimeProvider.System,
+            NullLogger<FileService>.Instance, new Processor());
+        var request = new DerivativeRequest([new DerivativeVariant(32, 32, "cover", null, null, "transparent", "png", 80, "repeat")]);
+
+        var first = Assert.Single(await service.CreateDerivatives("admin", source.Id, request, default));
+        var second = Assert.Single(await service.CreateDerivatives("admin", source.Id, request, default));
+
+        Assert.Equal(first.File!.Id, second.File!.Id);
+        Assert.Equal(1, repository.AddCount);
+        Assert.Equal(1, storage.PutCount);
+    }
+
+    [Fact]
     public async Task Variant_boundaries_and_contain_focal_fields_return_stable_errors()
     {
         var source = new FileAsset(Guid.NewGuid(), "original.png", "image/png", 3, "source", "admin", DateTime.UtcNow);
@@ -398,6 +416,7 @@ public sealed class FileDerivativeTests
         private readonly Dictionary<Guid, FileAsset> files = [];
         public Task<FilePage> List(int page, int size, string? query, string? type, CancellationToken ct) => Task.FromResult(new FilePage([], page, size, 0, 0));
         public Task<FileAsset?> Get(Guid id, CancellationToken ct) => Task.FromResult<FileAsset?>(id == source.Id ? source : files.GetValueOrDefault(id));
+        public Task<FileAsset?> FindDerivative(Guid sourceId, string preset, string derivativeSpecJson, CancellationToken ct) => Task.FromResult(files.Values.FirstOrDefault(x => x.DerivedFromFileId == sourceId && x.DerivedPreset == preset && x.DerivativeSpecJson == derivativeSpecJson));
         public Task Add(FileAsset file, CancellationToken ct) { AddCount++; files[file.Id] = file; return Task.CompletedTask; }
         public Task ReserveDerivativeAndAdd(FileAsset file, string candidateName, CancellationToken ct)
         {

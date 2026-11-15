@@ -17,6 +17,9 @@ public static class AdminEndpoints
         admin.MapGet("/products", (HttpContext c, int? page, int? pageSize, bool? isActive, AdminService s, CancellationToken ct) => Run(() => s.Products(Subject(c), page ?? 1, pageSize ?? 20, isActive, ct)));
         admin.MapGet("/products/slug-availability", (HttpContext c, string? slug, AdminService s, CancellationToken ct) => Run(() => s.ProductSlugAvailability(Subject(c), slug, ct)));
         admin.MapGet("/products/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => await s.Product(Subject(c), id, ct) is { } x ? Results.Ok(x) : Results.NotFound()));
+        admin.MapGet("/products/{id:int}/images", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => await s.ProductImages(Subject(c), id, ct) is { } x ? Results.Ok(new { items = x }) : Results.NotFound()));
+        admin.MapPut("/products/{id:int}/images", (HttpContext c, int id, ProductImageInput[] input, AdminService s, CancellationToken ct) => Run(async () => await s.ReplaceProductImages(Subject(c), id, input, ct) is { } x ? Results.Ok(new { items = x }) : Results.NotFound()));
+        admin.MapPost("/products/{id:int}/images/{imageId:guid}/derivatives", (HttpContext c, int id, Guid imageId, AdminService s, CancellationToken ct) => Run(async () => await s.RetryProductImageDerivatives(Subject(c), id, imageId, ct) is { } x ? Results.Ok(x) : Results.NotFound()));
         admin.MapPost("/products", (HttpContext c, ProductInput input, AdminService s, CancellationToken ct) => Run(() => s.CreateProduct(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapPut("/products/{id:int}", (HttpContext c, int id, ProductInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateProduct(Subject(c), id, input, ct)));
         admin.MapDelete("/products/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => { await s.DeleteProduct(Subject(c), id, ct); return Results.NoContent(); }));
@@ -147,6 +150,8 @@ public static class AdminEndpoints
         try { var result = await operation(); return successStatus == StatusCodes.Status201Created ? Results.Json(result, statusCode: successStatus) : Results.Ok(result); }
         catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
         catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (ProductImageFilesUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable); }
+        catch (ProductImageValidationException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["images"] = [ex.Message] }, statusCode: StatusCodes.Status422UnprocessableEntity); }
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (MatchingLaptopCategoryUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "category_unavailable" }); }
         catch (MatchingProductSlugConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "slug_conflict", ["slug"] = ex.Slug }); }
@@ -158,6 +163,8 @@ public static class AdminEndpoints
         try { return await operation(); }
         catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
         catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (ProductImageFilesUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable); }
+        catch (ProductImageValidationException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["images"] = [ex.Message] }, statusCode: StatusCodes.Status422UnprocessableEntity); }
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (ProductDeleteConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (MatchingLaptopCategoryUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "category_unavailable" }); }

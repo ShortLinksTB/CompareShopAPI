@@ -266,10 +266,13 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
 
                 var matching = await db.ProductMatchings.SingleAsync(x => x.ExternalSku == "QC-SL1815-v2-create-product");
                 var created = await service.CreateMatchingProduct(subject, matching.Id,
-                    new MatchingProductCreate("QC Created From Matching", "ASUS", null, laptopCategoryId, null, "none"), default);
+                    new MatchingProductCreate("QC Created From Matching", "ASUS", null, laptopCategoryId, null, "shop", "https://images.example.test/matching-product.jpg"), default);
                 Assert.True(created.NeedsStandardImage);
                 Assert.Equal(laptopCategoryId, created.CategoryId);
                 createdProductId = created.Id;
+                var createdProductImage = Assert.Single(await db.ProductImages.Where(x => x.ProductId == created.Id).ToListAsync());
+                Assert.Equal("https://images.example.test/matching-product.jpg", createdProductImage.ExternalUrl);
+                Assert.Equal(0, createdProductImage.SortOrder);
 
                 var missingMapping = await db.ProductMatchings.SingleAsync(x => x.Name.Contains("missing mapping"));
                 rollbackMatchingId = missingMapping.Id;

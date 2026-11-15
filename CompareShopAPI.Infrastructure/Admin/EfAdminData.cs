@@ -140,7 +140,17 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
             else item.ImageUrl = input.ImageUrl;
         }
         if (!id.HasValue) db.Products.Add(item);
-        await db.SaveChangesAsync(ct); return ToDto(item);
+        await db.SaveChangesAsync(ct);
+        if (!id.HasValue && !string.IsNullOrWhiteSpace(input.ImageUrl))
+        {
+            var fileId = TryParseFileUrl(input.ImageUrl);
+            var image = fileId.HasValue
+                ? ProductImage.CreateFile(item.Id, 0, fileId.Value, null, clock.GetUtcNow().UtcDateTime)
+                : ProductImage.CreateExternal(item.Id, 0, input.ImageUrl, null, clock.GetUtcNow().UtcDateTime);
+            db.ProductImages.Add(image);
+            await db.SaveChangesAsync(ct);
+        }
+        return ToDto(item);
     }
 
     public async Task<IReadOnlyList<AdminProductImage>?> ProductImages(int productId, CancellationToken ct)

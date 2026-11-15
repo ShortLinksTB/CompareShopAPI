@@ -15,6 +15,49 @@ namespace CompareShopAPI.Tests;
 public sealed class ProductImageApplicationTests
 {
     [Fact]
+    public async Task Product_creation_paths_create_the_initial_product_image_association()
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        await using var db = new CompareShopDbContext(options);
+        const string subject = "product-image-creator";
+        var user = new User(subject, DateTime.UtcNow);
+        var role = new AdminRole { Name = "product-image-creator" };
+        var category = new Category { Slug = "laptops", Name = "Laptops", Level = 2 };
+        var permissions = new[]
+        {
+            new AdminPermission { Key = AdminPermissions.ProductsCreate },
+            new AdminPermission { Key = AdminPermissions.MatchingApprove }
+        };
+        var matching = new CompareShopAPI.Domain.Admin.ProductMatching("Matching laptop", "Brand", DateTime.UtcNow);
+        db.Users.Add(user);
+        db.AdminRoles.Add(role);
+        db.AdminPermissions.AddRange(permissions);
+        db.Categories.Add(category);
+        db.ProductMatchings.Add(matching);
+        await db.SaveChangesAsync();
+        db.AdminUserRoles.Add(new AdminUserRole { UserId = user.Id, RoleId = role.Id });
+        db.AdminRolePermissions.AddRange(permissions.Select(permission => new AdminRolePermission
+            { RoleId = role.Id, PermissionId = permission.Id }));
+        await db.SaveChangesAsync();
+
+        var service = new AdminService(new EfAdminData(db, TimeProvider.System));
+        var standardProduct = await service.CreateProduct(subject,
+            new ProductInput("standard-product", "Standard Product", null, null, category.Id, ImageUrl: "https://images.example.test/standard.jpg"), default);
+        var matchingProduct = await service.CreateMatchingProduct(subject, matching.Id,
+            new MatchingProductCreate("Matching Product", null, null, category.Id, "https://images.example.test/matching.jpg", "shop"), default);
+
+        var standardImage = Assert.Single(await db.ProductImages.Where(image => image.ProductId == standardProduct.Id).ToListAsync());
+        Assert.Equal("https://images.example.test/standard.jpg", standardImage.ExternalUrl);
+        Assert.Equal(0, standardImage.SortOrder);
+        var matchingImage = Assert.Single(await db.ProductImages.Where(image => image.ProductId == matchingProduct.Id).ToListAsync());
+        Assert.Equal("https://images.example.test/matching.jpg", matchingImage.ExternalUrl);
+        Assert.Equal(0, matchingImage.SortOrder);
+    }
+
+    [Fact]
     public async Task Derivative_failure_keeps_valid_source_association_and_reports_per_size()
     {
         var options = new DbContextOptionsBuilder<CompareShopDbContext>()

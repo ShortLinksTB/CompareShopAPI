@@ -380,6 +380,9 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             Assert.Equal(5, setShopOrder.HomeDisplayOrder);
             var product = await service.CreateProduct(subject, new("admin-product", "Admin Product", "Brand", "Description", category.Id, true, "https://images.example.test/product.jpg"), default);
             Assert.Equal("https://images.example.test/product.jpg", product.ImageUrl);
+            var createdProductImage = Assert.Single(await db.ProductImages.Where(x => x.ProductId == product.Id).ToListAsync());
+            Assert.Equal("https://images.example.test/product.jpg", createdProductImage.ExternalUrl);
+            Assert.Equal(0, createdProductImage.SortOrder);
             var legacyCategoryInput = System.Text.Json.JsonSerializer.Deserialize<CategoryInput>("{\"slug\":\"admin-category-legacy\",\"name\":\"Legacy Update\",\"isActive\":true}",
                 new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
             var legacyUpdatedCategory = await service.UpdateCategory(subject, category.Id, legacyCategoryInput, default);

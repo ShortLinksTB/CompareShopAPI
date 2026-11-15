@@ -449,7 +449,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
                 await data.SaveMatching(matching, t);
                 await data.SaveMatchingDecision(matching.Id, "created_product", null, null, actor, Clock.GetUtcNow().UtcDateTime, t);
             }
-            // Matching-created products do not yet have derivative associations in ProductImages.
+            // Derivative generation is separate; SaveProduct has created the original image association.
             var needsStandardImage = true;
             return (product with { NeedsStandardImage = needsStandardImage }, null, new { productId = product.Id, matchingIds = ids, input.ImageChoice, needsStandardImage });
         }, ct);

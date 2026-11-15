@@ -293,7 +293,8 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
     {
         if (v.Width is < 16 or > 4000 || v.Height is < 16 or > 4000) throw new DerivativeFailure("invalid_dimensions");
         if (v.Fit is not ("cover" or "contain") || v.Format is not ("keep" or "webp" or "jpg" or "png")
-            || v.Quality is not (70 or 80 or 90) || v.Background != "transparent" && !System.Text.RegularExpressions.Regex.IsMatch(v.Background, "^#[0-9a-fA-F]{6}$"))
+            || v.Quality is not (70 or 80 or 90) || v.Background is null
+            || v.Background != "transparent" && !System.Text.RegularExpressions.Regex.IsMatch(v.Background, "^#[0-9a-fA-F]{6}$"))
             throw new DerivativeFailure("invalid_variant");
         if ((v.Fit == "contain" && (v.FocalX.HasValue || v.FocalY.HasValue)) || v.FocalX is < 0 or > 1 || v.FocalY is < 0 or > 1)
             throw new DerivativeFailure("invalid_variant");

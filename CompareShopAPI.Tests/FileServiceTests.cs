@@ -283,6 +283,41 @@ public sealed class FileServiceTests
         Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync($"/admin/files/{source.Id:D}/derivatives", request)).StatusCode);
     }
 
+    [Fact]
+    public async Task Derivative_endpoint_rejects_missing_and_null_background_without_affecting_valid_sibling()
+    {
+        var repository = new FakeRepository();
+        var source = NewAsset("source.png", "image/png", 3, 20, 20);
+        await repository.Add(source, default);
+        var storage = new FakeStorage { ReadBytes = [1, 2, 3] };
+        await using var app = new ApiFactory(signing: true, configureServices: services =>
+        {
+            services.RemoveAll<IFileRepository>(); services.AddSingleton<IFileRepository>(repository);
+            services.RemoveAll<IFileObjectStorage>(); services.AddSingleton<IFileObjectStorage>(storage);
+            services.RemoveAll<IFilePermissionGate>(); services.AddSingleton<IFilePermissionGate>(new FakePermissions(FilePermissions.Write));
+            services.RemoveAll<IImageDerivativeProcessor>(); services.AddSingleton<IImageDerivativeProcessor, TestDerivativeProcessor>();
+        });
+        using var client = app.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: "operator"));
+        const string body = """
+            {"variants":[
+              {"width":32,"height":32,"fit":"cover","background":"transparent","format":"png","quality":80},
+              {"width":32,"height":32,"fit":"cover","format":"png","quality":80},
+              {"width":32,"height":32,"fit":"cover","background":null,"format":"png","quality":80}
+            ]}
+            """;
+
+        var response = await client.PostAsync($"/admin/files/{source.Id:D}/derivatives",
+            new StringContent(body, System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var outcomes = Assert.IsType<DerivativeVariantOutcome[]>(await response.Content.ReadFromJsonAsync<DerivativeVariantOutcome[]>());
+        Assert.True(outcomes[0].Succeeded);
+        Assert.Equal("invalid_variant", outcomes[1].Error);
+        Assert.Equal("invalid_variant", outcomes[2].Error);
+        Assert.Equal(1, storage.PutCount);
+    }
+
     private static FileAsset NewAsset(string name, string type, long size, int? width, int? height) =>
         new(Guid.NewGuid(), name, type, size, "key", "admin", DateTime.UtcNow, width, height);
 

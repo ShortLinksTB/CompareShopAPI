@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi;
 using Scalar.AspNetCore;
 using CompareShopAPI.Api.RateLimiting;
 using CompareShopAPI.Application.Admin;
@@ -113,7 +114,17 @@ builder.Services.AddAuthorization(options =>
             && string.Equals(context.User.FindFirst("email_verified")?.Value, "true", StringComparison.OrdinalIgnoreCase)));
 });
 builder.Services.AddSingleton<IAuthorizationHandler, AdminClientRoleHandler>();
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options => options.AddSchemaTransformer((schema, context, _) =>
+{
+    if (context.JsonTypeInfo.Type == typeof(OptionalNullableInt))
+    {
+        schema.Type = JsonSchemaType.Integer | JsonSchemaType.Null;
+        schema.Format = null;
+        schema.Properties = new Dictionary<string, IOpenApiSchema>();
+    }
+
+    return Task.CompletedTask;
+}));
 builder.Services.AddCompareShopTelemetry(builder.Configuration);
 var app = builder.Build();
 if (await CatalogSeedCommand.TryRunAsync(args, app.Environment, app.Configuration, app.Services, app.Logger)) return;

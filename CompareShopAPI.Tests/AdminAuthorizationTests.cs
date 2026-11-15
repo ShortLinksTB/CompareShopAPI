@@ -339,7 +339,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             await service.UpdateCategory(subject, category.Id, new("admin-category-updated", "Updated Category", false, rootCategory.Id), default);
             var disposableCategory = await service.CreateCategory(subject, new("delete-category", "Delete Category"), default);
             var shop = await service.CreateShop(subject, new("admin-shop", "Admin Shop", "https://shop.example"), default);
-            var visibleShop = await service.UpdateShop(subject, shop.Id, new("admin-shop", "Admin Shop", "https://shop.example", true, true, 4), default);
+            var visibleShop = await service.UpdateShop(subject, shop.Id, new ShopInput("admin-shop", "Admin Shop", "https://shop.example", true, true) with { HomeDisplayOrder = 4 }, default);
             Assert.True(visibleShop.ShowOnHome);
             Assert.Equal(4, visibleShop.HomeDisplayOrder);
             var legacyShopInput = System.Text.Json.JsonSerializer.Deserialize<ShopInput>("{\"slug\":\"admin-shop\",\"name\":\"Admin Shop\",\"websiteUrl\":\"https://shop.example\",\"isActive\":true}",

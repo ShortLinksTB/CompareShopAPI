@@ -13,7 +13,47 @@ public sealed class Category
     public List<Category> Children { get; set; } = [];
 }
 public sealed class PartnerShop { public int Id { get; set; } public required string Slug { get; set; } public required string Name { get; set; } public string? WebsiteUrl { get; set; } public bool IsActive { get; set; } = true; public bool ShowOnHome { get; set; } public int? HomeDisplayOrder { get; set; } }
-public sealed class Product { public int Id { get; set; } public required string Slug { get; set; } public required string Name { get; set; } public string? Brand { get; set; } public string? Description { get; set; } public string? ImageUrl { get; set; } public string? SeoTitle { get; set; } public string? SeoDescription { get; set; } public int CategoryId { get; set; } public Category Category { get; set; } = null!; public bool IsActive { get; set; } = true; public List<ProductOffer> Offers { get; set; } = []; public List<SpecificationGroup> SpecificationGroups { get; set; } = []; }
+public sealed class Product { public int Id { get; set; } public required string Slug { get; set; } public required string Name { get; set; } public string? Brand { get; set; } public string? Description { get; set; } public string? ImageUrl { get; set; } public string? SeoTitle { get; set; } public string? SeoDescription { get; set; } public int CategoryId { get; set; } public Category Category { get; set; } = null!; public bool IsActive { get; set; } = true; public List<ProductOffer> Offers { get; set; } = []; public List<SpecificationGroup> SpecificationGroups { get; set; } = []; public List<ProductImage> Images { get; set; } = []; }
+
+public sealed class ProductImage
+{
+    public Guid Id { get; set; }
+    public int ProductId { get; set; }
+    public int SortOrder { get; set; }
+    public string? AltText { get; set; }
+    public Guid? FileId { get; set; }
+    public string? ExternalUrl { get; set; }
+    public Guid? Card600FileId { get; set; }
+    public Guid? Detail1000FileId { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
+    public DateTime UpdatedAtUtc { get; set; }
+
+    public static ProductImage CreateFile(int productId, int sortOrder, Guid fileId, string? altText, DateTime nowUtc)
+    {
+        if (productId <= 0 || sortOrder < 0 || fileId == Guid.Empty || nowUtc.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("Product image source is invalid.");
+        return new ProductImage { Id = Guid.NewGuid(), ProductId = productId, SortOrder = sortOrder, FileId = fileId,
+            AltText = NormalizeAltText(altText), CreatedAtUtc = nowUtc, UpdatedAtUtc = nowUtc };
+    }
+
+    public static ProductImage CreateExternal(int productId, int sortOrder, string url, string? altText, DateTime nowUtc)
+    {
+        if (productId <= 0 || sortOrder < 0 || string.IsNullOrWhiteSpace(url) || url.Length > 2048 || nowUtc.Kind != DateTimeKind.Utc)
+            throw new ArgumentException("Product image source is invalid.");
+        return new ProductImage { Id = Guid.NewGuid(), ProductId = productId, SortOrder = sortOrder, ExternalUrl = url.Trim(),
+            AltText = NormalizeAltText(altText), CreatedAtUtc = nowUtc, UpdatedAtUtc = nowUtc };
+    }
+
+    public string SourceUrl => ExternalUrl ?? (FileId.HasValue ? $"/files/{FileId.Value:D}" : throw new InvalidOperationException("Product image has no source."));
+    public string CardUrl => Card600FileId.HasValue ? $"/files/{Card600FileId.Value:D}" : SourceUrl;
+    public string DetailUrl => Detail1000FileId.HasValue ? $"/files/{Detail1000FileId.Value:D}" : SourceUrl;
+    private static string? NormalizeAltText(string? altText)
+    {
+        var normalized = altText?.Trim();
+        if (normalized?.Length > 500) throw new ArgumentException("Alt text must be 500 characters or fewer.", nameof(altText));
+        return string.IsNullOrEmpty(normalized) ? null : normalized;
+    }
+}
 public sealed class ProductOffer { public int Id { get; set; } public int ProductId { get; set; } public Product Product { get; set; } = null!; public int PartnerShopId { get; set; } public PartnerShop PartnerShop { get; set; } = null!; public int PriceVnd { get; set; } public string? Url { get; set; } public string? ImageUrl { get; set; } public int? OriginalPriceVnd { get; set; } public string? SpecificationsJson { get; set; } public string StockStatus { get; set; } = "unknown"; public DateTime UpdatedAtUtc { get; set; } public bool IsActive { get; set; } = true; public bool IsOutlier { get; set; } public string? OutlierReason { get; set; } }
 public sealed class ProductOfferSnapshot { public long Id { get; set; } public int ProductOfferId { get; set; } public int PriceVnd { get; set; } public string? Url { get; set; } public string? ImageUrl { get; set; } public int? OriginalPriceVnd { get; set; } public string? SpecificationsJson { get; set; } public string StockStatus { get; set; } = "unknown"; public DateTime CapturedAtUtc { get; set; } }
 public sealed class SpecificationGroup { public int Id { get; set; } public int ProductId { get; set; } public Product Product { get; set; } = null!; public required string Name { get; set; } public int SortOrder { get; set; } public List<SpecificationItem> Items { get; set; } = []; }

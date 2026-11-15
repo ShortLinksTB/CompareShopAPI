@@ -406,7 +406,8 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
                 Enumerable.Range(0, 21).Select(index => new ProductImageInput(null, index, null, null, $"https://images.example.test/{index}.jpg")).ToArray(), default));
             await Assert.ThrowsAsync<ProductImageValidationException>(() => service.ReplaceProductImages(subject, product.Id,
                 [new ProductImageInput(null, 0, null, Guid.NewGuid(), null)], default));
-            Assert.Empty(await db.ProductImages.Where(x => x.ProductId == product.Id).ToListAsync());
+            var originalImageAfterRejectedUpdates = Assert.Single(await db.ProductImages.Where(x => x.ProductId == product.Id).ToListAsync());
+            Assert.Equal("https://images.example.test/product.jpg", originalImageAfterRejectedUpdates.ExternalUrl);
             await service.ReplaceProductImages(subject, product.Id, gallery, default);
             Assert.Contains(await db.AdminAuditLogs.ToListAsync(), audit => audit.ResourceType == "product_images" && audit.Action == "replace" && audit.ResourceId == product.Id.ToString());
             var galleryBeforeLegacyUpdate = (await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync());

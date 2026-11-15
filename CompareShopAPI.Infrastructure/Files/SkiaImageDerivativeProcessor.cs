@@ -1,7 +1,7 @@
 using CompareShopAPI.Application.Files;
 using CompareShopAPI.Domain.Files;
 using SkiaSharp;
-using System.Text;
+using System.Xml;
 
 namespace CompareShopAPI.Infrastructure.Files;
 
@@ -26,9 +26,13 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
     public ProcessedDerivative Process(ReadOnlyMemory<byte> source, string requestedFormat, int width, int height,
         string fit, double focalX, double focalY, string background, int quality)
     {
-        if (IsSvgOrPdf(source.Span)) throw new DerivativeFailure("unsupported_source_type");
         using var data = SKData.CreateCopy(source.Span);
-        using var codec = SKCodec.Create(data) ?? throw new DerivativeFailure("decode_failed");
+        using var codec = SKCodec.Create(data);
+        if (codec is null)
+        {
+            if (IsSvgOrPdf(source.Span)) throw new DerivativeFailure("unsupported_source_type");
+            throw new DerivativeFailure("decode_failed");
+        }
         if (codec.Info.Width <= 0 || codec.Info.Height <= 0 || (long)codec.Info.Width * codec.Info.Height > MaxPixels)
             throw new DerivativeFailure("source_pixel_limit_exceeded");
         var actual = codec.EncodedFormat;
@@ -71,79 +75,24 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
 
     private static bool IsSvgOrPdf(ReadOnlySpan<byte> source)
     {
-        if (IsPdfHeader(source)) return true;
-
-        var text = Encoding.UTF8.GetString(source[..Math.Min(source.Length, 4096)])
-            .TrimStart('\uFEFF', '\u0000', ' ', '\t', '\r', '\n');
-        return StartsWithSvgElement(text);
-    }
-
-    private static bool IsPdfHeader(ReadOnlySpan<byte> source)
-    {
-        // PDF readers allow a short preamble, but the header must remain at the start of the file.
-        var limit = Math.Min(source.Length, 1024);
-        var hasBom = limit >= 3 && source[0] == 0xEF && source[1] == 0xBB && source[2] == 0xBF;
-        var index = hasBom ? 3 : 0;
-        while (index < limit && source[index] is 0x09 or 0x0A or 0x0C or 0x0D or 0x20) index++;
-        return source[index..limit].StartsWith("%PDF-"u8);
-    }
-
-    private static bool StartsWithSvgElement(string text)
-    {
-        var index = 0;
-        while (index < text.Length)
+        if (source.StartsWith("%PDF-"u8)) return true;
+        try
         {
-            while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
-            if (text.AsSpan(index).StartsWith("<?xml", StringComparison.OrdinalIgnoreCase))
+            using var stream = new MemoryStream(source.ToArray(), writable: false);
+            using var reader = XmlReader.Create(stream, new XmlReaderSettings
             {
-                var end = text.IndexOf("?>", index, StringComparison.Ordinal);
-                if (end < 0) return false;
-                index = end + 2;
-                continue;
-            }
-            if (text.AsSpan(index).StartsWith("<!--", StringComparison.Ordinal))
-            {
-                var end = text.IndexOf("-->", index + 4, StringComparison.Ordinal);
-                if (end < 0) return false;
-                index = end + 3;
-                continue;
-            }
-            if (text.AsSpan(index).StartsWith("<!DOCTYPE", StringComparison.OrdinalIgnoreCase))
-            {
-                var end = FindDoctypeEnd(text, index + 9);
-                if (end < 0) return false;
-                index = end + 1;
-                continue;
-            }
-
-            if (index >= text.Length || text[index] != '<' || index + 4 > text.Length ||
-                !text.AsSpan(index + 1).StartsWith("svg", StringComparison.OrdinalIgnoreCase)) return false;
-            var next = index + 4;
-            return next < text.Length && (char.IsWhiteSpace(text[next]) || text[next] is '>' or '/');
+                DtdProcessing = DtdProcessing.Parse,
+                XmlResolver = null,
+                MaxCharactersInDocument = FileUploadPolicy.MaxBytes,
+                MaxCharactersFromEntities = 1_000_000
+            });
+            while (reader.Read())
+                if (reader.NodeType == XmlNodeType.Element)
+                    return string.Equals(reader.LocalName, "svg", StringComparison.OrdinalIgnoreCase);
         }
+        catch (XmlException) { }
         return false;
     }
-
-    private static int FindDoctypeEnd(string text, int index)
-    {
-        var subsetDepth = 0;
-        var quote = '\0';
-        for (; index < text.Length; index++)
-        {
-            var current = text[index];
-            if (quote != '\0')
-            {
-                if (current == quote) quote = '\0';
-                continue;
-            }
-            if (current is '\'' or '"') quote = current;
-            else if (current == '[') subsetDepth++;
-            else if (current == ']') subsetDepth = Math.Max(0, subsetDepth - 1);
-            else if (current == '>' && subsetDepth == 0) return index;
-        }
-        return -1;
-    }
-
     internal static SKBitmap Orient(SKBitmap source, SKEncodedOrigin origin)
     {
         var swaps = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;

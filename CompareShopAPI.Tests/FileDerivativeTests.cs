@@ -54,13 +54,31 @@ public sealed class FileDerivativeTests
         Assert.True(supported.Succeeded);
 
         var unsupportedSource = new FileAsset(Guid.NewGuid(), "source.png", "image/png", 4, "source", "admin", DateTime.UtcNow);
-        var unsupportedStorage = new Storage([.. "%PDF"u8.ToArray()]);
+        var pdfBytes = "%PDF-1.7\n"u8.ToArray();
+        var unsupportedStorage = new Storage(pdfBytes);
         var unsupportedService = new FileService(new Repository(unsupportedSource), unsupportedStorage,
             new Permissions(), TimeProvider.System, NullLogger<FileService>.Instance, processor);
         var unsupported = Assert.Single(await unsupportedService.CreateDerivatives("admin", unsupportedSource.Id, request, default));
         Assert.Equal("unsupported_source_type", unsupported.Error);
         Assert.Equal(0, unsupportedStorage.PutCount);
+        Assert.Equal("unsupported_source_type", Assert.Throws<DerivativeFailure>(() =>
+            processor.Process(pdfBytes, "png", 32, 32, "cover", 0.5, 0.5, "transparent", 80)).Code);
 
+        var svgBytes = System.Text.Encoding.UTF8.GetBytes("<!-- header comment -->\n<!DOCTYPE svg [<!ELEMENT svg ANY>]>\n<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+        var svgSource = new FileAsset(Guid.NewGuid(), "source.png", "image/png", svgBytes.Length, "svg", "admin", DateTime.UtcNow);
+        var svgService = new FileService(new Repository(svgSource), new Storage(svgBytes), new Permissions(),
+            TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var svg = Assert.Single(await svgService.CreateDerivatives("admin", svgSource.Id, request, default));
+        Assert.Equal("unsupported_source_type", svg.Error);
+        Assert.Equal("unsupported_source_type", Assert.Throws<DerivativeFailure>(() =>
+            processor.Process(svgBytes, "png", 32, 32, "cover", 0.5, 0.5, "transparent", 80)).Code);
+
+        var jpegBytes = MakeJpegWithPdfMarkerInExif();
+        var jpegSource = new FileAsset(Guid.NewGuid(), "photo.jpg", "image/jpeg", jpegBytes.Length, "jpeg", "admin", DateTime.UtcNow);
+        var jpegService = new FileService(new Repository(jpegSource), new Storage(jpegBytes), new Permissions(),
+            TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var jpeg = Assert.Single(await jpegService.CreateDerivatives("admin", jpegSource.Id, request, default));
+        Assert.True(jpeg.Succeeded);
     }
 
     [Fact]

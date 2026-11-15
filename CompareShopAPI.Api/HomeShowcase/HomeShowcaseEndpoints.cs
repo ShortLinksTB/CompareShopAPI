@@ -7,6 +7,7 @@ namespace CompareShopAPI.Api.HomeShowcase;
 public static class HomeShowcaseEndpoints
 {
     private const string PublicCacheKey = "home-showcase:published:v1";
+    private const int PublicCacheSeconds = 3;
 
     public static RouteGroupBuilder MapHomeShowcaseEndpoints(this RouteGroupBuilder admin)
     {
@@ -41,11 +42,11 @@ public static class HomeShowcaseEndpoints
     {
         api.MapGet("/home/showcase", async (HttpContext context, HomeShowcaseService service, IMemoryCache cache, CancellationToken ct) =>
         {
-            context.Response.Headers.CacheControl = "public, max-age=30, stale-while-revalidate=30";
+            context.Response.Headers.CacheControl = $"public, max-age={PublicCacheSeconds}";
             if (!cache.TryGetValue(PublicCacheKey, out HomeShowcasePublicResponse? response))
             {
                 response = await service.Public(ct);
-                cache.Set(PublicCacheKey, response, TimeSpan.FromSeconds(30));
+                cache.Set(PublicCacheKey, response, TimeSpan.FromSeconds(PublicCacheSeconds));
             }
             return Results.Ok(response);
         }).AllowAnonymous();

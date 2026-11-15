@@ -18,6 +18,12 @@ public static class FileEndpoints
             try { return await service.Get(Subject(context), id, ct) is { } file ? Results.Ok(file) : Results.NotFound(); }
             catch (Exception ex) { return Error(ex); }
         });
+        admin.MapPost("/files/{id:guid}/derivatives", async (HttpContext context, Guid id, DerivativeRequest request,
+            FileService service, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await service.CreateDerivatives(Subject(context), id, request, ct)); }
+            catch (Exception ex) { return Error(ex); }
+        });
         admin.MapPost("/files", async (HttpContext context, IFormFileCollection files, FileService service, CancellationToken ct) =>
         {
             try { await service.EnsureWritePermission(Subject(context), ct); }

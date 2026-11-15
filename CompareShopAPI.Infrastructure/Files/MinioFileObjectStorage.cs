@@ -1,4 +1,5 @@
 using CompareShopAPI.Application.Files;
+using CompareShopAPI.Domain.Files;
 using Microsoft.Extensions.Configuration;
 using Minio;
 using Minio.DataModel.Args;
@@ -56,6 +57,26 @@ public sealed class MinioFileObjectStorage : IFileObjectStorage
 
     public Task Delete(string key, CancellationToken ct) => client.RemoveObjectAsync(
         new RemoveObjectArgs().WithBucket(bucket).WithObject(key), ct);
+
+    public async Task<StoredFileContent> OpenRead(string key, CancellationToken ct)
+    {
+        var stat = await client.StatObjectAsync(new StatObjectArgs().WithBucket(bucket).WithObject(key), ct);
+        if (stat.Size > FileUploadPolicy.MaxBytes) throw new FileObjectTooLargeException();
+        using var output = new MemoryStream();
+        await client.GetObjectAsync(new GetObjectArgs().WithBucket(bucket).WithObject(key).WithCallbackStream(stream => CopyWithinFileLimit(stream, output)), ct);
+        return new StoredFileContent(new MemoryStream(output.ToArray(), writable: false), output.Length);
+    }
+
+    private static void CopyWithinFileLimit(Stream source, Stream destination)
+    {
+        var buffer = new byte[64 * 1024];
+        int read;
+        while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (destination.Length + read > FileUploadPolicy.MaxBytes) throw new FileObjectTooLargeException();
+            destination.Write(buffer, 0, read);
+        }
+    }
 
     private sealed class SvgDispositionHandler(HttpMessageHandler innerHandler) : DelegatingHandler(innerHandler)
     {

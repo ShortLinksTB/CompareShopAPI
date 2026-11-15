@@ -80,6 +80,59 @@ public sealed class FileServiceTests
     }
 
     [Fact]
+    public async Task Minio_storage_reads_objects_and_stops_at_the_file_size_limit()
+    {
+        var payload = new byte[] { 4, 5, 6 };
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        await using var server = builder.Build();
+        server.Map("/{**path}", async (HttpContext context) =>
+        {
+            context.Response.ContentLength = payload.Length;
+            if (HttpMethods.IsHead(context.Request.Method)) return;
+            await context.Response.Body.WriteAsync(payload);
+        });
+        await server.StartAsync();
+        var address = server.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Minio:Endpoint"] = address, ["Minio:AccessKey"] = "test-access", ["Minio:SecretKey"] = "test-secret",
+            ["Minio:Bucket"] = "compareshop-files"
+        }).Build();
+        var storage = new MinioFileObjectStorage(configuration);
+        var content = await storage.OpenRead("source", default);
+        await using (content.Content)
+        {
+            using var buffer = new MemoryStream();
+            await content.Content.CopyToAsync(buffer);
+            Assert.Equal(payload, buffer.ToArray());
+            Assert.Equal(payload.Length, content.ContentLength);
+        }
+
+        var oversized = new byte[FileUploadPolicy.MaxBytes + 1];
+        var largeBuilder = WebApplication.CreateBuilder();
+        largeBuilder.WebHost.UseUrls("http://127.0.0.1:0");
+        await using var largeServer = largeBuilder.Build();
+        largeServer.Map("/{**path}", async (HttpContext context) =>
+        {
+            context.Response.ContentLength = oversized.Length;
+            if (!HttpMethods.IsHead(context.Request.Method)) await context.Response.Body.WriteAsync(oversized);
+        });
+        await largeServer.StartAsync();
+        var largeAddress = largeServer.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        using (var verificationClient = new HttpClient())
+            Assert.Equal(oversized.Length, (await verificationClient.GetByteArrayAsync(largeAddress + "/compareshop-files/large")).Length);
+        var largeConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Minio:Endpoint"] = largeAddress, ["Minio:AccessKey"] = "test-access", ["Minio:SecretKey"] = "test-secret",
+            ["Minio:Bucket"] = "compareshop-files"
+        }).Build();
+        var largeStorage = new MinioFileObjectStorage(largeConfiguration);
+        var limitFailure = await Record.ExceptionAsync(() => largeStorage.OpenRead("large", default));
+        Assert.IsType<FileObjectTooLargeException>(limitFailure);
+    }
+
+    [Fact]
     public async Task Upload_rejects_unsupported_type_and_files_above_10_mib_before_storage()
     {
         var storage = new FakeStorage();
@@ -201,6 +254,35 @@ public sealed class FileServiceTests
         Assert.Equal(putCountBeforeDeniedBatch, storage.PutCount);
     }
 
+    [Fact]
+    public async Task Derivative_endpoint_returns_per_variant_public_file_and_checks_files_write()
+    {
+        var repository = new FakeRepository();
+        var source = NewAsset("source.png", "image/png", 3, 20, 20);
+        await repository.Add(source, default);
+        var storage = new FakeStorage { ReadBytes = [1, 2, 3] };
+        var permissions = new FakePermissions(FilePermissions.Write);
+        await using var app = new ApiFactory(signing: true, configureServices: services =>
+        {
+            services.RemoveAll<IFileRepository>(); services.AddSingleton<IFileRepository>(repository);
+            services.RemoveAll<IFileObjectStorage>(); services.AddSingleton<IFileObjectStorage>(storage);
+            services.RemoveAll<IFilePermissionGate>(); services.AddSingleton<IFilePermissionGate>(permissions);
+            services.RemoveAll<IImageDerivativeProcessor>(); services.AddSingleton<IImageDerivativeProcessor, TestDerivativeProcessor>();
+        });
+        using var client = app.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: "operator"));
+        var request = new DerivativeRequest(new[] { new DerivativeVariant(32, 32, "cover", null, null, "transparent", "png", 80, null) });
+        var response = await client.PostAsJsonAsync($"/admin/files/{source.Id:D}/derivatives", request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var outcomes = await response.Content.ReadFromJsonAsync<DerivativeVariantOutcome[]>();
+        var outcome = Assert.IsType<DerivativeVariantOutcome[]>(outcomes).Single();
+        Assert.True(outcome.Succeeded);
+        Assert.Equal("/files/" + outcome.File!.Id.ToString("D"), outcome.PublicUrl);
+
+        permissions.Allowed.Remove(FilePermissions.Write);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsJsonAsync($"/admin/files/{source.Id:D}/derivatives", request)).StatusCode);
+    }
+
     private static FileAsset NewAsset(string name, string type, long size, int? width, int? height) =>
         new(Guid.NewGuid(), name, type, size, "key", "admin", DateTime.UtcNow, width, height);
 
@@ -225,6 +307,14 @@ public sealed class FileServiceTests
             assets[file.Id] = file;
             return Task.CompletedTask;
         }
+        public Task ReserveDerivativeAndAdd(FileAsset file, string candidateName, CancellationToken ct)
+        {
+            if (assets.Values.Any(x => string.Equals(x.OriginalFileName.Normalize(), candidateName.Normalize(), StringComparison.OrdinalIgnoreCase)))
+                return Task.FromException(new DerivativeNameCollisionException());
+            assets[file.Id] = file;
+            return Task.CompletedTask;
+        }
+        public Task AuditDerivative(string actor, Guid sourceId, int variantIndex, string parameters, string? resultFileId, string? errorCode, CancellationToken ct) => Task.CompletedTask;
         public Task<bool> Delete(Guid id, CancellationToken ct) => Task.FromResult(assets.Remove(id));
     }
 
@@ -233,6 +323,7 @@ public sealed class FileServiceTests
         public int PutCount { get; private set; }
         public int DeleteCount { get; private set; }
         public bool FailNextPut { get; set; }
+        public byte[] ReadBytes { get; init; } = [];
         public string PublicUrl(string key) => $"https://files.example.test/compareshop/{key}";
         public Task Put(string key, Stream content, long size, string contentType, CancellationToken ct)
         {
@@ -241,11 +332,20 @@ public sealed class FileServiceTests
             return Task.CompletedTask;
         }
         public Task Delete(string key, CancellationToken ct) { DeleteCount++; return Task.CompletedTask; }
+        public Task<StoredFileContent> OpenRead(string key, CancellationToken ct) => Task.FromResult(new StoredFileContent(new MemoryStream(ReadBytes), ReadBytes.Length));
     }
 
     private sealed class FakePermissions(params string[] grants) : IFilePermissionGate
     {
         public HashSet<string> Allowed { get; } = grants.ToHashSet(StringComparer.Ordinal);
         public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) => Task.FromResult(Allowed.Contains(permission));
+    }
+
+    private sealed class TestDerivativeProcessor : IImageDerivativeProcessor
+    {
+        public string? DetectSourceContentType(ReadOnlyMemory<byte> source) => "image/png";
+        public ProcessedDerivative Process(ReadOnlyMemory<byte> source, string requestedFormat, int width, int height,
+            string fit, double focalX, double focalY, string background, int quality) =>
+            new([1, 2, 3], width, height, "image/png", "png", []);
     }
 }

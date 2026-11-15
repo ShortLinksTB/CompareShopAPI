@@ -5,7 +5,8 @@ public sealed class FileAsset
     private FileAsset() { }
 
     public FileAsset(Guid id, string originalFileName, string contentType, long sizeBytes, string objectKey,
-        string uploadedBy, DateTime uploadedAtUtc, int? width = null, int? height = null)
+        string uploadedBy, DateTime uploadedAtUtc, int? width = null, int? height = null,
+        Guid? derivedFromFileId = null, string? derivedPreset = null, string? derivativeSpecJson = null)
     {
         if (id == Guid.Empty) throw new ArgumentException("File ID is required.", nameof(id));
         if (string.IsNullOrWhiteSpace(originalFileName) || originalFileName.Length > 255
@@ -26,6 +27,9 @@ public sealed class FileAsset
         UploadedAtUtc = uploadedAtUtc;
         Width = width;
         Height = height;
+        DerivedFromFileId = derivedFromFileId;
+        DerivedPreset = derivedPreset;
+        DerivativeSpecJson = derivativeSpecJson;
     }
 
     public Guid Id { get; private set; }
@@ -37,6 +41,10 @@ public sealed class FileAsset
     public string UploadedBy { get; private set; } = string.Empty;
     public DateTime UploadedAtUtc { get; private set; }
     public string ObjectKey { get; private set; } = string.Empty;
+    public Guid? DerivedFromFileId { get; private set; }
+    public string? DerivedPreset { get; private set; }
+    public string? DerivativeSpecJson { get; private set; }
+    public FileAsset? DerivedFromFile { get; private set; }
 }
 
 public static class FileUploadPolicy

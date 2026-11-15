@@ -113,6 +113,9 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<FileAsset>().Property(x => x.ContentType).HasMaxLength(100).IsRequired();
         model.Entity<FileAsset>().Property(x => x.ObjectKey).HasMaxLength(512).IsRequired();
         model.Entity<FileAsset>().Property(x => x.UploadedBy).HasMaxLength(200).IsRequired();
+        model.Entity<FileAsset>().Property(x => x.DerivedPreset).HasMaxLength(40);
+        model.Entity<FileAsset>().Property(x => x.DerivativeSpecJson).HasColumnType("nvarchar(max)");
+        model.Entity<FileAsset>().HasOne(x => x.DerivedFromFile).WithMany().HasForeignKey(x => x.DerivedFromFileId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<FileAsset>().HasIndex(x => x.UploadedAtUtc);
         model.Entity<AdminUserRole>().HasKey(x => new { x.UserId, x.RoleId });
         model.Entity<AdminUserRole>().HasOne<User>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);

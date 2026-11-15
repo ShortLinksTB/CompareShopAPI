@@ -7,6 +7,11 @@ public interface ISourceCatalogReader
 {
     bool Supports(string sourceKey) => true;
     Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct) => ReadAsync(sourceKey, categoryPath, ct);
+    async Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, Func<string, CancellationToken, Task> stageChanged, CancellationToken ct)
+    {
+        await stageChanged("catalog_read", ct);
+        return await ReadAsync(sourceKey, categoryPath, jobId, ct);
+    }
     Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct) => ReadValidatedBiaAsync(ct);
     Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => throw new NotSupportedException("Source reader requires a source-aware request.");
 }
@@ -93,15 +98,33 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISource
             var job = await jobs.TryClaim(dataSource.Id, now, ct);
             if (job is null) continue;
             await Log(job.Id, "Info", "reserved", "Job reserved.", ct);
-            if (!await jobs.ShopIsUsable(dataSource.Id, ct))
+            var shopCheckStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+            var shopIsUsable = await jobs.ShopIsUsable(dataSource.Id, ct);
+            if (!shopIsUsable)
             {
-                await Log(job.Id, "Error", "shop_check", "Partner shop is missing or disabled.", ct);
+                await Log(job.Id, "Error", "shop_check", "Partner shop is missing or disabled.", ct, durationMs: ElapsedMilliseconds(shopCheckStarted));
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0, "shop_unavailable", "Partner shop is missing or disabled.", ct);
                 continue;
             }
+            await Log(job.Id, "Info", "shop_check", "Partner shop is available.", ct, durationMs: ElapsedMilliseconds(shopCheckStarted));
             using var execution = CancellationTokenSource.CreateLinkedTokenSource(ct);
             execution.CancelAfter(executionLimit);
             var failureStep = "browser_start";
+            long? stepStarted = null;
+            var readerStageDurations = new Dictionary<string, int>(StringComparer.Ordinal);
+            var readerStageOrder = new List<string>();
+            void AddReaderDuration(string step, int durationMs)
+            {
+                if (!readerStageDurations.ContainsKey(step)) readerStageOrder.Add(step);
+                readerStageDurations[step] = (int)Math.Min(int.MaxValue, (long)readerStageDurations.GetValueOrDefault(step) + durationMs);
+            }
+            async Task FlushReaderStages(CancellationToken token)
+            {
+                foreach (var step in readerStageOrder)
+                    await Log(job.Id, "Info", step, $"Reader stage completed ({step}).", token, durationMs: readerStageDurations[step]);
+                readerStageOrder.Clear();
+                readerStageDurations.Clear();
+            }
             try
             {
                 // Keep active work shorter than the persisted lease so an expired claim is always safe to reclaim.
@@ -111,18 +134,41 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISource
                 if (reader is null || !DataSource.IsSupportedCategory(sourceKey, dataSource.CategoryPath)) throw new InvalidDataException("No reader supports this source category.");
                 // Some browser-driver operations do not accept a CancellationToken. WaitAsync
                 // keeps the job bounded even if one of those operations stops responding.
-                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, job.Id, execution.Token)
+                stepStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, job.Id, (stage, _) =>
+                    {
+                        if (stepStarted is { } started)
+                            AddReaderDuration(failureStep, ElapsedMilliseconds(started));
+                        failureStep = stage;
+                        stepStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                        return Task.CompletedTask;
+                    }, execution.Token)
                     .WaitAsync(execution.Token);
+                if (stepStarted is { } readStarted)
+                    AddReaderDuration(failureStep, ElapsedMilliseconds(readStarted));
+                stepStarted = null;
+                await FlushReaderStages(execution.Token);
+                failureStep = "page_read";
                 await Log(job.Id, "Info", "page_read", $"Read {rows.Count} product rows.", execution.Token);
                 failureStep = "validation";
-                await Log(job.Id, "Info", "validation", $"Validated {rows.Count(row => row.IsValid)} of {rows.Count} product rows.", execution.Token);
+                var validationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                stepStarted = validationStarted;
+                var validCount = rows.Count(row => row.IsValid);
                 if (rows.Count == 0 || rows.Any(row => !row.IsValid)) throw new InvalidDataException("Source returned no validated products.");
+                await Log(job.Id, "Info", "validation", $"Validated {validCount} of {rows.Count} product rows.", execution.Token, durationMs: ElapsedMilliseconds(validationStarted));
+                stepStarted = null;
                 failureStep = "import";
+                var importStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                stepStarted = importStarted;
                 var result = await jobs.Import(dataSource.Id, rows, true, execution.Token);
-                await Log(job.Id, "Info", "import", $"Imported {result.Imported}; pending {result.Pending}.", execution.Token);
+                await Log(job.Id, "Info", "import", $"Imported {result.Imported}; pending {result.Pending}.", execution.Token, durationMs: ElapsedMilliseconds(importStarted));
+                stepStarted = null;
                 failureStep = "price_history";
+                var historyStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                stepStarted = historyStarted;
                 await history.RecordForChangedMinimums(execution.Token);
-                await Log(job.Id, "Info", "price_history", "Price history recorded.", execution.Token);
+                await Log(job.Id, "Info", "price_history", "Price history recorded.", execution.Token, durationMs: ElapsedMilliseconds(historyStarted));
+                stepStarted = null;
                 await jobs.Complete(dataSource.Id, job, result.Pending > 0 ? SyncJobState.Partial : SyncJobState.Success, clock.GetUtcNow().UtcDateTime, rows.Count, result.Imported, result.Pending, null, null, ct);
                 await Log(job.Id, "Info", "completed", "Job completed.", ct);
             }
@@ -130,38 +176,45 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISource
             catch (OperationCanceledException) when (execution.IsCancellationRequested)
             {
                 System.Diagnostics.Trace.TraceWarning("Catalog source sync timed out; job {0} is recorded as failed.", job.Id);
-                await Log(job.Id, "Error", "execution", "Catalog source exceeded its execution time limit.", ct, new TimeoutException("Execution timeout."));
+                await FlushReaderStages(ct);
+                await Log(job.Id, "Error", failureStep, "Catalog source exceeded its execution time limit.", ct, new TimeoutException("Execution timeout."), durationMs: stepStarted is { } timedOutAt ? ElapsedMilliseconds(timedOutAt) : null);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     "execution_timeout", "Catalog source exceeded its execution time limit.", ct);
             }
             catch (SourceAccessBlockedException ex)
             {
-                await Log(job.Id, "Error", failureStep, SourceAccessBlockedException.SanitizedSummary, ct, ex);
+                await FlushReaderStages(ct);
+                await Log(job.Id, "Error", failureStep, SourceAccessBlockedException.SanitizedSummary, ct, ex, durationMs: stepStarted is { } blockedAt ? ElapsedMilliseconds(blockedAt) : null);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     "source_blocked", SourceAccessBlockedException.SanitizedSummary, ct, pauseSource: true);
             }
             catch (SourceRedirectDeniedException ex)
             {
-                await Log(job.Id, "Error", failureStep, SourceRedirectDeniedException.SanitizedSummary, ct, ex, int.TryParse(ex.ErrorCode.Split('_').Last(), out var code) ? code : null);
+                await FlushReaderStages(ct);
+                await Log(job.Id, "Error", failureStep, SourceRedirectDeniedException.SanitizedSummary, ct, ex, int.TryParse(ex.ErrorCode.Split('_').Last(), out var code) ? code : null, stepStarted is { } redirectedAt ? ElapsedMilliseconds(redirectedAt) : null);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     ex.ErrorCode, SourceRedirectDeniedException.SanitizedSummary, ct);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning("Catalog source sync failed; job {0} is recorded as failed ({1}).", job.Id, ex.GetType().Name);
-                await Log(job.Id, "Error", failureStep, ex.Message, ct, ex);
+                await FlushReaderStages(ct);
+                await Log(job.Id, "Error", failureStep, ex.Message, ct, ex, durationMs: stepStarted is { } failedAt ? ElapsedMilliseconds(failedAt) : null);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0, "source_failure", "Catalog source could not be read or imported.", ct);
             }
         }
     }
 
-    private async Task Log(int jobId, string level, string step, string message, CancellationToken ct, Exception? exception = null, int? status = null)
+    private async Task Log(int jobId, string level, string step, string message, CancellationToken ct, Exception? exception = null, int? status = null, int? durationMs = null)
     {
         if (logs is null) return;
-        try { await logs.Write(jobId, level, step, message, ct, exception, status); }
+        try { await logs.Write(jobId, level, step, message, ct, exception, status, durationMs); }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception logError) { System.Diagnostics.Trace.TraceWarning("Sync job log write failed for job {0} ({1}).", jobId, logError.GetType().Name); }
     }
+
+    private static int ElapsedMilliseconds(long startedAt) =>
+        (int)Math.Min(int.MaxValue, System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
     private static TimeSpan ResolveExecutionLimit(TimeSpan? configured)
     {

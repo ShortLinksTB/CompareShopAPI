@@ -9,11 +9,28 @@ internal enum CatalogReadFailure { RobotsPolicyDenied, ProductCountInvalid, Prod
 
 internal enum CatalogReadStage { Starting, Robots, BrowserLaunch, Navigation, AccessCheck, ProductCount, ProductFields }
 
-internal sealed class CatalogReadContext(string source, int? jobId)
+internal sealed class CatalogReadContext(string source, int? jobId, Func<string, CancellationToken, Task>? stageChanged = null)
 {
     internal string Source { get; } = source;
     internal int? JobId { get; } = jobId;
     internal CatalogReadStage Stage { get; set; }
+
+    internal async Task SetStage(CatalogReadStage stage, CancellationToken ct)
+    {
+        Stage = stage;
+        if (stageChanged is not null) await stageChanged(ToJobStep(stage), ct);
+    }
+
+    private static string ToJobStep(CatalogReadStage stage) => stage switch
+    {
+        CatalogReadStage.Robots => "reader_robots",
+        CatalogReadStage.BrowserLaunch => "browser_start",
+        CatalogReadStage.Navigation => "page_navigation",
+        CatalogReadStage.AccessCheck => "access_check",
+        CatalogReadStage.ProductCount => "product_count",
+        CatalogReadStage.ProductFields => "product_fields",
+        _ => "catalog_read"
+    };
 }
 
 internal static class CatalogReadDiagnostics

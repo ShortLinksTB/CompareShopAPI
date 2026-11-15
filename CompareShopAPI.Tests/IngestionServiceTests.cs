@@ -70,7 +70,8 @@ public sealed class IngestionServiceTests
         builder.WebHost.UseTestServer();
         builder.Services.AddSingleton<ISyncJobStore>(jobs);
         builder.Services.AddSingleton<IDataSourceStore>(new FakeDataSources());
-        builder.Services.AddSingleton<IAdminPermissionReader>(new FakePermissions { Allowed = true });
+        var permissions = new FakePermissions { Allowed = true };
+        builder.Services.AddSingleton<IAdminPermissionReader>(permissions);
         builder.Services.AddScoped<IngestionAdminService>();
         builder.Services.AddScoped<DataSourceAdminService>();
         await using var app = builder.Build();
@@ -89,7 +90,21 @@ public sealed class IngestionServiceTests
         Assert.Equal(JsonValueKind.Object, paged.RootElement.ValueKind);
         Assert.Equal(1, paged.RootElement.GetProperty("page").GetInt32());
         Assert.Equal(new[] { SyncJobState.Failed, SyncJobState.Partial }, jobs.LastQuery!.Statuses);
+        jobs.Exists = true;
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/sync-jobs/12/logs?page=1&pageSize=600")).StatusCode);
+        Assert.Equal(500, jobs.LogPageSize);
+        jobs.Exists = false;
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/admin/sync-jobs/999/logs")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/admin/sync-jobs?status=invalid")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/admin/sync-jobs/999/logs?page=0")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/admin/sync-jobs/999/retry", null)).StatusCode);
+        jobs.Retry = new SyncJobSummary(13, 1, "BHX", SyncJobState.Queued, Now, null, null, 0, 0, 0, null, null, 12);
+        Assert.Equal(HttpStatusCode.Accepted, (await client.PostAsync("/admin/sync-jobs/12/retry", null)).StatusCode);
+
+        permissions.Allowed = false;
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/sync-jobs")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/sync-jobs/999/logs")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.PostAsync("/admin/sync-jobs/12/retry", null)).StatusCode);
     }
 
     [Fact]
@@ -105,6 +120,15 @@ public sealed class IngestionServiceTests
 
         using var provider = services.BuildServiceProvider();
         Assert.NotNull(provider.GetRequiredService<IngestionCoordinator>());
+    }
+
+    [Fact]
+    public async Task ReaderDefaultStageCallbackKeepsLegacyReadersCompatible()
+    {
+        ISourceCatalogReader reader = new LegacyReader();
+        var stages = new List<string>();
+        await reader.ReadAsync("source", "/category", 42, (stage, _) => { stages.Add(stage); return Task.CompletedTask; }, CancellationToken.None);
+        Assert.Equal(new[] { "catalog_read" }, stages);
     }
 
     [Fact]
@@ -141,6 +165,25 @@ public sealed class IngestionServiceTests
         var failedLogsJobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
         await new IngestionCoordinator(failedLogsJobs, [new FakeReader { Rows = rows }], new FakeHistory(), TimeProvider.System, logs: new RecordingLogWriter { FailWrites = true }).RunDueSources(CancellationToken.None);
         Assert.Equal(SyncJobState.Success, failedLogsJobs.CompletedState);
+    }
+
+    [Fact]
+    public async Task CoordinatorLogsReaderFailureStageAndStepDurations()
+    {
+        var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
+        var reader = new FakeReader
+        {
+            ReportedStages = ["reader_robots", "page_navigation"],
+            Failure = new TimeoutException("navigation timed out")
+        };
+        var logs = new RecordingLogWriter();
+
+        await new IngestionCoordinator(jobs, [reader], new FakeHistory(), TimeProvider.System, logs: logs).RunDueSources(CancellationToken.None);
+
+        var error = Assert.Single(logs.Entries, entry => entry.Level == "Error");
+        Assert.Equal("page_navigation", error.Step);
+        Assert.NotNull(error.DurationMs);
+        Assert.Contains(logs.Entries, entry => entry.Step == "reader_robots" && entry.Level == "Info" && entry.DurationMs is not null);
     }
 
     [Fact]
@@ -317,6 +360,7 @@ public sealed class IngestionServiceTests
     private sealed class FakeReader : ISourceCatalogReader
     {
         public IReadOnlyList<ScrapedOffer> Rows { get; init; } = [];
+        public IReadOnlyList<string> ReportedStages { get; init; } = [];
         public Task<IReadOnlyList<ScrapedOffer>>? PendingRead { get; init; }
         public int? JobId { get; private set; }
         public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct)
@@ -325,7 +369,19 @@ public sealed class IngestionServiceTests
             return PendingRead ?? ReadValidatedBiaAsync(ct);
         }
         public Exception? Failure { get; set; }
+        public async Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, Func<string, CancellationToken, Task> stageChanged, CancellationToken ct)
+        {
+            JobId = jobId;
+            foreach (var stage in ReportedStages) await stageChanged(stage, ct);
+            return await (PendingRead ?? ReadValidatedBiaAsync(ct));
+        }
         public Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => Failure is null ? Task.FromResult(Rows) : Task.FromException<IReadOnlyList<ScrapedOffer>>(Failure);
+    }
+
+    private sealed class LegacyReader : ISourceCatalogReader
+    {
+        public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<ScrapedOffer>>([]);
     }
 
     private sealed class FakeHistory : IPriceHistoryRecorder
@@ -346,13 +402,13 @@ public sealed class IngestionServiceTests
         public bool FailWrites { get; init; }
         public bool CancelWrites { get; init; }
         public List<string> Steps { get; } = [];
-        public List<(string Level, string Step, string? ExceptionType)> Entries { get; } = [];
+        public List<(string Level, string Step, string? ExceptionType, int? DurationMs)> Entries { get; } = [];
         public Task Write(int jobId, string level, string step, string message, CancellationToken ct, Exception? exception = null, int? httpStatusCode = null, int? durationMs = null)
         {
             if (FailWrites) throw new InvalidOperationException("log store unavailable");
             if (CancelWrites) throw new OperationCanceledException(ct);
             Steps.Add(step);
-            Entries.Add((level, step, exception?.GetType().FullName));
+            Entries.Add((level, step, exception?.GetType().FullName, durationMs));
             return Task.CompletedTask;
         }
         public Task<int> DeleteExpired(DateTime cutoffUtc, int take, CancellationToken ct) => Task.FromResult(0);

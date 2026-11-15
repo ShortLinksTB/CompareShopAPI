@@ -79,8 +79,11 @@ public sealed class CatalogReadDiagnosticsTests
         ISourceCatalogReader reader = bhx
             ? new Worker.BhxPlaywrightCatalogReader(() => throw failure, logger)
             : new Worker.CellphoneSPlaywrightCatalogReader(_ => throw failure, cellLogger);
+        var jobSteps = new List<string>();
         Assert.Same(failure, await Assert.ThrowsAsync<TimeoutException>(() =>
-            reader.ReadAsync(bhx ? "bhx" : "cellphones", bhx ? "/bia" : "/laptop/mac.html", 28, default)));
+            reader.ReadAsync(bhx ? "bhx" : "cellphones", bhx ? "/bia" : "/laptop/mac.html", 28,
+                (step, _) => { jobSteps.Add(step); return Task.CompletedTask; }, default)));
+        Assert.Equal(new[] { "reader_robots" }, jobSteps);
         var entry = Assert.Single(bhx ? logger.Entries : cellLogger.Entries);
         Assert.Contains("Source=" + (bhx ? "bhx" : "cellphones"), entry.Text);
         Assert.Contains("JobId=28", entry.Text);
@@ -88,6 +91,29 @@ public sealed class CatalogReadDiagnosticsTests
         Assert.DoesNotContain("private", entry.Text);
         Assert.DoesNotContain("proxy-password", entry.Text);
         Assert.Null(entry.Exception);
+    }
+
+    [Theory]
+    [InlineData("Robots", "reader_robots")]
+    [InlineData("BrowserLaunch", "browser_start")]
+    [InlineData("Navigation", "page_navigation")]
+    [InlineData("AccessCheck", "access_check")]
+    [InlineData("ProductCount", "product_count")]
+    [InlineData("ProductFields", "product_fields")]
+    public async Task ReaderStageMapsToStableSyncJobStep(string stageName, string expectedStep)
+    {
+        var reported = new List<string>();
+        var stage = Enum.Parse<Worker.CatalogReadStage>(stageName);
+        var context = new Worker.CatalogReadContext("source", 42, (step, _) =>
+        {
+            reported.Add(step);
+            return Task.CompletedTask;
+        });
+
+        await context.SetStage(stage, CancellationToken.None);
+
+        Assert.Equal(stage, context.Stage);
+        Assert.Equal(new[] { expectedStep }, reported);
     }
 
     [Fact]

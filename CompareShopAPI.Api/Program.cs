@@ -75,6 +75,7 @@ builder.Services.AddScoped<AdminService>(services => new AdminService(
         .Select(section => section.Value).Where(subject => !string.IsNullOrWhiteSpace(subject)).Cast<string>().ToHashSet(StringComparer.Ordinal)));
 builder.Services.AddScoped<IFileRepository, EfFileRepository>();
 builder.Services.AddScoped<IFileObjectStorage, MinioFileObjectStorage>();
+builder.Services.AddSingleton<IImageDerivativeProcessor, SkiaImageDerivativeProcessor>();
 builder.Services.AddScoped<IFilePermissionGate, AdminFilePermissionGate>();
 builder.Services.AddScoped<FileService>();
 builder.Services.AddSingleton<MigrationState>();

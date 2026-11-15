@@ -230,6 +230,9 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                 {
                     b.Property<Guid>("Id").HasColumnType("uniqueidentifier");
                     b.Property<string>("ContentType").IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)");
+                    b.Property<Guid?>("DerivedFromFileId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("DerivedPreset").HasMaxLength(40).HasColumnType("nvarchar(40)");
+                    b.Property<string>("DerivativeSpecJson").HasColumnType("nvarchar(max)");
                     b.Property<int?>("Height").HasColumnType("int");
                     b.Property<string>("ObjectKey").IsRequired().HasMaxLength(512).HasColumnType("nvarchar(512)");
                     b.Property<string>("OriginalFileName").IsRequired().HasMaxLength(255).HasColumnType("nvarchar(255)");
@@ -239,7 +242,15 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<int?>("Width").HasColumnType("int");
                     b.HasKey("Id");
                     b.HasIndex("UploadedAtUtc");
+                    b.HasIndex("DerivedFromFileId");
                     b.ToTable("Files");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Files.FileAsset", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Files.FileAsset", "DerivedFromFile")
+                        .WithMany().HasForeignKey("DerivedFromFileId").OnDelete(DeleteBehavior.Restrict);
+                    b.Navigation("DerivedFromFile");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Admin.BannedItem", b =>

@@ -301,6 +301,7 @@ public sealed class FileServiceTests
                 asset.SizeBytes, asset.Width, asset.Height, asset.UploadedBy, asset.UploadedAtUtc)).ToArray(), page, pageSize, list.Length, list.Length == 0 ? 0 : 1));
         }
         public Task<FileAsset?> Get(Guid id, CancellationToken ct) => Task.FromResult(assets.GetValueOrDefault(id));
+        public Task<FileAsset?> FindDerivative(Guid sourceId, string preset, string derivativeSpecJson, CancellationToken ct) => Task.FromResult(assets.Values.FirstOrDefault(x => x.DerivedFromFileId == sourceId && x.DerivedPreset == preset && x.DerivativeSpecJson == derivativeSpecJson));
         public Task Add(FileAsset file, CancellationToken ct)
         {
             if (FailAdd) return Task.FromException(new InvalidOperationException("metadata failure"));

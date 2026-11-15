@@ -25,6 +25,7 @@ public interface IFileRepository
 {
     Task<FilePage> List(int page, int pageSize, string? query, string? type, CancellationToken ct);
     Task<FileAsset?> Get(Guid id, CancellationToken ct);
+    Task<FileAsset?> FindDerivative(Guid sourceId, string preset, string derivativeSpecJson, CancellationToken ct);
     Task Add(FileAsset file, CancellationToken ct);
     Task ReserveDerivativeAndAdd(FileAsset file, string candidateName, CancellationToken ct);
     Task AuditDerivative(string actor, Guid sourceId, int variantIndex, string parameters, string? resultFileId, string? errorCode, CancellationToken ct);
@@ -60,8 +61,13 @@ public interface IFilePermissionGate
     Task<bool> HasPermission(string subject, string permission, CancellationToken ct);
 }
 
+public interface IFileDerivatives
+{
+    Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct);
+}
+
 public sealed class FileService(IFileRepository files, IFileObjectStorage storage, IFilePermissionGate permissions,
-    TimeProvider clock, ILogger<FileService> logger, IImageDerivativeProcessor? imageProcessor = null)
+    TimeProvider clock, ILogger<FileService> logger, IImageDerivativeProcessor? imageProcessor = null) : IFileDerivatives
 {
     public async Task<FilePage> List(string? subject, int page, int pageSize, string? query, string? type, CancellationToken ct)
     {
@@ -235,6 +241,12 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
         ValidateVariant(variant);
         var focalX = variant.FocalX ?? 0.5;
         var focalY = variant.FocalY ?? 0.5;
+        var spec = new DerivativeSpec(1, variant.Width, variant.Height, variant.Fit, variant.Fit == "cover" ? focalX : null,
+            variant.Fit == "cover" ? focalY : null, variant.Background, variant.Format, variant.Quality);
+        var specJson = System.Text.Json.JsonSerializer.Serialize(spec);
+        var existing = await files.FindDerivative(source.Id, Preset(variant), specJson, ct);
+        if (existing is not null)
+            return new(index, ToMetadata(existing, source.OriginalFileName), "/files/" + existing.Id.ToString("D"), null, []);
         var processor = imageProcessor ?? throw new InvalidOperationException("Image derivative processor is not registered.");
         ProcessedDerivative output;
         try { output = processor.Process(sourceBytes, variant.Format, variant.Width, variant.Height, variant.Fit, focalX, focalY, variant.Background, variant.Quality); }
@@ -248,15 +260,13 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
         var candidate = $"{basename}-{variant.Width}x{variant.Height}.{output.Extension}";
         if (candidate.Length > 255) throw new DerivativeFailure("invalid_variant");
         var id = Guid.NewGuid(); var key = id.ToString("N");
-        var spec = new DerivativeSpec(1, variant.Width, variant.Height, variant.Fit, variant.Fit == "cover" ? focalX : null,
-            variant.Fit == "cover" ? focalY : null, variant.Background, variant.Format, variant.Quality);
         var warnings = output.Warnings;
         for (var suffix = 1; suffix <= 1000; suffix++)
         {
             var actual = suffix == 1 ? candidate : AddSuffix(candidate, suffix);
             if (actual.Length > 255) throw new DerivativeFailure("name_suffix_exhausted");
             var file = new FileAsset(id, actual, output.ContentType, output.Bytes.Length, key, actor, clock.GetUtcNow().UtcDateTime,
-                output.Width, output.Height, source.Id, Preset(variant), System.Text.Json.JsonSerializer.Serialize(spec));
+                output.Width, output.Height, source.Id, Preset(variant), specJson);
             await storage.Put(key, new MemoryStream(output.Bytes, writable: false), output.Bytes.Length, output.ContentType, ct);
             try
             {

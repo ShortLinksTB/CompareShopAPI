@@ -48,7 +48,8 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
                 db.Users.AddRange(authorized, partial);
                 db.AdminRoles.AddRange(fullRole, partialRole);
                 await db.SaveChangesAsync();
-                var required = await db.AdminPermissions.Where(x => x.Key == AdminPermissions.MatchingApprove || x.Key == AdminPermissions.ProductsCreate).ToListAsync();
+                var required = await db.AdminPermissions.Where(x => x.Key == AdminPermissions.MatchingApprove || x.Key == AdminPermissions.ProductsCreate ||
+                    x.Key == AdminPermissions.ProductsRead || x.Key == AdminPermissions.ProductsUpdate).ToListAsync();
                 db.AdminRolePermissions.AddRange(required.Select(x => new AdminRolePermission { RoleId = fullRole.Id, PermissionId = x.Id }));
                 db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = partialRole.Id, PermissionId = required.Single(x => x.Key == AdminPermissions.MatchingApprove).Id });
                 db.AdminUserRoles.AddRange(new AdminUserRole { UserId = authorized.Id, RoleId = fullRole.Id }, new AdminUserRole { UserId = partial.Id, RoleId = partialRole.Id });
@@ -90,6 +91,20 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
                 Assert.Equal(HttpStatusCode.Created, created.StatusCode);
                 var product = await created.Content.ReadFromJsonAsync<AdminProduct>();
                 Assert.Equal("chosen-slug", product!.Slug);
+
+                client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token(roles, subject: partialSubject));
+                Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/admin/products/{product.Id}/images")).StatusCode);
+                Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"/admin/products/{product.Id}/images", Array.Empty<ProductImageInput>())).StatusCode);
+
+                client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token(roles, subject: authorizedSubject));
+                Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/admin/products/{product.Id}/images")).StatusCode);
+                using var savedImages = await client.PutAsJsonAsync($"/admin/products/{product.Id}/images", new[]
+                {
+                    new ProductImageInput(null, 0, "Main image", null, "https://images.example.test/main.jpg")
+                });
+                Assert.Equal(HttpStatusCode.OK, savedImages.StatusCode);
+                using var readImages = await client.GetAsync($"/admin/products/{product.Id}/images");
+                Assert.Equal(HttpStatusCode.OK, readImages.StatusCode);
             }
         }
         finally
@@ -197,6 +212,8 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         {
             var subject = $"operator-{Guid.NewGuid():N}"; await AddUser(db, subject, 2);
             await service.Categories(subject, 1, 20, default);
+            Assert.Null(await service.ProductImages(subject, int.MaxValue, default));
+            await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ReplaceProductImages(subject, int.MaxValue, Array.Empty<ProductImageInput>(), default));
             await Assert.ThrowsAsync<AdminForbiddenException>(() => service.PriceAlerts(subject, 1, 20, null, null, default));
             await Assert.ThrowsAsync<AdminForbiddenException>(() => service.Users(subject, 1, 20, default));
         }
@@ -209,6 +226,8 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         {
             var subject = $"viewer-{Guid.NewGuid():N}"; await AddUser(db, subject, 4);
             await service.Products(subject, 1, 20, null, default);
+            Assert.Null(await service.ProductImages(subject, int.MaxValue, default));
+            await Assert.ThrowsAsync<AdminForbiddenException>(() => service.ReplaceProductImages(subject, int.MaxValue, Array.Empty<ProductImageInput>(), default));
             await Assert.ThrowsAsync<AdminForbiddenException>(() => service.CreateProduct(subject, new("x", "X", null, null, 1), default));
             await Assert.ThrowsAsync<AdminForbiddenException>(() => service.SaveSettings(subject, new Dictionary<string, string> { ["offers_display_count"] = "5" }, default));
         }
@@ -373,6 +392,37 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             db.ProductOffers.Add(offer); await db.SaveChangesAsync();
             await service.UpdateProduct(subject, product.Id, new("admin-product", "Updated Product", "Brand", "Updated", category.Id, true, product.ImageUrl), default);
             Assert.Equal(product.ImageUrl, (await service.Product(subject, product.Id, default))?.ImageUrl);
+            var gallery = new ProductImageInput[]
+            {
+                new(null, 0, "Main image", null, "https://images.example.test/main.jpg"),
+                new(null, 1, "Side image", null, "https://images.example.test/side.jpg")
+            };
+            await Assert.ThrowsAsync<ProductImageValidationException>(() => service.ReplaceProductImages(subject, product.Id,
+                [gallery[0], gallery[1] with { SortOrder = 0 }], default));
+            await Assert.ThrowsAsync<ProductImageValidationException>(() => service.ReplaceProductImages(subject, product.Id,
+                Enumerable.Range(0, 21).Select(index => new ProductImageInput(null, index, null, null, $"https://images.example.test/{index}.jpg")).ToArray(), default));
+            await Assert.ThrowsAsync<ProductImageValidationException>(() => service.ReplaceProductImages(subject, product.Id,
+                [new ProductImageInput(null, 0, null, Guid.NewGuid(), null)], default));
+            Assert.Empty(await db.ProductImages.Where(x => x.ProductId == product.Id).ToListAsync());
+            await service.ReplaceProductImages(subject, product.Id, gallery, default);
+            Assert.Contains(await db.AdminAuditLogs.ToListAsync(), audit => audit.ResourceType == "product_images" && audit.Action == "replace" && audit.ResourceId == product.Id.ToString());
+            var galleryBeforeLegacyUpdate = (await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync());
+            var currentProduct = await service.Product(subject, product.Id, default);
+            await service.UpdateProduct(subject, product.Id, new("admin-product", "Unrelated edit", "Brand", "Updated", category.Id, true, currentProduct!.ImageUrl), default);
+            var galleryAfterLegacyUpdate = await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync();
+            Assert.Equal(galleryBeforeLegacyUpdate.Select(x => (x.Id, x.SortOrder, x.AltText)), galleryAfterLegacyUpdate.Select(x => (x.Id, x.SortOrder, x.AltText)));
+
+            await service.UpdateProduct(subject, product.Id, new("admin-product", "Change main", "Brand", "Updated", category.Id, true, "https://images.example.test/new-main.jpg"), default);
+            var changedGallery = await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync();
+            Assert.Equal("https://images.example.test/new-main.jpg", changedGallery[0].ExternalUrl);
+            Assert.Equal("https://images.example.test/side.jpg", changedGallery[1].ExternalUrl);
+            await service.UpdateProduct(subject, product.Id, new("admin-product", "Remove main", "Brand", "Updated", category.Id, true, null), default);
+            var promotedGallery = await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync();
+            Assert.Single(promotedGallery);
+            Assert.Equal("https://images.example.test/side.jpg", promotedGallery[0].ExternalUrl);
+            Assert.Equal("https://images.example.test/side.jpg", (await service.Product(subject, product.Id, default))?.ImageUrl);
+            await service.ReplaceProductImages(subject, product.Id, gallery, default);
+            Assert.Equal(gallery[0].ExternalUrl, (await service.Product(subject, product.Id, default))?.ImageUrl);
             var inactiveProduct = await service.CreateProduct(subject, new("inactive-product", "Inactive Product", null, null, category.Id, false), default);
             var inactiveProducts = await service.Products(subject, 1, 20, false, default);
             var activeProducts = await service.Products(subject, 1, 20, true, default);

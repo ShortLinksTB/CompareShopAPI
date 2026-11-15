@@ -41,10 +41,16 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
         var representatives = await VisibleOffers().Where(o => productIds.Contains(o.ProductId)).OrderBy(o => o.PriceVnd).ThenBy(o => o.PartnerShopId).ThenBy(o => o.Id)
             .Select(o => new { o.ProductId, o.ImageUrl, o.SpecificationsJson }).ToListAsync(ct);
         var representativeByProduct = representatives.GroupBy(o => o.ProductId).ToDictionary(group => group.Key, group => group.First());
+        var mainImages = await db.ProductImages.AsNoTracking().Where(x => productIds.Contains(x.ProductId)).OrderBy(x => x.SortOrder)
+            .Select(x => new { x.ProductId, x.FileId, x.ExternalUrl, x.Card600FileId }).ToListAsync(ct);
+        var mainImageByProduct = mainImages.GroupBy(x => x.ProductId).ToDictionary(group => group.Key, group => group.First());
         var items = rows.Select(p =>
         {
             representativeByProduct.TryGetValue(p.Id, out var offer);
-            return new ProductListDto(p.Id, p.Slug, p.Name, p.Brand, p.Category, p.Summary, offer?.ImageUrl ?? p.ImageUrl, ParseSpecs(offer?.SpecificationsJson));
+            var imageUrl = mainImageByProduct.TryGetValue(p.Id, out var main)
+                ? main.Card600FileId.HasValue ? $"/files/{main.Card600FileId.Value:D}" : main.ExternalUrl ?? (main.FileId.HasValue ? $"/files/{main.FileId.Value:D}" : null)
+                : offer?.ImageUrl ?? p.ImageUrl;
+            return new ProductListDto(p.Id, p.Slug, p.Name, p.Brand, p.Category, p.Summary, imageUrl, ParseSpecs(offer?.SpecificationsJson));
         }).ToList();
         return new PageDto<ProductListDto>(items, f.Page, f.PageSize, total, (int)Math.Ceiling(total / (double)f.PageSize));
     }
@@ -64,8 +70,9 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
             return new ProductImageDto(x.Detail1000FileId.HasValue ? $"/files/{x.Detail1000FileId.Value:D}" : source,
                 x.Card600FileId.HasValue ? $"/files/{x.Card600FileId.Value:D}" : source, x.AltText);
         }).ToArray();
+        var imageUrl = imageDtos.Length > 0 ? imageDtos[0].Url600 : representative?.ImageUrl ?? row.ImageUrl;
         return new ProductDetailDto(row.Id, row.Slug, row.Name, row.Brand, row.Description, row.Category, row.Summary, row.Groups,
-            representative?.ImageUrl ?? row.ImageUrl, representative?.Specifications, imageDtos);
+            imageUrl, representative?.Specifications, imageDtos);
     }
     public async Task<IReadOnlyList<OfferDto>?> Offers(int productId, CancellationToken ct)
     {

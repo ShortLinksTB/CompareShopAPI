@@ -32,6 +32,9 @@ public sealed class EfFileRepository(CompareShopDbContext db) : IFileRepository
     }
 
     public Task<FileAsset?> Get(Guid id, CancellationToken ct) => db.Files.AsNoTracking().Include(file => file.DerivedFromFile).SingleOrDefaultAsync(file => file.Id == id, ct);
+    public Task<FileAsset?> FindDerivative(Guid sourceId, string preset, string derivativeSpecJson, CancellationToken ct) => db.Files.AsNoTracking()
+        .Include(file => file.DerivedFromFile).Where(file => file.DerivedFromFileId == sourceId && file.DerivedPreset == preset && file.DerivativeSpecJson == derivativeSpecJson)
+        .OrderBy(file => file.UploadedAtUtc).ThenBy(file => file.Id).FirstOrDefaultAsync(ct);
     public async Task Add(FileAsset file, CancellationToken ct) { db.Files.Add(file); await db.SaveChangesAsync(ct); }
     public async Task ReserveDerivativeAndAdd(FileAsset file, string candidateName, CancellationToken ct)
     {

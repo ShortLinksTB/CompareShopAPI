@@ -54,6 +54,8 @@ builder.Services.AddScoped<WishlistService>();
 builder.Services.AddScoped<PriceAlertService>();
 builder.Services.AddScoped<PriceHistoryService>();
 builder.Services.AddScoped<IAdminData, EfAdminData>();
+builder.Services.AddScoped<IProductImageFileCatalog>(services => services.GetRequiredService<IAdminData>() as IProductImageFileCatalog
+    ?? throw new InvalidOperationException("Product image Files catalog is unavailable."));
 builder.Services.AddScoped<IBannedItemData, EfBannedItemData>();
 builder.Services.AddScoped<BannedItemService>();
 builder.Services.AddScoped<IArticleRepository, EfArticleRepository>();
@@ -76,12 +78,14 @@ builder.Services.AddScoped<AdminService>(services => new AdminService(
     services.GetRequiredService<IAdminData>(),
     services.GetRequiredService<IConfiguration>().GetSection("Admin:BootstrapSuperAdminSubjects").GetChildren()
         .Select(section => section.Value).Where(subject => !string.IsNullOrWhiteSpace(subject)).Cast<string>().ToHashSet(StringComparer.Ordinal),
-    fileService: services.GetRequiredService<FileService>()));
+    fileService: services.GetRequiredService<IFileDerivatives>(),
+    fileCatalog: services.GetRequiredService<IProductImageFileCatalog>()));
 builder.Services.AddScoped<IFileRepository, EfFileRepository>();
 builder.Services.AddScoped<IFileObjectStorage, MinioFileObjectStorage>();
 builder.Services.AddSingleton<IImageDerivativeProcessor, SkiaImageDerivativeProcessor>();
 builder.Services.AddScoped<IFilePermissionGate, AdminFilePermissionGate>();
 builder.Services.AddScoped<FileService>();
+builder.Services.AddScoped<IFileDerivatives, DeferredFileDerivatives>();
 builder.Services.AddSingleton<MigrationState>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("database", tags: ["ready"]);
 builder.Services.AddCors(options => options.AddPolicy("UiClients", policy =>

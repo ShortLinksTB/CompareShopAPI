@@ -28,9 +28,13 @@ public sealed record AdminProduct(int Id, string Slug, string Name, string? Bran
     public bool NeedsStandardImage { get; init; }
 }
 public sealed record ProductImageInput(Guid? Id, int SortOrder, string? AltText, Guid? FileId, string? ExternalUrl);
-public sealed record AdminProductImage(Guid Id, int SortOrder, string? AltText, string SourceUrl, string Url600, string Url1000,
+public sealed record AdminProductImage(Guid Id, int SortOrder, string? AltText, Guid? FileId, string SourceUrl, string Url600, string Url1000,
     bool SourceAvailable, string? Derivative600Status, string? Derivative1000Status);
 public sealed record ProductImageFileCheck(Guid Id, bool Exists, bool IsImage);
+public interface IProductImageFileCatalog
+{
+    Task<IReadOnlyList<ProductImageFileCheck>> CheckFiles(IReadOnlyList<Guid> fileIds, CancellationToken ct);
+}
 public sealed record AdminOffer(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc, string? OutlierReason = null);
 public sealed record AdminOfferQuery(int Page = 1, int PageSize = 25, string? Q = null, int? ShopId = null, int? ProductId = null, string? Filter = null, string Sort = "attention", int StaleHours = 72);
 public sealed record AdminOfferListItem(int Id, int ProductId, int PartnerShopId, int PriceVnd, string? Url, bool IsActive, bool IsOutlier, DateTime UpdatedAtUtc, string? ProductName, string? ProductImageUrl, string? PartnerShopName, string? ExternalSku, string? ImageUrl, int? OriginalPriceVnd, string StockStatus, int? LowestPriceVnd, int? DeltaVnd, decimal? DeltaPercent, string? OutlierReason, decimal? OtherOffersAveragePriceVnd, decimal? OutlierDeviationPercent);
@@ -112,9 +116,9 @@ public interface IAdminData
     Task<AdminProduct?> Product(int id, CancellationToken ct);
     Task<AdminProduct> SaveProduct(int? id, ProductInput input, CancellationToken ct);
     Task<IReadOnlyList<AdminProductImage>?> ProductImages(int productId, CancellationToken ct);
-    Task<IReadOnlyList<ProductImageFileCheck>> CheckProductImageFiles(IReadOnlyList<Guid> fileIds, CancellationToken ct);
+    Task<Guid?> ProductImageFileId(int productId, Guid imageId, CancellationToken ct);
     Task<IReadOnlyList<AdminProductImage>?> ReplaceProductImages(int productId, IReadOnlyList<ProductImageInput> input, DateTime nowUtc, CancellationToken ct);
-    Task SaveProductImageDerivatives(int productId, Guid sourceFileId, Guid? cardFileId, string cardStatus, Guid? detailFileId, string detailStatus, DateTime nowUtc, CancellationToken ct);
+    Task SaveProductImageDerivatives(string actor, int productId, Guid sourceFileId, Guid? cardFileId, string cardStatus, Guid? detailFileId, string detailStatus, DateTime nowUtc, CancellationToken ct);
     Task<bool> DeleteProduct(int id, CancellationToken ct);
     Task<AdminOfferPage> Offers(AdminOfferQuery query, DateTime nowUtc, CancellationToken ct);
     Task<IReadOnlyList<AdminOfferHistoryPoint>?> OfferHistory(int id, DateTime fromUtc, DateTime toUtc, CancellationToken ct);
@@ -163,9 +167,11 @@ public sealed class AdminOfferImportConflictException() : Exception("The source 
 public sealed class MatchingLaptopCategoryUnavailableException() : Exception("A configured Laptop category is unavailable.");
 public sealed class MatchingProductSlugConflictException(string slug) : Exception($"Product slug '{slug}' is already in use.") { public string Slug { get; } = slug; }
 
-public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstrapSubjects = null, TimeProvider? clock = null, FileService? fileService = null)
+public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstrapSubjects = null, TimeProvider? clock = null,
+    IFileDerivatives? fileService = null, IProductImageFileCatalog? fileCatalog = null)
 {
     private TimeProvider Clock { get; } = clock ?? TimeProvider.System;
+    private IProductImageFileCatalog? FileCatalog { get; } = fileCatalog ?? data as IProductImageFileCatalog;
     private async Task<string> Authorize(string? subject, string permission, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
@@ -224,50 +230,68 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         var actor = await Authorize(subject, AdminPermissions.ProductsUpdate, ct);
         ValidateProductImages(input);
         var fileIds = input.Where(x => x.FileId.HasValue).Select(x => x.FileId!.Value).Distinct().ToArray();
-        try
-        {
-            var checks = await data.CheckProductImageFiles(fileIds, ct);
-            if (checks.Any(x => !x.Exists || !x.IsImage)) throw new ProductImageValidationException("One or more Files IDs are missing or are not images.");
-        }
-        catch (ProductImageFilesUnavailableException) { throw; }
         IReadOnlyList<AdminProductImage>? replaced;
         try { replaced = await data.ExecuteAudited(actor, "replace", "product_images", id.ToString(), async token =>
         {
             var before = await data.ProductImages(id, token);
             if (before is null) return (null, null, null);
+            var checks = await (FileCatalog?.CheckFiles(fileIds, token) ?? throw new ProductImageFilesUnavailableException());
+            if (checks.Any(x => !x.Exists || !x.IsImage)) throw new ProductImageValidationException("One or more Files IDs are missing or are not images.");
             var after = await data.ReplaceProductImages(id, input, Clock.GetUtcNow().UtcDateTime, token);
             return (after, before, after);
         }, ct); }
         catch (ArgumentException exception) { throw new ProductImageValidationException(exception.Message); }
-        if (replaced is null || fileService is null) return replaced;
+        if (replaced is null) return null;
+        await CreateMissingProductImageDerivatives(actor, id, replaced, retryFailed: false, ct);
+        return await data.ProductImages(id, ct);
+    }
 
-        foreach (var image in input.Where(x => x.FileId.HasValue))
+    public async Task<AdminProductImage?> RetryProductImageDerivatives(string? subject, int productId, Guid imageId, CancellationToken ct)
+    {
+        var actor = await Authorize(subject, AdminPermissions.ProductsUpdate, ct);
+        if (fileService is null) throw new ProductImageFilesUnavailableException();
+        var source = await data.ProductImageFileId(productId, imageId, ct);
+        if (!source.HasValue) throw new KeyNotFoundException("Product image or Files source not found.");
+        var sourceCheck = await (FileCatalog?.CheckFiles([source.Value], ct) ?? throw new ProductImageFilesUnavailableException());
+        if (sourceCheck.Any(x => !x.Exists || !x.IsImage)) throw new ProductImageValidationException("The source file is missing or is not an image.");
+        var images = await data.ProductImages(productId, ct) ?? throw new KeyNotFoundException();
+        var image = images.Single(x => x.Id == imageId);
+        await CreateMissingProductImageDerivatives(actor, productId, [image], retryFailed: true, ct);
+        return (await data.ProductImages(productId, ct))?.SingleOrDefault(x => x.Id == imageId);
+    }
+
+    private async Task CreateMissingProductImageDerivatives(string actor, int id, IReadOnlyList<AdminProductImage> images, bool retryFailed, CancellationToken ct)
+    {
+        if (fileService is null) return;
+        foreach (var image in images.Where(x => x.FileId.HasValue))
         {
-            var current = replaced.FirstOrDefault(x => x.SortOrder == image.SortOrder);
-            if (current is null || current.Derivative600Status == "ready" && current.Derivative1000Status == "ready") continue;
+            if (image.Derivative600Status == "ready" && image.Derivative1000Status == "ready") continue;
+            if (!retryFailed && image.Derivative600Status != "pending" && image.Derivative1000Status != "pending") continue;
             var cardId = (Guid?)null;
             var detailId = (Guid?)null;
-            var cardStatus = "unavailable";
-            var detailStatus = "unavailable";
+            var cardStatus = image.Derivative600Status == "ready" ? "ready" : "unavailable";
+            var detailStatus = image.Derivative1000Status == "ready" ? "ready" : "unavailable";
             try
             {
-                var outcomes = await fileService.CreateDerivatives(actor, image.FileId!.Value,
-                    new DerivativeRequest([
-                        new DerivativeVariant(600, 600, "cover", null, null, "#ffffff", "webp", 85, $"product-{id}-{image.SortOrder}-600x600.webp"),
-                        new DerivativeVariant(1000, 1000, "cover", null, null, "#ffffff", "webp", 85, $"product-{id}-{image.SortOrder}-1000x1000.webp")
-                    ]), ct);
-                cardId = outcomes.ElementAtOrDefault(0)?.File?.DerivedFrom?.Id == image.FileId ? outcomes[0].File.Id : null;
-                detailId = outcomes.ElementAtOrDefault(1)?.File?.DerivedFrom?.Id == image.FileId ? outcomes[1].File.Id : null;
-                cardStatus = cardId.HasValue ? "ready" : "failed";
-                detailStatus = detailId.HasValue ? "ready" : "failed";
+                var variants = new List<DerivativeVariant>();
+                var cardIndex = -1;
+                var detailIndex = -1;
+                if (cardStatus != "ready") { cardIndex = variants.Count; variants.Add(new(600, 600, "cover", null, null, "#ffffff", "webp", 85, $"product-{id}-{image.SortOrder}-600x600.webp")); }
+                if (detailStatus != "ready") { detailIndex = variants.Count; variants.Add(new(1000, 1000, "cover", null, null, "#ffffff", "webp", 85, $"product-{id}-{image.SortOrder}-1000x1000.webp")); }
+                var outcomes = await fileService.CreateDerivatives(actor, image.FileId!.Value, new DerivativeRequest(variants), ct);
+                var card = cardIndex >= 0 ? outcomes.ElementAtOrDefault(cardIndex)?.File : null;
+                var detail = detailIndex >= 0 ? outcomes.ElementAtOrDefault(detailIndex)?.File : null;
+                cardId = card?.DerivedFrom?.Id == image.FileId && card.Width == 600 && card.Height == 600 && card.DerivedPreset == "home-600x600" ? card.Id : null;
+                detailId = detail?.DerivedFrom?.Id == image.FileId && detail.Width == 1000 && detail.Height == 1000 && detail.DerivedPreset == "product-detail-1000x1000" ? detail.Id : null;
+                if (cardIndex >= 0) cardStatus = cardId.HasValue ? "ready" : "failed";
+                if (detailIndex >= 0) detailStatus = detailId.HasValue ? "ready" : "failed";
             }
             catch (AdminForbiddenException) { }
             catch (KeyNotFoundException) { cardStatus = detailStatus = "failed"; }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (Exception) when (!ct.IsCancellationRequested)
             { cardStatus = detailStatus = "failed"; }
-            await data.SaveProductImageDerivatives(id, image.FileId.Value, cardId, cardStatus, detailId, detailStatus, Clock.GetUtcNow().UtcDateTime, ct);
+            await data.SaveProductImageDerivatives(actor, id, image.FileId!.Value, cardId, cardStatus, detailId, detailStatus, Clock.GetUtcNow().UtcDateTime, ct);
         }
-        return await data.ProductImages(id, ct);
     }
     public Task<AdminProduct> CreateProduct(string? s, ProductInput i, CancellationToken ct) => Write<AdminProduct>(s, AdminPermissions.ProductsCreate, "create", "product", null, async t => (await data.SaveProduct(null, Validate(i), t), null, i), ct);
     public Task<AdminProduct> UpdateProduct(string? s, int id, ProductInput i, CancellationToken ct) => Write(s, AdminPermissions.ProductsUpdate, "update", "product", id.ToString(), async t => { var before = await data.Product(id, t); return before is null ? (null, null, null) : (await data.SaveProduct(id, Validate(i), t), before, i); }, ct);
@@ -425,7 +449,8 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
                 await data.SaveMatching(matching, t);
                 await data.SaveMatchingDecision(matching.Id, "created_product", null, null, actor, Clock.GetUtcNow().UtcDateTime, t);
             }
-            var needsStandardImage = input.ImageChoice != "files" || imageUrl is null;
+            // Matching-created products do not yet have derivative associations in ProductImages.
+            var needsStandardImage = true;
             return (product with { NeedsStandardImage = needsStandardImage }, null, new { productId = product.Id, matchingIds = ids, input.ImageChoice, needsStandardImage });
         }, ct);
     }

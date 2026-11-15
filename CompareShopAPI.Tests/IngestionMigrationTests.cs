@@ -384,12 +384,12 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             {
                 await setup.Database.MigrateAsync("20261027150000_AddCellphoneSOfferData");
                 var cellphonesShopId = await setup.PartnerShops.Where(x => x.Slug == "cellphones").Select(x => x.Id).SingleAsync();
-                var otherShop = new PartnerShop { Slug = $"other-{Guid.NewGuid():N}", Name = "Other shop", WebsiteUrl = "https://other.example", IsActive = true };
-                setup.PartnerShops.Add(otherShop);
-                await setup.SaveChangesAsync();
+                var otherShopSlug = $"other-{Guid.NewGuid():N}";
+                await setup.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO [PartnerShops] ([Slug], [Name], [WebsiteUrl], [IsActive]) VALUES ({otherShopSlug}, N'Other shop', N'https://other.example', 1)");
+                var otherShopId = await setup.PartnerShops.Where(x => x.Slug == otherShopSlug).Select(x => x.Id).SingleAsync();
                 var mac = await setup.DataSources.SingleAsync(x => x.Key == "cellphones");
                 macId = mac.Id;
-                originalPartnerShopId = otherShop.Id;
+                originalPartnerShopId = otherShopId;
                 mac.AttachPartnerShop(originalPartnerShopId);
                 await setup.SaveChangesAsync();
                 Assert.NotEqual(cellphonesShopId, originalPartnerShopId);

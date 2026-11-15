@@ -14,6 +14,52 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
     private static readonly TimeProvider FixedClock = new FixedTimeProvider(new DateTimeOffset(2026, 10, 17, 0, 0, 0, TimeSpan.Zero));
 
     [Fact]
+    public async Task Homepage_partner_backfill_matches_normalized_names_and_slugs_without_creating_rows()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopPartnerBackfill_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            await using var db = new CompareShopDbContext(options);
+            await db.Database.MigrateAsync("20261112030000_AddAuthSubject");
+            var existingShopCount = await db.PartnerShops.CountAsync();
+            await db.Database.ExecuteSqlRawAsync("""
+                INSERT INTO [PartnerShops] ([Slug], [Name], [IsActive]) VALUES
+                    (N'partner-ha', N'Hoàng Hà Mobile', 1),
+                    (N'partner-tgdd', N'THE GIOI DI DONG', 1),
+                    (N'dien-may-xanh', N'Unrelated display name', 1),
+                    (N'inactive-shopee', N'Shopee', 0),
+                    (N'another-shop', N'Another Shop', 1);
+                """);
+
+            await db.Database.MigrateAsync();
+            var shops = await db.PartnerShops.OrderBy(x => x.Id).ToListAsync();
+            Assert.Equal(existingShopCount + 5, shops.Count);
+            var bySlug = shops.ToDictionary(x => x.Slug);
+            Assert.Equal((true, 7), (bySlug["partner-ha"].ShowOnHome, bySlug["partner-ha"].HomeDisplayOrder));
+            Assert.Equal((true, 8), (bySlug["partner-tgdd"].ShowOnHome, bySlug["partner-tgdd"].HomeDisplayOrder));
+            Assert.Equal((true, 9), (bySlug["dien-may-xanh"].ShowOnHome, bySlug["dien-may-xanh"].HomeDisplayOrder));
+            Assert.False(bySlug["inactive-shopee"].IsActive);
+            Assert.False(bySlug["inactive-shopee"].ShowOnHome);
+            Assert.Null(bySlug["inactive-shopee"].HomeDisplayOrder);
+            Assert.False(bySlug["another-shop"].ShowOnHome);
+            Assert.Null(bySlug["another-shop"].HomeDisplayOrder);
+
+            var listed = await new EfCatalogQueries(db, FixedClock).HomePartners(default);
+            Assert.Contains("partner-ha", listed.Select(x => x.Slug));
+            Assert.Contains("partner-tgdd", listed.Select(x => x.Slug));
+            Assert.Contains("dien-may-xanh", listed.Select(x => x.Slug));
+            Assert.All(listed, partner => Assert.Equal(new[] { "Name", "Slug", "WebsiteUrl" },
+                typeof(HomePartnerDto).GetProperties().Select(property => property.Name)));
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task Migration_guard_rejects_partial_history_table_without_changing_it()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopGuardTest_{Guid.NewGuid():N}" }.ConnectionString;
@@ -50,6 +96,10 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             db.PartnerShops.Add(new PartnerShop { Slug = "existing-unrelated-shop", Name = "Existing Shop", WebsiteUrl = "https://existing.example.test", IsActive = true });
             await db.SaveChangesAsync();
             await CatalogSeed.SeedAsync(db);
+            var homepageShop = await db.PartnerShops.SingleAsync(x => x.Slug == "north-shop");
+            homepageShop.ShowOnHome = true;
+            homepageShop.HomeDisplayOrder = 1;
+            await db.SaveChangesAsync();
             var counts = (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync());
             await CatalogSeed.SeedAsync(db);
             Assert.Equal(counts, (await db.Products.CountAsync(), await db.Categories.CountAsync(), await db.PartnerShops.CountAsync(), await db.ProductOffers.CountAsync()));
@@ -252,6 +302,15 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
 
             await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection }, signing: true, timeProvider: FixedClock, authSigning: true);
             var client = app.CreateClient();
+            using (var partnersResponse = await client.GetAsync("/api/v1/partners"))
+            {
+                Assert.Equal("public, max-age=30, stale-while-revalidate=30", partnersResponse.Headers.CacheControl?.ToString());
+                using var partnersJson = System.Text.Json.JsonDocument.Parse(await partnersResponse.Content.ReadAsStringAsync());
+                var partners = partnersJson.RootElement.EnumerateArray().ToArray();
+                Assert.Equal(new[] { "north-shop", "cellphones" }, partners.Select(partner => partner.GetProperty("slug").GetString()));
+                Assert.All(partners, partner => Assert.Equal(new[] { "name", "slug", "websiteUrl" },
+                    partner.EnumerateObject().Select(property => property.Name).OrderBy(name => name)));
+            }
             Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/api/v1/categories")).StatusCode);
             using (var rootJson = System.Text.Json.JsonDocument.Parse(await (await client.GetAsync("/api/v1/categories")).Content.ReadAsStringAsync()))
             {

@@ -324,7 +324,27 @@ public sealed class SkeletonTests
         });
         var client = app.CreateClient();
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/docs")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/openapi/v1.json")).StatusCode);
+        using var openApiResponse = await client.GetAsync("/openapi/v1.json");
+        Assert.Equal(HttpStatusCode.OK, openApiResponse.StatusCode);
+        using var openApi = System.Text.Json.JsonDocument.Parse(await openApiResponse.Content.ReadAsStringAsync());
+        var shopInputSchemas = openApi.RootElement.GetProperty("components").GetProperty("schemas")
+            .EnumerateObject()
+            .Where(schema => schema.Value.TryGetProperty("properties", out var properties)
+                && properties.TryGetProperty("homeDisplayOrder", out _))
+            .ToArray();
+        var shopInputSchema = Assert.Single(shopInputSchemas).Value;
+        var orderProperty = shopInputSchema.GetProperty("properties").GetProperty("homeDisplayOrder");
+        Assert.True(orderProperty.TryGetProperty("$ref", out var orderReference));
+        var orderSchemaName = orderReference.GetString()!.Split('/').Last();
+        var orderSchema = openApi.RootElement.GetProperty("components").GetProperty("schemas").GetProperty(orderSchemaName);
+        var typeSchema = orderSchema.GetProperty("type");
+        var orderTypes = typeSchema.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? typeSchema.EnumerateArray().Select(type => type.GetString()).ToArray()
+            : [typeSchema.GetString()];
+        Assert.Contains("integer", orderTypes);
+        Assert.True(orderTypes.Contains("null") || orderSchema.TryGetProperty("nullable", out var nullable) && nullable.GetBoolean());
+        Assert.False(shopInputSchema.TryGetProperty("required", out var required)
+            && required.EnumerateArray().Any(property => property.GetString() == "homeDisplayOrder"));
         foreach(var origin in new[] {"https://compareshop-dev.giamha.online", "https://admin-compareshop-dev.giamha.online", "https://evil.example"})
         {
             using var request = new HttpRequestMessage(HttpMethod.Options, "/admin/health");

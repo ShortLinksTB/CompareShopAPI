@@ -100,16 +100,18 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
     public async Task<bool> DeleteCategory(int id, CancellationToken ct) { var rows = await db.Categories.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 
-    public Task<Page<AdminShop>> Shops(int page, int size, CancellationToken ct) => PageOf(db.PartnerShops.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive)), page, size, ct);
-    public Task<AdminShop?> Shop(int id, CancellationToken ct) => db.PartnerShops.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive)).SingleOrDefaultAsync(ct);
+    public Task<Page<AdminShop>> Shops(int page, int size, CancellationToken ct) => PageOf(db.PartnerShops.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder)), page, size, ct);
+    public Task<AdminShop?> Shop(int id, CancellationToken ct) => db.PartnerShops.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder)).SingleOrDefaultAsync(ct);
     public async Task<AdminShop> SaveShop(int? id, ShopInput input, CancellationToken ct)
     {
         var item = id.HasValue ? await db.PartnerShops.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
         item ??= new PartnerShop { Slug = input.Slug, Name = input.Name };
         item.Slug = input.Slug; item.Name = input.Name; item.WebsiteUrl = input.WebsiteUrl; item.IsActive = input.IsActive;
+        if (input.ShowOnHome.HasValue) item.ShowOnHome = input.ShowOnHome.Value;
+        if (input.HomeDisplayOrder.IsSpecified) item.HomeDisplayOrder = input.HomeDisplayOrder.Value;
         if (!id.HasValue) db.PartnerShops.Add(item);
-        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.WebsiteUrl, item.IsActive);
+        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.WebsiteUrl, item.IsActive, item.ShowOnHome, item.HomeDisplayOrder);
     }
     public async Task<bool> DeleteShop(int id, CancellationToken ct) { var rows = await db.PartnerShops.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 

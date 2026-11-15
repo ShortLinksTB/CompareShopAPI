@@ -54,7 +54,7 @@ public sealed class FileDerivativeTests
         Assert.True(supported.Succeeded);
 
         var unsupportedSource = new FileAsset(Guid.NewGuid(), "source.png", "image/png", 4, "source", "admin", DateTime.UtcNow);
-        var pdfBytes = "%PDF-1.7\n"u8.ToArray();
+        var pdfBytes = "\uFEFF \n%PDF-1.7\n"u8.ToArray();
         var unsupportedStorage = new Storage(pdfBytes);
         var unsupportedService = new FileService(new Repository(unsupportedSource), unsupportedStorage,
             new Permissions(), TimeProvider.System, NullLogger<FileService>.Instance, processor);

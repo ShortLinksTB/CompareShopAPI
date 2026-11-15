@@ -75,7 +75,7 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
 
     private static bool IsSvgOrPdf(ReadOnlySpan<byte> source)
     {
-        if (source.StartsWith("%PDF-"u8)) return true;
+        if (HasPdfHeaderAtStart(source)) return true;
         try
         {
             using var stream = new MemoryStream(source.ToArray(), writable: false);
@@ -93,6 +93,17 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
         catch (XmlException) { }
         return false;
     }
+
+    private static bool HasPdfHeaderAtStart(ReadOnlySpan<byte> source)
+    {
+        // Allow a UTF-8 BOM and PDF whitespace before the header, but never search
+        // deeper into the payload where image metadata may contain the same bytes.
+        var index = source.StartsWith("\uFEFF"u8) ? 3 : 0;
+        while (index < source.Length && source[index] is 0x00 or 0x09 or 0x0A or 0x0C or 0x0D or 0x20)
+            index++;
+        return source[index..].StartsWith("%PDF-"u8);
+    }
+
     internal static SKBitmap Orient(SKBitmap source, SKEncodedOrigin origin)
     {
         var swaps = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;

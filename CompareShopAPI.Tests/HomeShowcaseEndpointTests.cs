@@ -47,9 +47,15 @@ public sealed class HomeShowcaseEndpointTests
         var publicOne = await client.GetAsync("/api/v1/home/showcase");
         var publicTwo = await client.GetAsync("/api/v1/home/showcase");
         Assert.Equal(HttpStatusCode.OK, publicOne.StatusCode);
-        Assert.Contains("max-age=30", publicOne.Headers.CacheControl?.ToString());
+        Assert.Contains("max-age=3", publicOne.Headers.CacheControl?.ToString());
         Assert.Equal(2, store.PublicReads);
         Assert.Equal(2, store.FallbackReads);
+
+        await Task.Delay(TimeSpan.FromMilliseconds(3200));
+        var refreshed = await client.GetAsync("/api/v1/home/showcase");
+        Assert.Equal(HttpStatusCode.OK, refreshed.StatusCode);
+        Assert.Equal(4, store.PublicReads);
+        Assert.Equal(4, store.FallbackReads);
     }
 
     private static async Task<WebApplication> CreateApp(EndpointStore store, EndpointPermissions permissions)

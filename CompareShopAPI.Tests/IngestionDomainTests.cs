@@ -47,6 +47,22 @@ public sealed class IngestionDomainTests
     }
 
     [Fact]
+    public void SourceConfigurationValidatesMutableFieldsAndDoesNotReactivateError()
+    {
+        var now = DateTime.UtcNow;
+        var source = new DataSource("bhx", "BHX", "/bia", null, now);
+        source.Configure(DataSourceState.Paused, 1, 4);
+        Assert.Equal(DataSourceState.Paused, source.State);
+        Assert.Equal(1, source.IntervalHours);
+        Assert.Equal(4, source.PartnerShopId);
+        Assert.Throws<ArgumentOutOfRangeException>(() => source.Configure(DataSourceState.Active, 721, null));
+        Assert.Throws<ArgumentException>(() => source.Configure(DataSourceState.Error, 24, null));
+
+        source.MarkError();
+        Assert.Throws<ArgumentException>(() => source.Configure(DataSourceState.Active, 24, null));
+    }
+
+    [Fact]
     public void RetryAndMappingTransitionsEnforceTheirInvariants()
     {
         var now = new DateTime(2026, 10, 18, 12, 0, 0, DateTimeKind.Utc);

@@ -23,8 +23,13 @@ public interface ISyncJobStore
 public interface IDataSourceStore
 {
     Task<IReadOnlyList<DataSourceSummary>> ListDataSources(CancellationToken ct);
+    Task<DataSourceSummary?> Configure(int id, DataSourceConfigurationInput input, string actor, CancellationToken ct);
+    Task<ManualSyncResult> QueueManualSync(int id, DateTime queuedAtUtc, CancellationToken ct);
 }
-public sealed record DataSourceSummary(int Id, string Key, string DisplayName, string CategoryPath, int? PartnerShopId, DataSourceState State, int IntervalHours, DateTime CreatedAtUtc, DateTime? LastCompletedAtUtc, DateTime? NextAttemptAtUtc);
+public sealed record DataSourceConfigurationInput(DataSourceState State, int IntervalHours, int? PartnerShopId);
+public enum ManualSyncResultKind { Queued, Missing, Unavailable }
+public sealed record ManualSyncResult(ManualSyncResultKind Kind, SyncJobSummary? Job = null);
+public sealed record DataSourceSummary(int Id, string Key, string DisplayName, string CategoryPath, int? PartnerShopId, DataSourceState State, int IntervalHours, DateTime CreatedAtUtc, DateTime? LastCompletedAtUtc, DateTime? NextAttemptAtUtc, string? PartnerShopDisplayName = null);
 public sealed record SyncJobSummary(int Id, int DataSourceId, string DataSource, SyncJobState State, DateTime QueuedAtUtc, DateTime? StartedAtUtc, DateTime? FinishedAtUtc, int SeenCount, int ImportedCount, int PendingCount, string? ErrorCode, string? ErrorSummary, int? RetryOfJobId);
 public interface IPriceHistoryRecorder { Task RecordForChangedMinimums(CancellationToken ct); }
 public sealed record ImportCounts(int Imported, int Pending);
@@ -125,12 +130,33 @@ public sealed class IngestionAdminService(IAdminPermissionReader permissions, IS
         return await jobs.QueueRetry(id, ct) ?? throw new KeyNotFoundException("A failed or partial job was not found.");
     }
 }
-public sealed class DataSourceAdminService(IAdminPermissionReader permissions, IDataSourceStore sources)
+public sealed class DataSourceAdminService(IAdminPermissionReader permissions, IDataSourceStore sources, TimeProvider clock)
 {
     public async Task<IReadOnlyList<DataSourceSummary>> List(string? subject, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.read", ct)) throw new IngestionForbiddenException();
         return await sources.ListDataSources(ct);
     }
+
+    public async Task<DataSourceSummary> Configure(string? subject, int id, DataSourceConfigurationInput input, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.execute", ct)) throw new IngestionForbiddenException();
+        if (id <= 0) throw new ArgumentException("Data source ID must be positive.", nameof(id));
+        return await sources.Configure(id, input, subject, ct) ?? throw new KeyNotFoundException("Data source was not found.");
+    }
+
+    public async Task<SyncJobSummary> QueueSync(string? subject, int id, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.execute", ct)) throw new IngestionForbiddenException();
+        if (id <= 0) throw new ArgumentException("Data source ID must be positive.", nameof(id));
+        var result = await sources.QueueManualSync(id, clock.GetUtcNow().UtcDateTime, ct);
+        return result.Kind switch
+        {
+            ManualSyncResultKind.Queued => result.Job!,
+            ManualSyncResultKind.Missing => throw new KeyNotFoundException("Data source was not found."),
+            _ => throw new DataSourceSyncConflictException()
+        };
+    }
 }
 public sealed class IngestionForbiddenException : Exception { }
+public sealed class DataSourceSyncConflictException : Exception { }

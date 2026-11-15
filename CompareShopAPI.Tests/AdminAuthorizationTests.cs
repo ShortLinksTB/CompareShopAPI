@@ -408,15 +408,15 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             Assert.Contains(await db.AdminAuditLogs.ToListAsync(), audit => audit.ResourceType == "product_images" && audit.Action == "replace" && audit.ResourceId == product.Id.ToString());
             var galleryBeforeLegacyUpdate = (await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync());
             var currentProduct = await service.Product(subject, product.Id, default);
-            await service.UpdateProduct(subject, product.Id, new("admin-product", "Unrelated edit", "Brand", "Updated", category.Id, true, currentProduct!.ImageUrl), default);
+            await service.UpdateProduct(subject, product.Id, new("admin-product", "Updated Product", "Brand", "Unrelated description edit", category.Id, true, currentProduct!.ImageUrl), default);
             var galleryAfterLegacyUpdate = await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync();
             Assert.Equal(galleryBeforeLegacyUpdate.Select(x => (x.Id, x.SortOrder, x.AltText)), galleryAfterLegacyUpdate.Select(x => (x.Id, x.SortOrder, x.AltText)));
 
-            await service.UpdateProduct(subject, product.Id, new("admin-product", "Change main", "Brand", "Updated", category.Id, true, "https://images.example.test/new-main.jpg"), default);
+            await service.UpdateProduct(subject, product.Id, new("admin-product", "Updated Product", "Brand", "Changed main image", category.Id, true, "https://images.example.test/new-main.jpg"), default);
             var changedGallery = await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync();
             Assert.Equal("https://images.example.test/new-main.jpg", changedGallery[0].ExternalUrl);
             Assert.Equal("https://images.example.test/side.jpg", changedGallery[1].ExternalUrl);
-            await service.UpdateProduct(subject, product.Id, new("admin-product", "Remove main", "Brand", "Updated", category.Id, true, null), default);
+            await service.UpdateProduct(subject, product.Id, new("admin-product", "Updated Product", "Brand", "Removed main image", category.Id, true, null), default);
             var promotedGallery = await db.ProductImages.AsNoTracking().Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync();
             Assert.Single(promotedGallery);
             Assert.Equal("https://images.example.test/side.jpg", promotedGallery[0].ExternalUrl);

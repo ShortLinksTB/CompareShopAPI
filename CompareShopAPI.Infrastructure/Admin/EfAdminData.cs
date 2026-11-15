@@ -236,8 +236,9 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
             {
                 if (existing is not null) db.ProductImages.Remove(existing);
                 var main = requestedFileId.HasValue
-                    ? ProductImage.CreateFile(product.Id, -1, requestedFileId.Value, null, clock.GetUtcNow().UtcDateTime)
-                    : ProductImage.CreateExternal(product.Id, -1, requestedImageUrl, null, clock.GetUtcNow().UtcDateTime);
+                    ? ProductImage.CreateFile(product.Id, 0, requestedFileId.Value, null, clock.GetUtcNow().UtcDateTime)
+                    : ProductImage.CreateExternal(product.Id, 0, requestedImageUrl, null, clock.GetUtcNow().UtcDateTime);
+                main.SortOrder = -1;
                 db.ProductImages.Add(main);
                 images.Insert(0, main);
             }

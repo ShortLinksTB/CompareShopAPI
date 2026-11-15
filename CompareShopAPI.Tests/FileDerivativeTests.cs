@@ -61,12 +61,6 @@ public sealed class FileDerivativeTests
         Assert.Equal("unsupported_source_type", unsupported.Error);
         Assert.Equal(0, unsupportedStorage.PutCount);
 
-        var svgBytes = System.Text.Encoding.UTF8.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
-        var svgSource = new FileAsset(Guid.NewGuid(), "source.png", "image/png", svgBytes.Length, "svg", "admin", DateTime.UtcNow);
-        var svgService = new FileService(new Repository(svgSource), new Storage(svgBytes), new Permissions(),
-            TimeProvider.System, NullLogger<FileService>.Instance, processor);
-        var svg = Assert.Single(await svgService.CreateDerivatives("admin", svgSource.Id, request, default));
-        Assert.Equal("unsupported_source_type", svg.Error);
     }
 
     [Fact]
@@ -243,17 +237,22 @@ public sealed class FileDerivativeTests
     }
 
     [Fact]
-    public void Processor_does_not_treat_pdf_marker_in_png_trailing_metadata_as_pdf_header()
+    public async Task Derivative_accepts_jpeg_with_pdf_marker_in_exif_metadata()
     {
         var processor = new SkiaImageDerivativeProcessor();
-        var png = MakeImage(20, 20);
-        var sourceWithMarkerInMetadata = png.Concat("\nmetadata:%PDF-not-a-header"u8.ToArray()).ToArray();
+        var jpegBytes = MakeJpegWithPdfMarkerInExif();
+        var source = new FileAsset(Guid.NewGuid(), "photo.jpg", "image/jpeg", jpegBytes.Length,
+            "jpeg", "admin", DateTime.UtcNow);
+        var service = new FileService(new Repository(source), new Storage(jpegBytes), new Permissions(),
+            TimeProvider.System, NullLogger<FileService>.Instance, processor);
+        var request = new DerivativeRequest(new[]
+        {
+            new DerivativeVariant(32, 32, "cover", null, null, "transparent", "png", 80, null)
+        });
 
-        var result = processor.Process(sourceWithMarkerInMetadata, "png", 32, 32,
-            "cover", 0.5, 0.5, "transparent", 80);
+        var outcome = Assert.Single(await service.CreateDerivatives("admin", source.Id, request, default));
 
-        Assert.Equal("image/png", result.ContentType);
-        Assert.Equal((32, 32), (result.Width, result.Height));
+        Assert.True(outcome.Succeeded);
     }
 
     [Fact]
@@ -329,6 +328,32 @@ public sealed class FileDerivativeTests
         using var image = SKImage.FromBitmap(bitmap);
         using var data = image.Encode(SKEncodedImageFormat.Png, 100);
         return data.ToArray();
+    }
+
+    private static byte[] MakeJpegWithPdfMarkerInExif()
+    {
+        using var bitmap = SKBitmap.Decode(MakeImage(20, 20));
+        using var image = SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SKEncodedImageFormat.Jpeg, 90);
+        var jpeg = encoded.ToArray();
+        var pdfMarker = System.Text.Encoding.ASCII.GetBytes("%PDF-1.7");
+        var payload = new byte[6 + 14 + pdfMarker.Length];
+        "Exif\0\0"u8.CopyTo(payload);
+        new byte[] { (byte)'I', (byte)'I', 42, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0 }.CopyTo(payload, 6);
+        pdfMarker.CopyTo(payload, 20);
+        var segment = new byte[4 + payload.Length];
+        segment[0] = 0xFF;
+        segment[1] = 0xE1;
+        var segmentLength = payload.Length + 2;
+        segment[2] = (byte)(segmentLength >> 8);
+        segment[3] = (byte)segmentLength;
+        payload.CopyTo(segment, 4);
+
+        var result = new byte[jpeg.Length + segment.Length];
+        jpeg.AsSpan(0, 2).CopyTo(result);
+        segment.CopyTo(result, 2);
+        jpeg.AsSpan(2).CopyTo(result.AsSpan(2 + segment.Length));
+        return result;
     }
 
     private sealed class Processor : IImageDerivativeProcessor

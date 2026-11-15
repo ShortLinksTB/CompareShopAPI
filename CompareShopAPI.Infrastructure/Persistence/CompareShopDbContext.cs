@@ -37,6 +37,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<ArticleViewDaily> ArticleViewDaily => Set<ArticleViewDaily>();
     public DbSet<DataSource> DataSources => Set<DataSource>();
     public DbSet<SyncJob> SyncJobs => Set<SyncJob>();
+    public DbSet<SyncJobLogEntry> SyncJobLogEntries => Set<SyncJobLogEntry>();
     public DbSet<SourceItemMapping> SourceItemMappings => Set<SourceItemMapping>();
     public DbSet<FileAsset> Files => Set<FileAsset>();
     protected override void OnModelCreating(ModelBuilder model)
@@ -201,6 +202,13 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<SyncJob>().HasIndex(x => x.RetryOfJobId).IsUnique().HasFilter("[RetryOfJobId] IS NOT NULL");
         model.Entity<SyncJob>().HasOne<DataSource>().WithMany().HasForeignKey(x => x.DataSourceId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<SyncJob>().HasOne<SyncJob>().WithMany().HasForeignKey(x => x.RetryOfJobId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<SyncJobLogEntry>().HasKey(x => x.Id);
+        model.Entity<SyncJobLogEntry>().Property(x => x.Level).HasMaxLength(16).IsRequired();
+        model.Entity<SyncJobLogEntry>().Property(x => x.Step).HasMaxLength(80).IsRequired();
+        model.Entity<SyncJobLogEntry>().Property(x => x.Message).HasMaxLength(2000).IsRequired();
+        model.Entity<SyncJobLogEntry>().Property(x => x.ExceptionType).HasMaxLength(200);
+        model.Entity<SyncJobLogEntry>().HasIndex(x => new { x.JobId, x.OccurredAtUtc, x.Id });
+        model.Entity<SyncJobLogEntry>().HasOne<SyncJob>().WithMany().HasForeignKey(x => x.JobId).OnDelete(DeleteBehavior.Cascade);
         model.Entity<SourceItemMapping>().HasKey(x => x.Id);
         model.Entity<SourceItemMapping>().HasIndex(x => new { x.DataSourceId, x.ExternalSku }).IsUnique();
         model.Entity<SourceItemMapping>().Property(x => x.ExternalSku).HasMaxLength(160).IsRequired();

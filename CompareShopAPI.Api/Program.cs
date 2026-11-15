@@ -62,7 +62,9 @@ builder.Services.AddScoped<IArticleProductLookup, UserCommerceArticleProductLook
 builder.Services.AddScoped<ArticleService>();
 builder.Services.AddHostedService<ArticlePublishingWorker>();
 builder.Services.AddScoped<BlogArticleService>();
-builder.Services.AddScoped<ISyncJobStore, EfSyncJobStore>();
+builder.Services.AddScoped<EfSyncJobStore>();
+builder.Services.AddScoped<ISyncJobStore>(services => services.GetRequiredService<EfSyncJobStore>());
+builder.Services.AddScoped<ISyncJobLogWriter, EfSyncJobLogWriter>();
 builder.Services.AddScoped<IDataSourceStore, EfDataSourceStore>();
 builder.Services.AddScoped<IPriceHistoryRecorder, EfPriceHistoryRecorder>();
 builder.Services.AddScoped<IAdminPermissionReader>(services => services.GetRequiredService<IAdminData>() as IAdminPermissionReader

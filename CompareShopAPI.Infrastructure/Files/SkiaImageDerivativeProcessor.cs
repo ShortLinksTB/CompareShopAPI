@@ -8,6 +8,7 @@ namespace CompareShopAPI.Infrastructure.Files;
 public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
 {
     private const long MaxPixels = 24_000_000;
+    private const int MaxPdfHeaderBytes = 1024;
 
     public string? DetectSourceContentType(ReadOnlyMemory<byte> source)
     {
@@ -81,7 +82,7 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
     private static bool IsPdfHeader(ReadOnlySpan<byte> source)
     {
         // PDF readers allow a short preamble, but the header must remain at the start of the file.
-        var limit = Math.Min(source.Length, 1024);
+        var limit = Math.Min(source.Length, MaxPdfHeaderBytes);
         var hasBom = limit >= 3 && source[0] == 0xEF && source[1] == 0xBB && source[2] == 0xBF;
         var index = hasBom ? 3 : 0;
         while (index < limit && source[index] is 0x09 or 0x0A or 0x0C or 0x0D or 0x20) index++;

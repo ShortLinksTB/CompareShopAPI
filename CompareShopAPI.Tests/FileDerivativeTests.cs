@@ -256,6 +256,20 @@ public sealed class FileDerivativeTests
     }
 
     [Fact]
+    public void Processor_does_not_treat_pdf_marker_beyond_header_window_as_pdf()
+    {
+        var processor = new SkiaImageDerivativeProcessor();
+        var bytes = new byte[1024 + "%PDF-1.7"u8.Length];
+        Array.Fill(bytes, (byte)' ');
+        "%PDF-1.7"u8.CopyTo(bytes.AsSpan(1024));
+
+        var failure = Assert.Throws<DerivativeFailure>(() => processor.Process(bytes, "png", 32, 32,
+            "cover", 0.5, 0.5, "transparent", 80));
+
+        Assert.Equal("decode_failed", failure.Code);
+    }
+
+    [Fact]
     public async Task Name_collision_retries_with_suffix_and_metadata_failure_cleans_orphan()
     {
         var source = new FileAsset(Guid.NewGuid(), "original.png", "image/png", 3, "source", "admin", DateTime.UtcNow);

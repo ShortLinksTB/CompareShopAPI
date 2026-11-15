@@ -347,6 +347,12 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             var legacyUpdatedShop = await service.UpdateShop(subject, shop.Id, legacyShopInput, default);
             Assert.True(legacyUpdatedShop.ShowOnHome);
             Assert.Equal(4, legacyUpdatedShop.HomeDisplayOrder);
+            var clearOrderInput = System.Text.Json.JsonSerializer.Deserialize<ShopInput>("{\"slug\":\"admin-shop\",\"name\":\"Admin Shop\",\"websiteUrl\":\"https://shop.example\",\"isActive\":true,\"homeDisplayOrder\":null}",
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+            Assert.True(clearOrderInput.HomeDisplayOrder.IsSpecified);
+            Assert.Null(clearOrderInput.HomeDisplayOrder.Value);
+            var clearedShopOrder = await service.UpdateShop(subject, shop.Id, clearOrderInput, default);
+            Assert.Null(clearedShopOrder.HomeDisplayOrder);
             var product = await service.CreateProduct(subject, new("admin-product", "Admin Product", "Brand", "Description", category.Id, true, "https://images.example.test/product.jpg"), default);
             Assert.Equal("https://images.example.test/product.jpg", product.ImageUrl);
             var legacyCategoryInput = System.Text.Json.JsonSerializer.Deserialize<CategoryInput>("{\"slug\":\"admin-category-legacy\",\"name\":\"Legacy Update\",\"isActive\":true}",

@@ -109,7 +109,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         item ??= new PartnerShop { Slug = input.Slug, Name = input.Name };
         item.Slug = input.Slug; item.Name = input.Name; item.WebsiteUrl = input.WebsiteUrl; item.IsActive = input.IsActive;
         if (input.ShowOnHome.HasValue) item.ShowOnHome = input.ShowOnHome.Value;
-        if (input.HomeDisplayOrder.HasValue) item.HomeDisplayOrder = input.HomeDisplayOrder;
+        if (input.HomeDisplayOrder.IsSpecified) item.HomeDisplayOrder = input.HomeDisplayOrder.Value;
         if (!id.HasValue) db.PartnerShops.Add(item);
         await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.WebsiteUrl, item.IsActive, item.ShowOnHome, item.HomeDisplayOrder);
     }

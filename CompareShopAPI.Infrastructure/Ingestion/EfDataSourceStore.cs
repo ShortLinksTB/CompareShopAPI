@@ -22,7 +22,8 @@ public sealed class EfDataSourceStore(CompareShopDbContext db) : IDataSourceStor
             source.IntervalHours,
             source.CreatedAtUtc,
             source.LastCompletedAtUtc,
-            source.NextAttemptAtUtc))
+            source.NextAttemptAtUtc,
+            db.PartnerShops.Where(shop => shop.Id == source.PartnerShopId).Select(shop => shop.Name).FirstOrDefault()))
         .ToListAsync(ct);
 
     public async Task<DataSourceSummary?> Configure(int id, DataSourceConfigurationInput input, string actor, CancellationToken ct)
@@ -48,8 +49,11 @@ public sealed class EfDataSourceStore(CompareShopDbContext db) : IDataSourceStor
         });
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
+        var partnerShopDisplayName = input.PartnerShopId is int partnerShopId
+            ? await db.PartnerShops.Where(shop => shop.Id == partnerShopId).Select(shop => shop.Name).SingleOrDefaultAsync(ct)
+            : null;
         return new(source.Id, source.Key, source.DisplayName, source.CategoryPath, source.PartnerShopId, source.State,
-            source.IntervalHours, source.CreatedAtUtc, source.LastCompletedAtUtc, source.NextAttemptAtUtc);
+            source.IntervalHours, source.CreatedAtUtc, source.LastCompletedAtUtc, source.NextAttemptAtUtc, partnerShopDisplayName);
     }
 
     public async Task<ManualSyncResult> QueueManualSync(int id, DateTime queuedAtUtc, CancellationToken ct)

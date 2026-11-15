@@ -29,7 +29,7 @@ public interface IDataSourceStore
 public sealed record DataSourceConfigurationInput(DataSourceState State, int IntervalHours, int? PartnerShopId);
 public enum ManualSyncResultKind { Queued, Missing, Unavailable }
 public sealed record ManualSyncResult(ManualSyncResultKind Kind, SyncJobSummary? Job = null);
-public sealed record DataSourceSummary(int Id, string Key, string DisplayName, string CategoryPath, int? PartnerShopId, DataSourceState State, int IntervalHours, DateTime CreatedAtUtc, DateTime? LastCompletedAtUtc, DateTime? NextAttemptAtUtc);
+public sealed record DataSourceSummary(int Id, string Key, string DisplayName, string CategoryPath, int? PartnerShopId, DataSourceState State, int IntervalHours, DateTime CreatedAtUtc, DateTime? LastCompletedAtUtc, DateTime? NextAttemptAtUtc, string? PartnerShopDisplayName = null);
 public sealed record SyncJobSummary(int Id, int DataSourceId, string DataSource, SyncJobState State, DateTime QueuedAtUtc, DateTime? StartedAtUtc, DateTime? FinishedAtUtc, int SeenCount, int ImportedCount, int PendingCount, string? ErrorCode, string? ErrorSummary, int? RetryOfJobId);
 public interface IPriceHistoryRecorder { Task RecordForChangedMinimums(CancellationToken ct); }
 public sealed record ImportCounts(int Imported, int Pending);

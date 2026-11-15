@@ -70,6 +70,7 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
                 Assert.Equal((int)DataSourceState.Paused, body.RootElement.GetProperty("state").GetInt32());
                 Assert.Equal(24, body.RootElement.GetProperty("intervalHours").GetInt32());
                 Assert.Equal(shopId, body.RootElement.GetProperty("partnerShopId").GetInt32());
+                Assert.Equal("SL-2330 Test Shop", body.RootElement.GetProperty("partnerShopDisplayName").GetString());
             }
 
             var invalidShop = await PatchJsonAsync(client, $"/admin/data-sources/{sourceId}", new
@@ -114,6 +115,21 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
                 partnerShopId = shopId
             });
             Assert.Equal(HttpStatusCode.BadRequest, reactivateErrorSource.StatusCode);
+
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var shop = await db.PartnerShops.SingleAsync(item => item.Id == shopId);
+                db.PartnerShops.Remove(shop);
+                await db.SaveChangesAsync();
+            }
+            using (var sourcesResponse = await client.GetAsync("/admin/data-sources"))
+            {
+                Assert.Equal(HttpStatusCode.OK, sourcesResponse.StatusCode);
+                using var sources = JsonDocument.Parse(await sourcesResponse.Content.ReadAsStringAsync());
+                var source = Assert.Single(sources.RootElement.EnumerateArray(), item => item.GetProperty("id").GetInt32() == sourceId);
+                Assert.Equal(JsonValueKind.Null, source.GetProperty("partnerShopId").ValueKind);
+                Assert.Equal(JsonValueKind.Null, source.GetProperty("partnerShopDisplayName").ValueKind);
+            }
 
             await using (var db = new CompareShopDbContext(options))
             {
@@ -193,6 +209,7 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
                 Assert.Equal("SL-1452 Test Source", source.GetProperty("displayName").GetString());
                 Assert.Equal("/test", source.GetProperty("categoryPath").GetString());
                 Assert.Equal(JsonValueKind.Null, source.GetProperty("partnerShopId").ValueKind);
+                Assert.Equal(JsonValueKind.Null, source.GetProperty("partnerShopDisplayName").ValueKind);
                 Assert.Equal((int)DataSourceState.Active, source.GetProperty("state").GetInt32());
                 Assert.Equal(72, source.GetProperty("intervalHours").GetInt32());
                 Assert.Equal(createdAt, source.GetProperty("createdAtUtc").GetDateTime());

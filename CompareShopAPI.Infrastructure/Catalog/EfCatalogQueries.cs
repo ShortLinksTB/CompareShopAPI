@@ -65,6 +65,10 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
         return rows.Select(o => new OfferDto(o.Id, o.PriceVnd, o.Url, o.UpdatedAtUtc, o.PartnerShopId, o.Slug, o.Name, o.OriginalPriceVnd, o.ImageUrl, o.StockStatus, ParseSpecs(o.SpecificationsJson))).ToList();
     }
     public async Task<ShopDto?> Shop(string slug, CancellationToken ct) => await db.PartnerShops.AsNoTracking().Where(s => s.IsActive && s.Slug == slug).Select(s => new ShopDto(s.Id, s.Slug, s.Name, s.WebsiteUrl)).FirstOrDefaultAsync(ct);
+    public async Task<IReadOnlyList<HomePartnerDto>> HomePartners(CancellationToken ct) => await db.PartnerShops.AsNoTracking()
+        .Where(s => s.IsActive && s.ShowOnHome)
+        .OrderBy(s => s.HomeDisplayOrder.HasValue ? 0 : 1).ThenBy(s => s.HomeDisplayOrder).ThenBy(s => s.Id)
+        .Select(s => new HomePartnerDto(s.Name, s.Slug, s.WebsiteUrl)).ToListAsync(ct);
     public async Task<IReadOnlyList<ProductSuggestionDto>> Suggestions(string query, int limit, CancellationToken ct) =>
         await ActiveProducts().Where(p => p.Name.Contains(query))
             .OrderByDescending(p => p.Name.StartsWith(query)).ThenBy(p => p.Name).ThenBy(p => p.Id)

@@ -21,7 +21,7 @@ public static class AdminPermissions
 }
 
 public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId);
-public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive);
+public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive, bool ShowOnHome, int? HomeDisplayOrder);
 public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null)
 {
     public bool NeedsStandardImage { get; init; }
@@ -76,7 +76,7 @@ public sealed record AdminSetting(string Key, string Value);
 public sealed record PermissionsResponse(IReadOnlyList<string> Permissions);
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int TotalItems);
 public sealed record CategoryInput(string Slug, string Name, bool IsActive = true, int? ParentCategoryId = null, bool ClearParentCategory = false);
-public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true);
+public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true, bool? ShowOnHome = null, int? HomeDisplayOrder = null);
 public sealed record ProductInput(string Slug, string Name, string? Brand, string? Description, int CategoryId, bool IsActive = true, string? ImageUrl = null);
 public sealed record OfferInput(int PriceVnd, string? Url, bool IsActive, bool IsOutlier);
 public sealed record SeoInput(string? Title, string? Description);
@@ -428,7 +428,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     }
     private static bool IsValidHttpsUrl(string value, int maxLength) => value.Length <= maxLength && Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrWhiteSpace(uri.UserInfo) && !value.Any(char.IsControl);
     private static CategoryInput Validate(CategoryInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160) throw new ArgumentException("Invalid category."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
-    private static ShopInput Validate(ShopInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160 || x.WebsiteUrl?.Length > 2048) throw new ArgumentException("Invalid shop."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
+    private static ShopInput Validate(ShopInput x) { if (string.IsNullOrWhiteSpace(x.Name) || x.Name.Trim().Length > 200 || string.IsNullOrWhiteSpace(x.Slug) || x.Slug.Trim().Length > 160 || x.WebsiteUrl?.Length > 2048 || x.HomeDisplayOrder is < 1) throw new ArgumentException("Invalid shop."); return x with { Name = x.Name.Trim(), Slug = x.Slug.Trim() }; }
     private static ProductInput Validate(ProductInput x)
     {
         var imageUrl = x.ImageUrl?.Trim();

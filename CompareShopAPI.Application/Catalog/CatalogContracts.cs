@@ -12,6 +12,7 @@ public sealed record SpecificationGroupDto(string Name, IReadOnlyList<Specificat
 public sealed record ProductListDto(int Id, string Slug, string Name, string? Brand, CategoryDto Category, OfferSummaryDto OfferSummary, string? ImageUrl = null, IReadOnlyDictionary<string,string>? OfferSpecifications = null);
 public sealed record ProductDetailDto(int Id, string Slug, string Name, string? Brand, string? Description, CategoryDto Category, OfferSummaryDto OfferSummary, IReadOnlyList<SpecificationGroupDto> SpecificationGroups, string? ImageUrl = null, IReadOnlyDictionary<string,string>? OfferSpecifications = null);
 public sealed record ShopDto(int Id, string Slug, string Name, string? WebsiteUrl);
+public sealed record HomePartnerDto(string Name, string Slug, string? WebsiteUrl);
 public sealed record ProductSuggestionDto(int Id, string Slug, string Name);
 public sealed record PriceHistoryDto(DateTime Date, int MinPrice, int? ShopId);
 public sealed record ProductFilter(int Page = 1, int PageSize = 20, int? CategoryId = null, int? MinPrice = null, int? MaxPrice = null, int? ShopId = null, string? Search = null);
@@ -23,6 +24,7 @@ public interface ICatalogQueries
     Task<ProductDetailDto?> Product(string slug, CancellationToken ct);
     Task<IReadOnlyList<OfferDto>?> Offers(int productId, CancellationToken ct);
     Task<ShopDto?> Shop(string slug, CancellationToken ct);
+    Task<IReadOnlyList<HomePartnerDto>> HomePartners(CancellationToken ct);
     Task<IReadOnlyList<ProductSuggestionDto>> Suggestions(string query, int limit, CancellationToken ct);
 }
 
@@ -49,6 +51,7 @@ public sealed class CatalogService(ICatalogQueries queries)
     public Task<ProductDetailDto?> Product(string slug, CancellationToken ct) => queries.Product(slug, ct);
     public Task<IReadOnlyList<OfferDto>?> Offers(int productId, CancellationToken ct) => queries.Offers(productId, ct);
     public Task<ShopDto?> Shop(string slug, CancellationToken ct) => queries.Shop(slug, ct);
+    public Task<IReadOnlyList<HomePartnerDto>> HomePartners(CancellationToken ct) => queries.HomePartners(ct);
 
     public async Task<IReadOnlyList<ProductSuggestionDto>> Suggestions(string? query, int limit, CancellationToken ct)
     {

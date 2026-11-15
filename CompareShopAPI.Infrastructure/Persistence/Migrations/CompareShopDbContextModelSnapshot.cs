@@ -668,6 +668,14 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<int?>("HomeDisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("ShowOnHome")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)

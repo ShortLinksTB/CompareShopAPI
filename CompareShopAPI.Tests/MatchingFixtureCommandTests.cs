@@ -266,7 +266,7 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
 
                 var matching = await db.ProductMatchings.SingleAsync(x => x.ExternalSku == "QC-SL1815-v2-create-product");
                 var created = await service.CreateMatchingProduct(subject, matching.Id,
-                    new MatchingProductCreate("QC Created From Matching", "ASUS", null, laptopCategoryId, null, "shop", "https://images.example.test/matching-product.jpg"), default);
+                    new MatchingProductCreate("QC Created From Matching", "ASUS", null, laptopCategoryId, "https://images.example.test/matching-product.jpg", "shop"), default);
                 Assert.True(created.NeedsStandardImage);
                 Assert.Equal(laptopCategoryId, created.CategoryId);
                 createdProductId = created.Id;

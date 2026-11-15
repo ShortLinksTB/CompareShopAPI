@@ -134,9 +134,9 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISource
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     "execution_timeout", "Catalog source exceeded its execution time limit.", ct);
             }
-            catch (SourceAccessBlockedException)
+            catch (SourceAccessBlockedException ex)
             {
-                await Log(job.Id, "Error", failureStep, SourceAccessBlockedException.SanitizedSummary, ct);
+                await Log(job.Id, "Error", failureStep, SourceAccessBlockedException.SanitizedSummary, ct, ex);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     "source_blocked", SourceAccessBlockedException.SanitizedSummary, ct, pauseSource: true);
             }

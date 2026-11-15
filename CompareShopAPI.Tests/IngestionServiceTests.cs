@@ -204,13 +204,15 @@ public sealed class IngestionServiceTests
     {
         var jobs = new FakeJobs { Sources = [Source()], Claimed = new SyncJob(1, Now) };
         var reader = new FakeReader { Failure = new SourceAccessBlockedException() };
+        var logs = new RecordingLogWriter();
 
-        await new IngestionCoordinator(jobs, [reader], new FakeHistory(), TimeProvider.System).RunDueSources(CancellationToken.None);
+        await new IngestionCoordinator(jobs, [reader], new FakeHistory(), TimeProvider.System, logs: logs).RunDueSources(CancellationToken.None);
 
         Assert.Equal(SyncJobState.Failed, jobs.CompletedState);
         Assert.Equal("source_blocked", jobs.ErrorCode);
         Assert.Equal(SourceAccessBlockedException.SanitizedSummary, jobs.ErrorSummary);
         Assert.True(jobs.SourcePaused);
+        Assert.Equal(typeof(SourceAccessBlockedException).FullName, Assert.Single(logs.Entries, entry => entry.Step == "browser_start" && entry.Level == "Error").ExceptionType);
     }
 
     [Fact]
@@ -344,11 +346,13 @@ public sealed class IngestionServiceTests
         public bool FailWrites { get; init; }
         public bool CancelWrites { get; init; }
         public List<string> Steps { get; } = [];
+        public List<(string Level, string Step, string? ExceptionType)> Entries { get; } = [];
         public Task Write(int jobId, string level, string step, string message, CancellationToken ct, Exception? exception = null, int? httpStatusCode = null, int? durationMs = null)
         {
             if (FailWrites) throw new InvalidOperationException("log store unavailable");
             if (CancelWrites) throw new OperationCanceledException(ct);
             Steps.Add(step);
+            Entries.Add((level, step, exception?.GetType().FullName));
             return Task.CompletedTask;
         }
         public Task<int> DeleteExpired(DateTime cutoffUtc, int take, CancellationToken ct) => Task.FromResult(0);

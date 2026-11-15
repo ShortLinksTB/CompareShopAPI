@@ -75,7 +75,8 @@ builder.Services.AddScoped<DataSourceAdminService>();
 builder.Services.AddScoped<AdminService>(services => new AdminService(
     services.GetRequiredService<IAdminData>(),
     services.GetRequiredService<IConfiguration>().GetSection("Admin:BootstrapSuperAdminSubjects").GetChildren()
-        .Select(section => section.Value).Where(subject => !string.IsNullOrWhiteSpace(subject)).Cast<string>().ToHashSet(StringComparer.Ordinal)));
+        .Select(section => section.Value).Where(subject => !string.IsNullOrWhiteSpace(subject)).Cast<string>().ToHashSet(StringComparer.Ordinal),
+    fileService: services.GetRequiredService<FileService>()));
 builder.Services.AddScoped<IFileRepository, EfFileRepository>();
 builder.Services.AddScoped<IFileObjectStorage, MinioFileObjectStorage>();
 builder.Services.AddSingleton<IImageDerivativeProcessor, SkiaImageDerivativeProcessor>();

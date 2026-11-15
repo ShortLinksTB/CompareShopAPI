@@ -60,6 +60,8 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<ProductImage>().HasKey(x => x.Id);
         model.Entity<ProductImage>().Property(x => x.AltText).HasMaxLength(500);
         model.Entity<ProductImage>().Property(x => x.ExternalUrl).HasMaxLength(2048);
+        model.Entity<ProductImage>().Property(x => x.Card600Status).HasMaxLength(50).IsRequired();
+        model.Entity<ProductImage>().Property(x => x.Detail1000Status).HasMaxLength(50).IsRequired();
         model.Entity<ProductImage>().HasIndex(x => new { x.ProductId, x.SortOrder }).IsUnique();
         model.Entity<ProductImage>().HasIndex(x => new { x.ProductId, x.FileId }).IsUnique().HasFilter("[FileId] IS NOT NULL");
         model.Entity<ProductImage>().HasOne<Product>().WithMany(x => x.Images).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);

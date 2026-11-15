@@ -123,7 +123,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
     public async Task<AdminProduct?> Product(int id, CancellationToken ct)
     {
-        var product = await db.Products.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+        var product = await db.Products.AsNoTracking().Include(x => x.Images).SingleOrDefaultAsync(x => x.Id == id, ct);
         return product is null ? null : ToDto(product);
     }
     public async Task<AdminProduct> SaveProduct(int? id, ProductInput input, CancellationToken ct)
@@ -132,9 +132,151 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var item = id.HasValue ? await db.Products.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
         item ??= new Product { Slug = input.Slug, Name = input.Name };
-        item.Slug = input.Slug; item.Name = input.Name; item.Brand = input.Brand; item.Description = input.Description; item.ImageUrl = input.ImageUrl; item.CategoryId = input.CategoryId; item.IsActive = input.IsActive;
+        var previousImageUrl = item.ImageUrl;
+        item.Slug = input.Slug; item.Name = input.Name; item.Brand = input.Brand; item.Description = input.Description; item.CategoryId = input.CategoryId; item.IsActive = input.IsActive;
+        if (!id.HasValue || !string.Equals(previousImageUrl, input.ImageUrl, StringComparison.Ordinal))
+        {
+            if (id.HasValue) await ApplyLegacyProductImageChange(item, previousImageUrl, input.ImageUrl, ct);
+            else item.ImageUrl = input.ImageUrl;
+        }
         if (!id.HasValue) db.Products.Add(item);
         await db.SaveChangesAsync(ct); return ToDto(item);
+    }
+
+    public async Task<IReadOnlyList<AdminProductImage>?> ProductImages(int productId, CancellationToken ct)
+    {
+        if (!await db.Products.AsNoTracking().AnyAsync(x => x.Id == productId, ct)) return null;
+        var rows = await db.ProductImages.AsNoTracking().Where(x => x.ProductId == productId).OrderBy(x => x.SortOrder).ToListAsync(ct);
+        var ids = rows.SelectMany(x => new Guid?[] { x.FileId, x.Card600FileId, x.Detail1000FileId }).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+        HashSet<Guid> available;
+        try { available = await db.Files.AsNoTracking().Where(x => ids.Contains(x.Id) && x.ContentType.StartsWith("image/")).Select(x => x.Id).ToHashSetAsync(ct); }
+        catch (SqlException) { available = []; }
+        return rows.Select(x => ToAdminProductImage(x, x.FileId is null || available.Contains(x.FileId.Value), available)).ToArray();
+    }
+
+    public async Task<IReadOnlyList<ProductImageFileCheck>> CheckProductImageFiles(IReadOnlyList<Guid> fileIds, CancellationToken ct)
+    {
+        if (fileIds.Count == 0) return [];
+        try
+        {
+            var metadata = await db.Files.AsNoTracking().Where(x => fileIds.Contains(x.Id)).Select(x => new { x.Id, x.ContentType }).ToListAsync(ct);
+            return fileIds.Select(id => { var file = metadata.FirstOrDefault(x => x.Id == id); return new ProductImageFileCheck(id, file is not null, file?.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true); }).ToArray();
+        }
+        catch (SqlException) { throw new ProductImageFilesUnavailableException(); }
+    }
+
+    public async Task<IReadOnlyList<AdminProductImage>?> ReplaceProductImages(int productId, IReadOnlyList<ProductImageInput> input, DateTime nowUtc, CancellationToken ct)
+    {
+        var product = await db.Products.SingleOrDefaultAsync(x => x.Id == productId, ct);
+        if (product is null) return null;
+        var existing = await db.ProductImages.Where(x => x.ProductId == productId).ToListAsync(ct);
+        foreach (var image in existing) image.SortOrder += 20;
+        await db.SaveChangesAsync(ct);
+
+        var keep = new HashSet<ProductImage>();
+        var result = new List<ProductImage>(input.Count);
+        foreach (var item in input.OrderBy(x => x.SortOrder))
+        {
+            var source = item.FileId.HasValue ? $"f:{item.FileId.Value:D}" : $"u:{item.ExternalUrl!.Trim()}";
+            var match = item.Id.HasValue ? existing.SingleOrDefault(x => x.Id == item.Id.Value) : null;
+            if (item.Id.HasValue && match is null) throw new ArgumentException("An image ID does not belong to this product.");
+            match ??= existing.FirstOrDefault(x => !keep.Contains(x) && ImageSourceKey(x) == source);
+            if (match is null)
+                match = item.FileId.HasValue
+                    ? ProductImage.CreateFile(productId, item.SortOrder, item.FileId.Value, item.AltText, nowUtc)
+                    : ProductImage.CreateExternal(productId, item.SortOrder, item.ExternalUrl!, item.AltText, nowUtc);
+            else
+            {
+                var existingSource = ImageSourceKey(match);
+                if (existingSource != source)
+                {
+                    match.FileId = item.FileId;
+                    match.ExternalUrl = item.ExternalUrl?.Trim();
+                    match.Card600FileId = null;
+                    match.Detail1000FileId = null;
+                    match.Card600Status = match.Detail1000Status = "pending";
+                }
+                match.SortOrder = item.SortOrder;
+                match.AltText = item.AltText?.Trim();
+                match.UpdatedAtUtc = nowUtc;
+            }
+            keep.Add(match);
+            result.Add(match);
+        }
+        db.ProductImages.RemoveRange(existing.Where(x => !keep.Contains(x)));
+        db.ProductImages.AddRange(result.Where(x => !existing.Contains(x)));
+        var main = result.FirstOrDefault();
+        product.ImageUrl = main?.CardUrl;
+        await db.SaveChangesAsync(ct);
+        return await ProductImages(productId, ct);
+    }
+
+    private async Task ApplyLegacyProductImageChange(Product product, string? previousImageUrl, string? requestedImageUrl, CancellationToken ct)
+    {
+        var images = await db.ProductImages.Where(x => x.ProductId == product.Id).OrderBy(x => x.SortOrder).ToListAsync(ct);
+        foreach (var image in images) image.SortOrder += 20;
+        await db.SaveChangesAsync(ct);
+        var existing = images.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(requestedImageUrl))
+        {
+            if (existing is not null) db.ProductImages.Remove(existing);
+        }
+        else
+        {
+            var requestedFileId = TryParseFileUrl(requestedImageUrl);
+            var matching = images.FirstOrDefault(x => requestedFileId.HasValue ? x.FileId == requestedFileId : string.Equals(x.ExternalUrl, requestedImageUrl, StringComparison.Ordinal));
+            if (matching is not null)
+            {
+                matching.SortOrder = -1;
+            }
+            else
+            {
+                if (existing is not null) db.ProductImages.Remove(existing);
+                var main = requestedFileId.HasValue
+                    ? ProductImage.CreateFile(product.Id, -1, requestedFileId.Value, null, clock.GetUtcNow().UtcDateTime)
+                    : ProductImage.CreateExternal(product.Id, -1, requestedImageUrl, null, clock.GetUtcNow().UtcDateTime);
+                db.ProductImages.Add(main);
+                images.Insert(0, main);
+            }
+        }
+        var remaining = images.Where(x => db.Entry(x).State != EntityState.Deleted).OrderBy(x => x.SortOrder < 0 ? int.MinValue : x.SortOrder).ToArray();
+        for (var index = 0; index < remaining.Length; index++) remaining[index].SortOrder = index;
+        product.ImageUrl = remaining.FirstOrDefault()?.CardUrl;
+        if (remaining.Length == 0) product.ImageUrl = null;
+    }
+
+    private static Guid? TryParseFileUrl(string? url) => url is { Length: 43 } && url.StartsWith("/files/", StringComparison.OrdinalIgnoreCase)
+        && Guid.TryParse(url[7..], out var id) ? id : null;
+    private static string ImageSourceKey(ProductImage image) => image.FileId.HasValue ? $"f:{image.FileId.Value:D}" : $"u:{image.ExternalUrl}";
+    private static AdminProductImage ToAdminProductImage(ProductImage image, bool sourceAvailable, ISet<Guid> available)
+    {
+        var source = image.SourceUrl;
+        var url600 = image.Card600FileId.HasValue ? $"/files/{image.Card600FileId.Value:D}" : source;
+        var url1000 = image.Detail1000FileId.HasValue ? $"/files/{image.Detail1000FileId.Value:D}" : source;
+        return new AdminProductImage(image.Id, image.SortOrder, image.AltText, source, url600, url1000, sourceAvailable,
+            image.Card600FileId.HasValue ? available.Contains(image.Card600FileId.Value) ? "ready" : "unavailable" : image.Card600Status,
+            image.Detail1000FileId.HasValue ? available.Contains(image.Detail1000FileId.Value) ? "ready" : "unavailable" : image.Detail1000Status);
+    }
+
+    public async Task SaveProductImageDerivatives(int productId, Guid sourceFileId, Guid? cardFileId, string cardStatus,
+        Guid? detailFileId, string detailStatus, DateTime nowUtc, CancellationToken ct)
+    {
+        var image = await db.ProductImages.SingleOrDefaultAsync(x => x.ProductId == productId && x.FileId == sourceFileId, ct);
+        if (image is null) return;
+        var derivativeIds = new[] { cardFileId, detailFileId }.Where(x => x.HasValue).Select(x => x!.Value).ToArray();
+        var valid = await db.Files.AsNoTracking().Where(x => derivativeIds.Contains(x.Id) && x.DerivedFromFileId == sourceFileId && x.ContentType.StartsWith("image/"))
+            .Select(x => x.Id).ToHashSetAsync(ct);
+        image.Card600FileId = cardFileId.HasValue && valid.Contains(cardFileId.Value) ? cardFileId : null;
+        image.Detail1000FileId = detailFileId.HasValue && valid.Contains(detailFileId.Value) ? detailFileId : null;
+        image.Card600Status = image.Card600FileId.HasValue ? "ready" : cardStatus;
+        image.Detail1000Status = image.Detail1000FileId.HasValue ? "ready" : detailStatus;
+        image.UpdatedAtUtc = nowUtc;
+        if (image.SortOrder == 0)
+        {
+            var product = await db.Products.SingleAsync(x => x.Id == productId, ct);
+            product.ImageUrl = image.CardUrl;
+        }
+        await db.SaveChangesAsync(ct);
     }
     public async Task<bool> DeleteProduct(int id, CancellationToken ct)
     {
@@ -513,7 +655,8 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     private static System.Text.Json.JsonElement? Parse(string? value) { if (string.IsNullOrWhiteSpace(value)) return null; using var doc = JsonDocument.Parse(value); return doc.RootElement.Clone(); }
     private static AdminProduct ToDto(Product x) => new(x.Id, x.Slug, x.Name, x.Brand, x.Description, x.SeoTitle, x.SeoDescription, x.CategoryId, x.IsActive, x.ImageUrl)
     {
-        NeedsStandardImage = !IsFilesImageUrl(x.ImageUrl)
+        NeedsStandardImage = x.Images.OrderBy(image => image.SortOrder).FirstOrDefault() is not
+            { FileId: not null, Card600FileId: not null, Detail1000FileId: not null }
     };
     private static bool IsFilesImageUrl(string? imageUrl) =>
         imageUrl is not null && imageUrl.StartsWith("/files/", StringComparison.Ordinal) &&
@@ -523,7 +666,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var actualPage = Math.Max(1, page);
         var actualSize = BoundSize(size);
         var total = await query.CountAsync(ct);
-        var products = await query.Skip(Offset(actualPage, actualSize)).Take(actualSize).ToListAsync(ct);
+        var products = await query.Include(x => x.Images).Skip(Offset(actualPage, actualSize)).Take(actualSize).ToListAsync(ct);
         return new(products.Select(ToDto).ToList(), actualPage, actualSize, total);
     }
     private static readonly System.Linq.Expressions.Expression<Func<CompareShopAPI.Domain.Admin.ProductMatching, AdminMatching>> MatchingDto = x => new AdminMatching(x.Id, x.Name, x.Brand, x.ProductId, x.CreatedAtUtc, x.IsApproved, x.ExternalSku, x.DataSourceId) { Status = x.Status };

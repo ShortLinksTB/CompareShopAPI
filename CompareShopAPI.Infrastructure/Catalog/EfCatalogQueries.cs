@@ -56,7 +56,16 @@ public sealed class EfCatalogQueries(CompareShopDbContext db, TimeProvider clock
                 Groups = x.SpecificationGroups.OrderBy(g => g.SortOrder).Select(g => new SpecificationGroupDto(g.Name, g.Items.OrderBy(i => i.SortOrder).Select(i => new SpecificationItemDto(i.Name, i.Value)).ToList())).ToList() }).FirstOrDefaultAsync(ct);
         if (row is null) return null;
         var representative = (await Offers(row.Id, ct))?.FirstOrDefault();
-        return new ProductDetailDto(row.Id, row.Slug, row.Name, row.Brand, row.Description, row.Category, row.Summary, row.Groups, representative?.ImageUrl ?? row.ImageUrl, representative?.Specifications);
+        var images = await db.ProductImages.AsNoTracking().Where(x => x.ProductId == row.Id).OrderBy(x => x.SortOrder)
+            .Select(x => new { x.FileId, x.ExternalUrl, x.Card600FileId, x.Detail1000FileId, x.AltText }).ToListAsync(ct);
+        var imageDtos = images.Select(x =>
+        {
+            var source = x.ExternalUrl ?? (x.FileId.HasValue ? $"/files/{x.FileId.Value:D}" : string.Empty);
+            return new ProductImageDto(x.Detail1000FileId.HasValue ? $"/files/{x.Detail1000FileId.Value:D}" : source,
+                x.Card600FileId.HasValue ? $"/files/{x.Card600FileId.Value:D}" : source, x.AltText);
+        }).ToArray();
+        return new ProductDetailDto(row.Id, row.Slug, row.Name, row.Brand, row.Description, row.Category, row.Summary, row.Groups,
+            representative?.ImageUrl ?? row.ImageUrl, representative?.Specifications, imageDtos);
     }
     public async Task<IReadOnlyList<OfferDto>?> Offers(int productId, CancellationToken ct)
     {

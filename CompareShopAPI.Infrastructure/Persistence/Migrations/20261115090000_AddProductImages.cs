@@ -21,6 +21,8 @@ public sealed class AddProductImages : Migration
                 ExternalUrl = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: true),
                 Card600FileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                 Detail1000FileId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                Card600Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false, defaultValue: "pending"),
+                Detail1000Status = table.Column<string>(type: "nvarchar(50)", maxLength: 50, nullable: false, defaultValue: "pending"),
                 CreatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false),
                 UpdatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false)
             },

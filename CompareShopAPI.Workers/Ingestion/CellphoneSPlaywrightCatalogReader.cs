@@ -32,22 +32,25 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
     public bool Supports(string sourceKey) => DataSource.CellphoneSCategories.ContainsKey(sourceKey);
 
     public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct)
-        => ReadWithContextAsync(sourceKey, categoryPath, null, ct);
+        => ReadWithContextAsync(sourceKey, categoryPath, null, null, ct);
 
     public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct)
-        => ReadWithContextAsync(sourceKey, categoryPath, jobId, ct);
+        => ReadWithContextAsync(sourceKey, categoryPath, jobId, null, ct);
 
-    private Task<IReadOnlyList<ScrapedOffer>> ReadWithContextAsync(string sourceKey, string categoryPath, int? jobId, CancellationToken ct)
+    public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, Func<string, CancellationToken, Task> stageChanged, CancellationToken ct)
+        => ReadWithContextAsync(sourceKey, categoryPath, jobId, stageChanged, ct);
+
+    private Task<IReadOnlyList<ScrapedOffer>> ReadWithContextAsync(string sourceKey, string categoryPath, int? jobId, Func<string, CancellationToken, Task>? stageChanged, CancellationToken ct)
     {
         if (!Supports(sourceKey) || !DataSource.IsSupportedCategory(sourceKey, categoryPath)) throw new InvalidDataException("CellphoneS category is not supported.");
-        var context = new CatalogReadContext(sourceKey, jobId);
+        var context = new CatalogReadContext(sourceKey, jobId, stageChanged);
         return CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedCoreAsync(context, sourceKey, categoryPath, ct), context);
     }
 
     private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedCoreAsync(CatalogReadContext context, string sourceKey, string categoryPath, CancellationToken ct)
     {
         var categoryUri = CellphoneSListingProvenance.ListingForPath(categoryPath);
-        context.Stage = CatalogReadStage.Robots;
+        await context.SetStage(CatalogReadStage.Robots, ct);
         await using var proxy = await BhxForwardProxy.StartAsync(CellphoneSRequestGuard.AllowedHosts, ct);
         using var robotsClient = robotsClientFactory(proxy.Server);
         using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(categoryUri, "/robots.txt"));
@@ -57,7 +60,7 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         var robotsText = await robots.Content.ReadAsStringAsync(ct);
         if (IsDisallowed(robotsText, categoryPath)) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
 
-        context.Stage = CatalogReadStage.BrowserLaunch;
+        await context.SetStage(CatalogReadStage.BrowserLaunch, ct);
         using var playwright = await playwrightFactory();
         await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(proxy.Server)).WaitAsync(ct);
         var page = await browser.NewPageAsync(new BrowserNewPageOptions { AcceptDownloads = false, UserAgent = UserAgent });
@@ -66,20 +69,20 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
         string? activeCardHref = null;
         CellphoneSListingProvenance? provenance = null;
         await page.RouteAsync("**/*", route => HandleRouteAsync(route, context, activeCardHref, () => provenance, gate, ct));
-        context.Stage = CatalogReadStage.Navigation;
+        await context.SetStage(CatalogReadStage.Navigation, ct);
         var response = await page.GotoAsync(categoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
-        context.Stage = CatalogReadStage.AccessCheck;
+        await context.SetStage(CatalogReadStage.AccessCheck, ct);
         if (response is null || !CellphoneSListingProvenance.TryCreate(new Uri(response.Url), System.Text.Encoding.UTF8.GetString(await response.BodyAsync()), out var extractedProvenance))
             throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
         var approvedListing = extractedProvenance!;
         provenance = approvedListing;
         BhxPlaywrightCatalogReader.EnsureAccessible(response?.Status, page.Url, (await page.Locator("body").InnerTextAsync()).ToLowerInvariant());
-        context.Stage = CatalogReadStage.ProductCount;
+        await context.SetStage(CatalogReadStage.ProductCount, ct);
         var cards = page.Locator(".product-info");
         var count = await cards.CountAsync();
         if (count is < 1 or > 300) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductCountInvalid);
         var categoryProducts = new List<CellphoneSCategoryProduct>(count);
-        context.Stage = CatalogReadStage.ProductFields;
+        await context.SetStage(CatalogReadStage.ProductFields, ct);
         for (var i = 0; i < count; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -118,16 +121,16 @@ public sealed class CellphoneSPlaywrightCatalogReader : ISourceCatalogReader
             if (IsDisallowed(robotsText, product.Url.AbsolutePath))
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
 
-            context.Stage = CatalogReadStage.Navigation;
+            await context.SetStage(CatalogReadStage.Navigation, ct);
             activeCardHref = product.Url.ToString();
             var detailResponse = await page.GotoAsync(product.Url.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
-            context.Stage = CatalogReadStage.AccessCheck;
+            await context.SetStage(CatalogReadStage.AccessCheck, ct);
             var detailText = (await page.Locator("body").InnerTextAsync()).ToLowerInvariant();
             BhxPlaywrightCatalogReader.EnsureAccessible(detailResponse?.Status, page.Url, detailText);
             if (!TryValidateDetailUrl(context, approvedListing, product.Url, page.Url, out var detailUri))
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductUrlDenied);
 
-            context.Stage = CatalogReadStage.ProductFields;
+            await context.SetStage(CatalogReadStage.ProductFields, ct);
             var sku = await ReadPublishedProductIdAsync(context, page, approvedListing, product.Url, detailUri, product.PriceVnd);
             rows.Add(CreateOffer(product, sku, sourceKey));
         }

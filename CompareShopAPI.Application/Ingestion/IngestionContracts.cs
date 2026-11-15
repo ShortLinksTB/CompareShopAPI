@@ -7,6 +7,11 @@ public interface ISourceCatalogReader
 {
     bool Supports(string sourceKey) => true;
     Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct) => ReadAsync(sourceKey, categoryPath, ct);
+    async Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, Func<string, CancellationToken, Task> stageChanged, CancellationToken ct)
+    {
+        await stageChanged("catalog_read", ct);
+        return await ReadAsync(sourceKey, categoryPath, jobId, ct);
+    }
     Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, CancellationToken ct) => ReadValidatedBiaAsync(ct);
     Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => throw new NotSupportedException("Source reader requires a source-aware request.");
 }
@@ -18,7 +23,40 @@ public interface ISyncJobStore
     Task<ImportCounts> Import(int sourceId, IReadOnlyList<ScrapedOffer> rows, bool fullSnapshot, CancellationToken ct);
     Task Complete(int sourceId, SyncJob job, SyncJobState state, DateTime finishedUtc, int seen, int imported, int pending, string? errorCode, string? errorSummary, CancellationToken ct, bool pauseSource = false);
     Task<IReadOnlyList<SyncJobSummary>> ListJobs(CancellationToken ct);
+    Task<SyncJobPage<SyncJobSummary>> SearchJobs(SyncJobQuery query, CancellationToken ct);
+    Task<SyncJobPage<SyncJobLog>> JobLogs(int jobId, int page, int pageSize, CancellationToken ct);
+    Task<bool> JobExists(int jobId, CancellationToken ct);
     Task<SyncJobSummary?> QueueRetry(int jobId, CancellationToken ct);
+}
+public sealed record SyncJobQuery(int Page, int PageSize, string? Q, IReadOnlyList<SyncJobState> Statuses, DateTime? StartedFrom, DateTime? StartedTo);
+public sealed record SyncJobPage<T>(IReadOnlyList<T> Items, int Page, int PageSize, int TotalItems);
+public sealed record SyncJobLog(int Id, DateTime OccurredAtUtc, string Level, string Step, string Message, string? ExceptionType, int? HttpStatusCode, int? DurationMs);
+public interface ISyncJobLogWriter
+{
+    Task Write(int jobId, string level, string step, string message, CancellationToken ct, Exception? exception = null, int? httpStatusCode = null, int? durationMs = null);
+    Task<int> DeleteExpired(DateTime cutoffUtc, int take, CancellationToken ct);
+}
+public static class SyncJobLogSanitizer
+{
+    public static string Clean(string? input, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return "";
+        if (input.Contains("<html", StringComparison.OrdinalIgnoreCase) || input.Contains("<!doctype", StringComparison.OrdinalIgnoreCase)) return "[html omitted]";
+        var value = System.Text.RegularExpressions.Regex.Replace(input, @"(?i)(https?://)[^\s/]+(?:/[^\s?#]*)?(?:\?[^\s#]*)?(?:#[^\s]*)?", m => SafeHostOnly(m.Value));
+        value = System.Text.RegularExpressions.Regex.Replace(value, @"(?i)(connection[\s_-]*string)\s*[:=]\s*[^\r\n]+", "$1=[redacted]");
+        value = System.Text.RegularExpressions.Regex.Replace(value, @"(?i)(authorization|cookie|set-cookie|token|password|secret|proxy-authorization)\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+(?:\s+[^\s,;]+)?", "$1=[redacted]");
+        value = System.Text.RegularExpressions.Regex.Replace(value, @"(?i)(?:[A-Z]:\\|/)(?:[^\s:]+[/\\])+[^\s:]*", "[path]");
+        return value[..Math.Min(value.Length, maxLength)];
+    }
+    private static string SafeHostOnly(string raw)
+    {
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) return "[url]";
+        var host = uri.Host.TrimEnd('.');
+        var localOrReservedDomains = new[] { "localhost", "local", "internal", "lan", "corp", "home", "intranet", "test", "invalid", "example", "onion", "alt", "home.arpa" };
+        if (localOrReservedDomains.Any(domain => host.Equals(domain, StringComparison.OrdinalIgnoreCase) || host.EndsWith($".{domain}", StringComparison.OrdinalIgnoreCase))
+            || !host.Contains('.') || System.Net.IPAddress.TryParse(host, out _)) return "[url]";
+        return $"{uri.Scheme}://{host}/[redacted]";
+    }
 }
 public interface IDataSourceStore
 {
@@ -50,7 +88,7 @@ public sealed class SourceRedirectDeniedException : Exception
     }
 }
 
-public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISourceCatalogReader> readers, IPriceHistoryRecorder history, TimeProvider clock, TimeSpan? executionTimeout = null)
+public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISourceCatalogReader> readers, IPriceHistoryRecorder history, TimeProvider clock, TimeSpan? executionTimeout = null, ISyncJobLogWriter? logs = null)
 {
     private readonly TimeSpan executionLimit = ResolveExecutionLimit(executionTimeout);
 
@@ -61,52 +99,124 @@ public sealed class IngestionCoordinator(ISyncJobStore jobs, IEnumerable<ISource
         {
             var job = await jobs.TryClaim(dataSource.Id, now, ct);
             if (job is null) continue;
-            if (!await jobs.ShopIsUsable(dataSource.Id, ct))
+            await Log(job.Id, "Info", "reserved", "Job reserved.", ct);
+            var shopCheckStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+            var shopIsUsable = await jobs.ShopIsUsable(dataSource.Id, ct);
+            if (!shopIsUsable)
             {
+                await Log(job.Id, "Error", "shop_check", "Partner shop is missing or disabled.", ct, durationMs: ElapsedMilliseconds(shopCheckStarted));
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0, "shop_unavailable", "Partner shop is missing or disabled.", ct);
                 continue;
             }
+            await Log(job.Id, "Info", "shop_check", "Partner shop is available.", ct, durationMs: ElapsedMilliseconds(shopCheckStarted));
             using var execution = CancellationTokenSource.CreateLinkedTokenSource(ct);
             execution.CancelAfter(executionLimit);
+            var failureStep = "browser_start";
+            long? stepStarted = null;
+            var readerStageDurations = new Dictionary<string, int>(StringComparer.Ordinal);
+            var readerStageOrder = new List<string>();
+            void AddReaderDuration(string step, int durationMs)
+            {
+                if (!readerStageDurations.ContainsKey(step)) readerStageOrder.Add(step);
+                readerStageDurations[step] = (int)Math.Min(int.MaxValue, (long)readerStageDurations.GetValueOrDefault(step) + durationMs);
+            }
+            async Task FlushReaderStages(CancellationToken token)
+            {
+                foreach (var step in readerStageOrder)
+                    await Log(job.Id, "Info", step, $"Reader stage completed ({step}).", token, durationMs: readerStageDurations[step]);
+                readerStageOrder.Clear();
+                readerStageDurations.Clear();
+            }
             try
             {
                 // Keep active work shorter than the persisted lease so an expired claim is always safe to reclaim.
                 var sourceKey = dataSource.Key;
+                await Log(job.Id, "Info", "browser_start", "Starting source reader.", execution.Token);
                 var reader = readers.SingleOrDefault(candidate => candidate.Supports(sourceKey));
                 if (reader is null || !DataSource.IsSupportedCategory(sourceKey, dataSource.CategoryPath)) throw new InvalidDataException("No reader supports this source category.");
                 // Some browser-driver operations do not accept a CancellationToken. WaitAsync
                 // keeps the job bounded even if one of those operations stops responding.
-                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, job.Id, execution.Token)
+                stepStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                var rows = await reader.ReadAsync(sourceKey, dataSource.CategoryPath, job.Id, (stage, _) =>
+                    {
+                        if (stepStarted is { } started)
+                            AddReaderDuration(failureStep, ElapsedMilliseconds(started));
+                        failureStep = stage;
+                        stepStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                        return Task.CompletedTask;
+                    }, execution.Token)
                     .WaitAsync(execution.Token);
+                if (stepStarted is { } readStarted)
+                    AddReaderDuration(failureStep, ElapsedMilliseconds(readStarted));
+                stepStarted = null;
+                await FlushReaderStages(execution.Token);
+                failureStep = "page_read";
+                await Log(job.Id, "Info", "page_read", $"Read {rows.Count} product rows.", execution.Token);
+                failureStep = "validation";
+                var validationStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                stepStarted = validationStarted;
+                var validCount = rows.Count(row => row.IsValid);
                 if (rows.Count == 0 || rows.Any(row => !row.IsValid)) throw new InvalidDataException("Source returned no validated products.");
+                await Log(job.Id, "Info", "validation", $"Validated {validCount} of {rows.Count} product rows.", execution.Token, durationMs: ElapsedMilliseconds(validationStarted));
+                stepStarted = null;
+                failureStep = "import";
+                var importStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                stepStarted = importStarted;
                 var result = await jobs.Import(dataSource.Id, rows, true, execution.Token);
+                await Log(job.Id, "Info", "import", $"Imported {result.Imported}; pending {result.Pending}.", execution.Token, durationMs: ElapsedMilliseconds(importStarted));
+                stepStarted = null;
+                failureStep = "price_history";
+                var historyStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+                stepStarted = historyStarted;
                 await history.RecordForChangedMinimums(execution.Token);
+                await Log(job.Id, "Info", "price_history", "Price history recorded.", execution.Token, durationMs: ElapsedMilliseconds(historyStarted));
+                stepStarted = null;
                 await jobs.Complete(dataSource.Id, job, result.Pending > 0 ? SyncJobState.Partial : SyncJobState.Success, clock.GetUtcNow().UtcDateTime, rows.Count, result.Imported, result.Pending, null, null, ct);
+                await Log(job.Id, "Info", "completed", "Job completed.", ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (OperationCanceledException) when (execution.IsCancellationRequested)
             {
                 System.Diagnostics.Trace.TraceWarning("Catalog source sync timed out; job {0} is recorded as failed.", job.Id);
+                await FlushReaderStages(ct);
+                await Log(job.Id, "Error", failureStep, "Catalog source exceeded its execution time limit.", ct, new TimeoutException("Execution timeout."), durationMs: stepStarted is { } timedOutAt ? ElapsedMilliseconds(timedOutAt) : null);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     "execution_timeout", "Catalog source exceeded its execution time limit.", ct);
             }
-            catch (SourceAccessBlockedException)
+            catch (SourceAccessBlockedException ex)
             {
+                await FlushReaderStages(ct);
+                await Log(job.Id, "Error", failureStep, SourceAccessBlockedException.SanitizedSummary, ct, ex, durationMs: stepStarted is { } blockedAt ? ElapsedMilliseconds(blockedAt) : null);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     "source_blocked", SourceAccessBlockedException.SanitizedSummary, ct, pauseSource: true);
             }
             catch (SourceRedirectDeniedException ex)
             {
+                await FlushReaderStages(ct);
+                await Log(job.Id, "Error", failureStep, SourceRedirectDeniedException.SanitizedSummary, ct, ex, int.TryParse(ex.ErrorCode.Split('_').Last(), out var code) ? code : null, stepStarted is { } redirectedAt ? ElapsedMilliseconds(redirectedAt) : null);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0,
                     ex.ErrorCode, SourceRedirectDeniedException.SanitizedSummary, ct);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.TraceWarning("Catalog source sync failed; job {0} is recorded as failed ({1}).", job.Id, ex.GetType().Name);
+                await FlushReaderStages(ct);
+                await Log(job.Id, "Error", failureStep, ex.Message, ct, ex, durationMs: stepStarted is { } failedAt ? ElapsedMilliseconds(failedAt) : null);
                 await jobs.Complete(dataSource.Id, job, SyncJobState.Failed, clock.GetUtcNow().UtcDateTime, 0, 0, 0, "source_failure", "Catalog source could not be read or imported.", ct);
             }
         }
     }
+
+    private async Task Log(int jobId, string level, string step, string message, CancellationToken ct, Exception? exception = null, int? status = null, int? durationMs = null)
+    {
+        if (logs is null) return;
+        try { await logs.Write(jobId, level, step, message, ct, exception, status, durationMs); }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception logError) { System.Diagnostics.Trace.TraceWarning("Sync job log write failed for job {0} ({1}).", jobId, logError.GetType().Name); }
+    }
+
+    private static int ElapsedMilliseconds(long startedAt) =>
+        (int)Math.Min(int.MaxValue, System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
 
     private static TimeSpan ResolveExecutionLimit(TimeSpan? configured)
     {
@@ -128,6 +238,23 @@ public sealed class IngestionAdminService(IAdminPermissionReader permissions, IS
     {
         if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.execute", ct)) throw new IngestionForbiddenException();
         return await jobs.QueueRetry(id, ct) ?? throw new KeyNotFoundException("A failed or partial job was not found.");
+    }
+    public async Task<SyncJobPage<SyncJobSummary>> Search(string? subject, int page, int pageSize, string? q, string? status, DateTime? from, DateTime? to, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.read", ct)) throw new IngestionForbiddenException();
+        if (page < 1 || pageSize < 1) throw new ArgumentException("Page and pageSize must be positive.");
+        if (page > int.MaxValue / Math.Min(pageSize, 100)) throw new ArgumentException("Page is too large.");
+        if (from is not null && from.Value.Kind != DateTimeKind.Utc || to is not null && to.Value.Kind != DateTimeKind.Utc || from is not null && to is not null && from.Value > to.Value) throw new ArgumentException("Date range must be UTC and ordered.");
+        var statuses = (status ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => Enum.TryParse<SyncJobState>(x, true, out var parsed) && Enum.IsDefined(parsed) ? parsed : throw new ArgumentException("Invalid sync job status.")).Distinct().ToArray();
+        return await jobs.SearchJobs(new(page, Math.Min(pageSize, 100), q, statuses, from, to), ct);
+    }
+    public async Task<SyncJobPage<SyncJobLog>> Logs(string? subject, int id, int page, int pageSize, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(subject) || !await permissions.HasPermission(subject, "sync_jobs.read", ct)) throw new IngestionForbiddenException();
+        if (page < 1 || pageSize < 1) throw new ArgumentException("Page and pageSize must be positive.");
+        if (page > int.MaxValue / Math.Min(pageSize, 500)) throw new ArgumentException("Page is too large.");
+        if (!await jobs.JobExists(id, ct)) throw new KeyNotFoundException();
+        return await jobs.JobLogs(id, page, Math.Min(pageSize, 500), ct);
     }
 }
 public sealed class DataSourceAdminService(IAdminPermissionReader permissions, IDataSourceStore sources, TimeProvider clock)

@@ -404,6 +404,23 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.ToTable("SyncJobs");
                 });
 
+            modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.SyncJobLogEntry", b =>
+                {
+                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+                    b.Property<int>("JobId").HasColumnType("int");
+                    b.Property<DateTime>("OccurredAtUtc").HasColumnType("datetime2");
+                    b.Property<string>("Level").IsRequired().HasMaxLength(16).HasColumnType("nvarchar(16)");
+                    b.Property<string>("Step").IsRequired().HasMaxLength(80).HasColumnType("nvarchar(80)");
+                    b.Property<string>("Message").IsRequired().HasMaxLength(2000).HasColumnType("nvarchar(2000)");
+                    b.Property<string>("ExceptionType").HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<int?>("HttpStatusCode").HasColumnType("int");
+                    b.Property<int?>("DurationMs").HasColumnType("int");
+                    b.HasKey("Id");
+                    b.HasIndex("JobId", "OccurredAtUtc", "Id");
+                    b.ToTable("SyncJobLogEntries");
+                });
+
             modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.SourceItemMapping", b =>
                 {
                     b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
@@ -1064,6 +1081,11 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                 {
                     b.HasOne("CompareShopAPI.Domain.Ingestion.DataSource", null).WithMany().HasForeignKey("DataSourceId").OnDelete(DeleteBehavior.Restrict).IsRequired();
                     b.HasOne("CompareShopAPI.Domain.Ingestion.SyncJob", null).WithMany().HasForeignKey("RetryOfJobId").OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.SyncJobLogEntry", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Ingestion.SyncJob", null).WithMany().HasForeignKey("JobId").OnDelete(DeleteBehavior.Cascade).IsRequired();
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.SourceItemMapping", b =>

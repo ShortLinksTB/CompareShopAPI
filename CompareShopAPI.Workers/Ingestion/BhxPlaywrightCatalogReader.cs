@@ -42,20 +42,26 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
     public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, CancellationToken ct)
     {
         if (!Supports(sourceKey) || categoryPath != "/bia") throw new InvalidDataException("BHX source category is not supported.");
-        return ReadWithContextAsync(jobId, ct);
+        return ReadWithContextAsync(jobId, null, ct);
     }
 
-    public Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => ReadWithContextAsync(null, ct);
-
-    private Task<IReadOnlyList<ScrapedOffer>> ReadWithContextAsync(int? jobId, CancellationToken ct)
+    public Task<IReadOnlyList<ScrapedOffer>> ReadAsync(string sourceKey, string categoryPath, int jobId, Func<string, CancellationToken, Task> stageChanged, CancellationToken ct)
     {
-        var context = new CatalogReadContext(DataSource.BhxKey, jobId);
+        if (!Supports(sourceKey) || categoryPath != "/bia") throw new InvalidDataException("BHX source category is not supported.");
+        return ReadWithContextAsync(jobId, stageChanged, ct);
+    }
+
+    public Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaAsync(CancellationToken ct) => ReadWithContextAsync(null, null, ct);
+
+    private Task<IReadOnlyList<ScrapedOffer>> ReadWithContextAsync(int? jobId, Func<string, CancellationToken, Task>? stageChanged, CancellationToken ct)
+    {
+        var context = new CatalogReadContext(DataSource.BhxKey, jobId, stageChanged);
         return CatalogReadDiagnostics.ReadAsync(logger, () => ReadValidatedBiaCoreAsync(context, ct), context);
     }
 
     private async Task<IReadOnlyList<ScrapedOffer>> ReadValidatedBiaCoreAsync(CatalogReadContext context, CancellationToken ct)
     {
-        context.Stage = CatalogReadStage.Robots;
+        await context.SetStage(CatalogReadStage.Robots, ct);
         using var robotsClient = robotsClientFactory();
         using var robotsRequest = new HttpRequestMessage(HttpMethod.Get, new Uri(CategoryUri, "/robots.txt"));
         robotsRequest.Headers.UserAgent.ParseAdd("CompareShopPriceMonitor/1.0 (+https://giamha.online)");
@@ -73,7 +79,7 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
             }))
                 throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.RobotsPolicyDenied);
         }
-        context.Stage = CatalogReadStage.BrowserLaunch;
+        await context.SetStage(CatalogReadStage.BrowserLaunch, ct);
         using var playwright = await playwrightFactory();
         await using var egressProxy = await BhxForwardProxy.StartAsync(ct);
         await using var browser = await playwright.Chromium.LaunchAsync(BhxBrowserLaunchOptions.Create(egressProxy.Server)).WaitAsync(ct);
@@ -90,18 +96,18 @@ public sealed class BhxPlaywrightCatalogReader : ISourceCatalogReader
                 finally { requestGate.Release(); }
             }
         });
-        context.Stage = CatalogReadStage.Navigation;
+        await context.SetStage(CatalogReadStage.Navigation, ct);
         var navigationResponse = await page.GotoAsync(CategoryUri.ToString(), new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 20_000 });
-        context.Stage = CatalogReadStage.AccessCheck;
+        await context.SetStage(CatalogReadStage.AccessCheck, ct);
         EnsureAccessible(navigationResponse?.Status, page.Url, null);
         var pageText = (await page.Locator("body").InnerTextAsync()).ToLowerInvariant();
         EnsureAccessible(null, page.Url, pageText);
-        context.Stage = CatalogReadStage.ProductCount;
+        await context.SetStage(CatalogReadStage.ProductCount, ct);
         var cards = page.Locator("[data-product-code]");
         var count = await cards.CountAsync();
         if (count is < 1 or > 500) throw CatalogReadDiagnostics.InvalidData(CatalogReadFailure.ProductCountInvalid);
         var result = new List<ScrapedOffer>();
-        context.Stage = CatalogReadStage.ProductFields;
+        await context.SetStage(CatalogReadStage.ProductFields, ct);
         for (var i = 0; i < count; i++)
         {
             ct.ThrowIfCancellationRequested();

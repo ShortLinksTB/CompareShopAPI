@@ -136,6 +136,56 @@ public sealed class EfSyncJobStore(CompareShopDbContext db) : ISyncJobStore
         .Join(db.DataSources.AsNoTracking(), job => job.DataSourceId, source => source.Id,
             (job, source) => new SyncJobSummary(job.Id, job.DataSourceId, source.DisplayName, job.State, job.QueuedAtUtc, job.StartedAtUtc, job.FinishedAtUtc, job.SeenCount, job.ImportedCount, job.PendingCount, job.ErrorCode, job.ErrorSummary, job.RetryOfJobId)).ToListAsync(ct);
 
+    public async Task<SyncJobPage<SyncJobSummary>> SearchJobs(SyncJobQuery query, CancellationToken ct)
+    {
+        var jobs = from job in db.SyncJobs.AsNoTracking()
+                   join source in db.DataSources.AsNoTracking() on job.DataSourceId equals source.Id
+                   select new { job, source };
+        if (!string.IsNullOrWhiteSpace(query.Q))
+        {
+            var needle = query.Q.ToLower();
+            jobs = jobs.Where(x => x.source.DisplayName.ToLower().Contains(needle));
+        }
+        if (query.Statuses.Count > 0) jobs = jobs.Where(x => query.Statuses.Contains(x.job.State));
+        if (query.StartedFrom is not null) jobs = jobs.Where(x => x.job.StartedAtUtc >= query.StartedFrom);
+        if (query.StartedTo is not null) jobs = jobs.Where(x => x.job.StartedAtUtc <= query.StartedTo);
+        var total = await jobs.CountAsync(ct);
+        var items = await jobs.OrderByDescending(x => x.job.StartedAtUtc).ThenByDescending(x => x.job.Id)
+            .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize)
+            .Select(x => new SyncJobSummary(x.job.Id, x.job.DataSourceId, x.source.DisplayName, x.job.State, x.job.QueuedAtUtc, x.job.StartedAtUtc, x.job.FinishedAtUtc, x.job.SeenCount, x.job.ImportedCount, x.job.PendingCount, x.job.ErrorCode, x.job.ErrorSummary, x.job.RetryOfJobId)).ToListAsync(ct);
+        return new(items, query.Page, query.PageSize, total);
+    }
+    public async Task<SyncJobPage<SyncJobLog>> JobLogs(int jobId, int page, int pageSize, CancellationToken ct)
+    {
+        var query = db.SyncJobLogEntries.AsNoTracking().Where(x => x.JobId == jobId);
+        var total = await query.CountAsync(ct);
+        var items = await query.OrderBy(x => x.OccurredAtUtc).ThenBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize)
+            .Select(x => new SyncJobLog(x.Id, x.OccurredAtUtc, x.Level, x.Step, x.Message, x.ExceptionType, x.HttpStatusCode, x.DurationMs)).ToListAsync(ct);
+        return new(items, page, pageSize, total);
+    }
+    public Task<bool> JobExists(int jobId, CancellationToken ct) => db.SyncJobs.AsNoTracking().AnyAsync(x => x.Id == jobId, ct);
+
+    public async Task WriteLog(int jobId, string level, string step, string message, string? exceptionType, int? status, int? duration, CancellationToken ct)
+    {
+        var count = await db.SyncJobLogEntries.CountAsync(x => x.JobId == jobId, ct);
+        if (count >= 500) return;
+        if (count == 499)
+        {
+            db.SyncJobLogEntries.Add(new SyncJobLogEntry(jobId, DateTime.UtcNow, "Warning", "retention", "Log entry limit reached; subsequent entries were omitted."));
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+        db.SyncJobLogEntries.Add(new SyncJobLogEntry(jobId, DateTime.UtcNow, level, step, message, exceptionType, status, duration));
+        await db.SaveChangesAsync(ct);
+    }
+    public async Task<int> DeleteExpiredLogs(DateTime cutoffUtc, int take, CancellationToken ct)
+    {
+        var expired = await db.SyncJobLogEntries.Where(x => x.OccurredAtUtc < cutoffUtc).OrderBy(x => x.OccurredAtUtc).Take(Math.Clamp(take, 1, 500)).ToListAsync(ct);
+        db.SyncJobLogEntries.RemoveRange(expired);
+        await db.SaveChangesAsync(ct);
+        return expired.Count;
+    }
+
     public async Task<SyncJobSummary?> QueueRetry(int jobId, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);

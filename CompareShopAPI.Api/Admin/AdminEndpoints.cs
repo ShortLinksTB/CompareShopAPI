@@ -61,11 +61,6 @@ public static class AdminEndpoints
         admin.MapPost("/matching/{id:int}/restore", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.RestoreMatching(Subject(c), id, ct)));
         admin.MapGet("/products/{id:int}/matchings", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.ProductMatchings(Subject(c), id, ct)));
         admin.MapDelete("/matching/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(() => s.UnlinkMatching(Subject(c), id, ct)));
-        admin.MapGet("/sync-jobs", async (HttpContext c, IngestionAdminService s, CancellationToken ct) =>
-        {
-            try { return Results.Ok(await s.List(Subject(c), ct)); }
-            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
-        });
         admin.MapGet("/data-sources", async (HttpContext c, DataSourceAdminService s, CancellationToken ct) =>
         {
             try { return Results.Ok(await s.List(Subject(c), ct)); }
@@ -86,12 +81,7 @@ public static class AdminEndpoints
             catch (DataSourceSyncConflictException) { return Results.Problem("Data source is inactive, in Error, or already has an active sync job.", statusCode: StatusCodes.Status409Conflict); }
             catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
         });
-        admin.MapPost("/sync-jobs/{id:int}/retry", async (HttpContext c, int id, IngestionAdminService s, CancellationToken ct) =>
-        {
-            try { return Results.Accepted(value: await s.Retry(Subject(c), id, ct)); }
-            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
-            catch (KeyNotFoundException) { return Results.NotFound(); }
-        });
+        admin.MapSyncJobEndpoints();
         admin.MapGet("/audit-logs", (HttpContext c, int? page, int? pageSize, AdminService s, CancellationToken ct) => Run(() => s.AuditLogs(Subject(c), page ?? 1, pageSize ?? 50, ct)));
         admin.MapGet("/dashboard/summary", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.Dashboard(Subject(c), ct)));
         admin.MapGet("/price-alerts", (HttpContext c, int? page, int? pageSize, int? productId, int? userId, AdminService s, CancellationToken ct) => Run(() => s.PriceAlerts(Subject(c), page ?? 1, pageSize ?? 50, productId, userId, ct)));
@@ -120,6 +110,34 @@ public static class AdminEndpoints
             RunCompliance(() => s.Create(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapDelete("/compliance/bans/{id:int}", (HttpContext c, int id, BannedItemService s, CancellationToken ct) =>
             RunCompliance(async () => await s.Revoke(Subject(c), id, ct) ? Results.NoContent() : Results.NotFound()));
+        return admin;
+    }
+
+    public static RouteGroupBuilder MapSyncJobEndpoints(this RouteGroupBuilder admin)
+    {
+        admin.MapGet("/sync-jobs", async (HttpContext c, int? page, int? pageSize, string? q, DateTime? startedFrom, DateTime? startedTo, IngestionAdminService s, CancellationToken ct) =>
+        {
+            try
+            {
+                if (c.Request.Query.Count == 0) return Results.Ok(await s.List(Subject(c), ct));
+                return Results.Ok(await s.Search(Subject(c), page ?? 1, pageSize ?? 25, q, c.Request.Query["status"].ToString(), startedFrom, startedTo, ct));
+            }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+            catch (ArgumentException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
+        });
+        admin.MapGet("/sync-jobs/{id:int}/logs", async (HttpContext c, int id, int? page, int? pageSize, IngestionAdminService s, CancellationToken ct) =>
+        {
+            try { return Results.Ok(await s.Logs(Subject(c), id, page ?? 1, pageSize ?? 100, ct)); }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+            catch (ArgumentException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest); }
+        });
+        admin.MapPost("/sync-jobs/{id:int}/retry", async (HttpContext c, int id, IngestionAdminService s, CancellationToken ct) =>
+        {
+            try { return Results.Accepted(value: await s.Retry(Subject(c), id, ct)); }
+            catch (IngestionForbiddenException) { return Results.Problem("Forbidden", statusCode: StatusCodes.Status403Forbidden); }
+            catch (KeyNotFoundException) { return Results.NotFound(); }
+        });
         return admin;
     }
 

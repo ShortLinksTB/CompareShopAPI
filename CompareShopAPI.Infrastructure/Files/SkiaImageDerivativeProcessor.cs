@@ -71,12 +71,77 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
 
     private static bool IsSvgOrPdf(ReadOnlySpan<byte> source)
     {
-        var header = source[..Math.Min(source.Length, 4096)];
-        if (header.IndexOf("%PDF-"u8) >= 0) return true;
-        var text = Encoding.UTF8.GetString(header).TrimStart('\uFEFF', '\u0000', ' ', '\t', '\r', '\n');
-        return text.StartsWith("<svg", StringComparison.OrdinalIgnoreCase) ||
-               (text.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) &&
-                text.Contains("<svg", StringComparison.OrdinalIgnoreCase));
+        if (IsPdfHeader(source)) return true;
+
+        var text = Encoding.UTF8.GetString(source[..Math.Min(source.Length, 4096)])
+            .TrimStart('\uFEFF', '\u0000', ' ', '\t', '\r', '\n');
+        return StartsWithSvgElement(text);
+    }
+
+    private static bool IsPdfHeader(ReadOnlySpan<byte> source)
+    {
+        // PDF readers allow a short preamble, but the header must remain at the start of the file.
+        var limit = Math.Min(source.Length, 1024);
+        var hasBom = limit >= 3 && source[0] == 0xEF && source[1] == 0xBB && source[2] == 0xBF;
+        var index = hasBom ? 3 : 0;
+        while (index < limit && source[index] is 0x09 or 0x0A or 0x0C or 0x0D or 0x20) index++;
+        return source[index..limit].StartsWith("%PDF-"u8);
+    }
+
+    private static bool StartsWithSvgElement(string text)
+    {
+        var index = 0;
+        while (index < text.Length)
+        {
+            while (index < text.Length && char.IsWhiteSpace(text[index])) index++;
+            if (text.AsSpan(index).StartsWith("<?xml", StringComparison.OrdinalIgnoreCase))
+            {
+                var end = text.IndexOf("?>", index, StringComparison.Ordinal);
+                if (end < 0) return false;
+                index = end + 2;
+                continue;
+            }
+            if (text.AsSpan(index).StartsWith("<!--", StringComparison.Ordinal))
+            {
+                var end = text.IndexOf("-->", index + 4, StringComparison.Ordinal);
+                if (end < 0) return false;
+                index = end + 3;
+                continue;
+            }
+            if (text.AsSpan(index).StartsWith("<!DOCTYPE", StringComparison.OrdinalIgnoreCase))
+            {
+                var end = FindDoctypeEnd(text, index + 9);
+                if (end < 0) return false;
+                index = end + 1;
+                continue;
+            }
+
+            if (index >= text.Length || text[index] != '<' || index + 4 > text.Length ||
+                !text.AsSpan(index + 1).StartsWith("svg", StringComparison.OrdinalIgnoreCase)) return false;
+            var next = index + 4;
+            return next < text.Length && (char.IsWhiteSpace(text[next]) || text[next] is '>' or '/');
+        }
+        return false;
+    }
+
+    private static int FindDoctypeEnd(string text, int index)
+    {
+        var subsetDepth = 0;
+        var quote = '\0';
+        for (; index < text.Length; index++)
+        {
+            var current = text[index];
+            if (quote != '\0')
+            {
+                if (current == quote) quote = '\0';
+                continue;
+            }
+            if (current is '\'' or '"') quote = current;
+            else if (current == '[') subsetDepth++;
+            else if (current == ']') subsetDepth = Math.Max(0, subsetDepth - 1);
+            else if (current == '>' && subsetDepth == 0) return index;
+        }
+        return -1;
     }
 
     internal static SKBitmap Orient(SKBitmap source, SKEncodedOrigin origin)

@@ -230,6 +230,33 @@ public sealed class FileDerivativeTests
     }
 
     [Fact]
+    public void Processor_rejects_svg_with_comment_and_doctype_before_root_without_xml_declaration()
+    {
+        var processor = new SkiaImageDerivativeProcessor();
+        var svgBytes = System.Text.Encoding.UTF8.GetBytes(
+            "<!-- exported SVG -->\n<!DOCTYPE svg [<!ENTITY label 'image'>]>\n<svg xmlns=\"http://www.w3.org/2000/svg\"><title>&label;</title></svg>");
+
+        var failure = Assert.Throws<DerivativeFailure>(() => processor.Process(svgBytes, "png", 32, 32,
+            "cover", 0.5, 0.5, "transparent", 80));
+
+        Assert.Equal("unsupported_source_type", failure.Code);
+    }
+
+    [Fact]
+    public void Processor_does_not_treat_pdf_marker_in_png_trailing_metadata_as_pdf_header()
+    {
+        var processor = new SkiaImageDerivativeProcessor();
+        var png = MakeImage(20, 20);
+        var sourceWithMarkerInMetadata = png.Concat("\nmetadata:%PDF-not-a-header"u8.ToArray()).ToArray();
+
+        var result = processor.Process(sourceWithMarkerInMetadata, "png", 32, 32,
+            "cover", 0.5, 0.5, "transparent", 80);
+
+        Assert.Equal("image/png", result.ContentType);
+        Assert.Equal((32, 32), (result.Width, result.Height));
+    }
+
+    [Fact]
     public async Task Name_collision_retries_with_suffix_and_metadata_failure_cleans_orphan()
     {
         var source = new FileAsset(Guid.NewGuid(), "original.png", "image/png", 3, "source", "admin", DateTime.UtcNow);

@@ -161,20 +161,27 @@ public sealed class FileDerivativeTests
     }
 
     [Fact]
-    public async Task Unsupported_source_is_rejected_before_object_read_and_permission_is_required()
+    public async Task Derivative_source_type_uses_encoded_bytes_instead_of_stored_content_type()
     {
         var pdf = new FileAsset(Guid.NewGuid(), "manual.pdf", "application/pdf", 3, "source", "admin", DateTime.UtcNow);
-        var repository = new Repository(pdf);
-        var storage = new Storage(MakeImage(10, 10));
-        var service = new FileService(repository, storage, new Permissions(), TimeProvider.System,
-            NullLogger<FileService>.Instance, new Processor());
         var variant = new DerivativeVariant(32, 32, "cover", null, null, "transparent", "keep", 70, null);
-        var unsupported = await service.CreateDerivatives("admin", pdf.Id, new(new[] { variant }), default);
-        Assert.Equal("unsupported_source_type", unsupported[0].Error);
-        Assert.Equal(0, storage.ReadCount);
+        var supportedBytes = MakeImage(10, 10);
+        var supportedStorage = new Storage(supportedBytes);
+        var misleadingMimeService = new FileService(new Repository(pdf), supportedStorage, new Permissions(), TimeProvider.System,
+            NullLogger<FileService>.Instance, new SkiaImageDerivativeProcessor());
+        var supported = Assert.Single(await misleadingMimeService.CreateDerivatives("admin", pdf.Id, new(new[] { variant }), default));
+        Assert.True(supported.Succeeded);
+        Assert.Equal(1, supportedStorage.ReadCount);
+
+        var mislabeledPdf = new FileAsset(Guid.NewGuid(), "image.png", "image/png", 3, "source", "admin", DateTime.UtcNow);
+        var unsupportedService = new FileService(new Repository(mislabeledPdf), new Storage("%PDF-1.7\n"u8.ToArray()),
+            new Permissions(), TimeProvider.System, NullLogger<FileService>.Instance, new SkiaImageDerivativeProcessor());
+        var unsupported = Assert.Single(await unsupportedService.CreateDerivatives("admin", mislabeledPdf.Id, new(new[] { variant }), default));
+        Assert.Equal("unsupported_source_type", unsupported.Error);
+
         await Assert.ThrowsAsync<CompareShopAPI.Application.Admin.AdminUnauthorizedException>(() =>
-            service.CreateDerivatives(null, pdf.Id, new(new[] { variant }), default));
-        await Assert.ThrowsAsync<ArgumentException>(() => service.CreateDerivatives("admin", pdf.Id,
+            misleadingMimeService.CreateDerivatives(null, pdf.Id, new(new[] { variant }), default));
+        await Assert.ThrowsAsync<ArgumentException>(() => misleadingMimeService.CreateDerivatives("admin", pdf.Id,
             new(Enumerable.Repeat(variant, 6).ToArray()), default));
     }
 

@@ -147,12 +147,6 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
         if (request.Variants is null || request.Variants.Count is < 1 or > 5)
             throw new ArgumentException("Between 1 and 5 variants are required.");
         var source = await files.Get(id, ct) ?? throw new KeyNotFoundException();
-        if (source.ContentType is "image/svg+xml" or "application/pdf" || !DerivativePolicy.ContentTypes.Contains(source.ContentType))
-        {
-            foreach (var (variant, index) in request.Variants.Select((value, index) => (value, index)))
-                await TryAuditDerivative(actor, id, index, variant, "unsupported_source_type", ct);
-            return request.Variants.Select((_, i) => new DerivativeVariantOutcome(i, null, null, "unsupported_source_type", [])).ToArray();
-        }
         StoredFileContent stored;
         try { stored = await storage.OpenRead(source.ObjectKey, ct); }
         catch (FileObjectTooLargeException)
@@ -303,7 +297,6 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
     private static string TruncateGrapheme(string value, int max) { var e = System.Globalization.StringInfo.GetTextElementEnumerator(value); var result = new System.Text.StringBuilder(); while (e.MoveNext()) { var x = e.GetTextElement(); if (result.Length + x.Length > max) break; result.Append(x); } return result.ToString(); }
 }
 
-public static class DerivativePolicy { public static readonly HashSet<string> ContentTypes = new(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/png", "image/webp", "image/gif" }; }
 public sealed class DerivativeFailure(string code) : Exception(code) { public string Code { get; } = code; }
 public sealed class DerivativeNameCollisionException : Exception { }
 public sealed class FileObjectTooLargeException : Exception { }

@@ -1,6 +1,7 @@
 using CompareShopAPI.Application.Files;
 using CompareShopAPI.Domain.Files;
 using SkiaSharp;
+using System.Text;
 
 namespace CompareShopAPI.Infrastructure.Files;
 
@@ -11,6 +12,7 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
     public ProcessedDerivative Process(ReadOnlyMemory<byte> source, string requestedFormat, int width, int height,
         string fit, double focalX, double focalY, string background, int quality)
     {
+        if (IsSvgOrPdf(source.Span)) throw new DerivativeFailure("unsupported_source_type");
         using var data = SKData.CreateCopy(source.Span);
         using var codec = SKCodec.Create(data) ?? throw new DerivativeFailure("decode_failed");
         if (codec.Info.Width <= 0 || codec.Info.Height <= 0 || (long)codec.Info.Width * codec.Info.Height > MaxPixels)
@@ -51,6 +53,16 @@ public sealed class SkiaImageDerivativeProcessor : IImageDerivativeProcessor
         if (encoded.Size > FileUploadPolicy.MaxBytes) throw new DerivativeFailure("output_too_large");
         var outputType = format == "jpg" ? "image/jpeg" : $"image/{format}";
         return new(encoded.ToArray(), width, height, outputType, format, warnings);
+    }
+
+    private static bool IsSvgOrPdf(ReadOnlySpan<byte> source)
+    {
+        var header = source[..Math.Min(source.Length, 4096)];
+        if (header.IndexOf("%PDF-"u8) >= 0) return true;
+        var text = Encoding.UTF8.GetString(header).TrimStart('\uFEFF', '\u0000', ' ', '\t', '\r', '\n');
+        return text.StartsWith("<svg", StringComparison.OrdinalIgnoreCase) ||
+               (text.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase) &&
+                text.Contains("<svg", StringComparison.OrdinalIgnoreCase));
     }
 
     internal static SKBitmap Orient(SKBitmap source, SKEncodedOrigin origin)

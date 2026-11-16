@@ -153,6 +153,7 @@ app.UseAuthorization();
 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") }).AllowAnonymous();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapAdminEndpoints();
+app.MapCategoryImportExportRoutes();
 app.MapGroup("/admin").RequireAuthorization("Admin").MapHomeShowcaseEndpoints();
 app.MapGroup("/api/v1").MapCatalogEndpoints();
 app.MapGroup("/api/v1").MapPublicHomeShowcaseEndpoints();

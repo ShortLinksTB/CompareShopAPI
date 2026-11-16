@@ -1,17 +1,22 @@
+using System.Net;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
-using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Api.Admin;
+using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Infrastructure.Admin;
 using CompareShopAPI.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
-using System.Security.Claims;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -247,6 +252,70 @@ public sealed class CategoryImportServiceTests
         var successfulCommitContext = CreateUploadContext("""{"schemaVersion":1,"categories":[]}""", new Dictionary<string, Microsoft.Extensions.Primitives.StringValues> { ["confirmation"] = "GHI ĐÈ" });
         var successfulCommit = await AdminEndpoints.RunCategoryImport(successfulCommitContext, service, default, commit: true);
         Assert.Equal(StatusCodes.Status200OK, ((IStatusCodeHttpResult)successfulCommit).StatusCode);
+    }
+
+    [Fact]
+    public async Task Contract_prefixed_routes_resolve_and_preserve_category_permissions_and_operations()
+    {
+        await using var db = await CreateDatabase();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddAuthorization(options => options.AddPolicy("Admin", policy => policy.RequireAssertion(_ => true)));
+        builder.Services.AddSingleton(db);
+        builder.Services.AddScoped<IAdminData>(services => new EfAdminData(services.GetRequiredService<CompareShopDbContext>(), TimeProvider.System));
+        builder.Services.AddScoped<IAdminPermissionReader>(services => (IAdminPermissionReader)services.GetRequiredService<IAdminData>());
+        builder.Services.AddScoped<CategoryImportService>();
+        var app = builder.Build();
+        app.UseAuthorization();
+        app.Use(async (context, next) =>
+        {
+            var subject = context.Request.Headers["X-Subject"].FirstOrDefault() ?? "category-reader";
+            context.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", subject)], "test"));
+            await next();
+        });
+        app.MapCategoryImportExportRoutes();
+        await app.StartAsync();
+
+        try
+        {
+            var client = app.GetTestClient();
+            using var export = await client.GetAsync("/api/admin/categories/export");
+            Assert.Equal(HttpStatusCode.OK, export.StatusCode);
+            Assert.Equal("application/json", export.Content.Headers.ContentType?.MediaType);
+            using var legacyExport = await client.GetAsync("/admin/categories/export");
+            Assert.Equal(HttpStatusCode.OK, legacyExport.StatusCode);
+
+            using var deniedContent = CreateMultipartContent("""{"schemaVersion":1,"categories":[]}""");
+            using var denied = await SendAs(client, HttpMethod.Post, "/api/admin/categories/import/dry-run", deniedContent, "category-reader");
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+            using var previewContent = CreateMultipartContent("""{"schemaVersion":1,"categories":[]}""");
+            using var preview = await SendAs(client, HttpMethod.Post, "/api/admin/categories/import/dry-run", previewContent, "category-writer");
+            Assert.Equal(HttpStatusCode.OK, preview.StatusCode);
+
+            using var commitContent = CreateMultipartContent("""{"schemaVersion":1,"categories":[]}""", "GHI ĐÈ");
+            using var commit = await SendAs(client, HttpMethod.Post, "/api/admin/categories/import/commit", commitContent, "category-writer");
+            Assert.Equal(HttpStatusCode.OK, commit.StatusCode);
+        }
+        finally
+        {
+            await app.DisposeAsync();
+        }
+    }
+
+    private static MultipartFormDataContent CreateMultipartContent(string json, string? confirmation = null)
+    {
+        var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent(Encoding.UTF8.GetBytes(json)), "file", "categories.json");
+        if (confirmation is not null) content.Add(new StringContent(confirmation), "confirmation");
+        return content;
+    }
+
+    private static async Task<HttpResponseMessage> SendAs(HttpClient client, HttpMethod method, string path, HttpContent content, string subject)
+    {
+        using var request = new HttpRequestMessage(method, path) { Content = content };
+        request.Headers.Add("X-Subject", subject);
+        return await client.SendAsync(request);
     }
 
     private static async Task<CompareShopDbContext> CreateDatabase()

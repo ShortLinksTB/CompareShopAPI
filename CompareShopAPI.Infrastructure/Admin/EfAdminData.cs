@@ -101,6 +101,91 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
     public async Task<bool> DeleteCategory(int id, CancellationToken ct) { var rows = await db.Categories.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 
+    public async Task<IReadOnlyList<CategoryImportStoredCategory>> CategoryImportSnapshot(CancellationToken ct)
+    {
+        var categories = await db.Categories.AsNoTracking().OrderBy(x => x.Id)
+            .Select(x => new { x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId, ParentSlug = x.ParentCategory == null ? null : x.ParentCategory.Slug, x.SortOrder })
+            .ToListAsync(ct);
+        var counts = await db.Products.AsNoTracking().GroupBy(x => x.CategoryId)
+            .Select(group => new { CategoryId = group.Key, Count = group.Count() }).ToDictionaryAsync(x => x.CategoryId, x => x.Count, ct);
+        return categories.Select(x => new CategoryImportStoredCategory(x.Id, x.Slug, x.Name, x.IsActive,
+            x.ParentCategoryId, x.ParentSlug, x.SortOrder, counts.GetValueOrDefault(x.Id))).ToArray();
+    }
+
+    public async Task ApplyCategoryImport(IReadOnlyList<CategoryImportRow> rows, IReadOnlyList<int> deletedCategoryIds, CancellationToken ct)
+    {
+        var existing = await db.Categories.ToListAsync(ct);
+        var byId = existing.ToDictionary(x => x.Id);
+        var deleted = deletedCategoryIds.Select(id => byId[id]).OrderByDescending(x => x.ParentCategoryId.HasValue).ToArray();
+        var deletedSet = deletedCategoryIds.ToHashSet();
+        foreach (var retainedChild in existing.Where(x => x.ParentCategoryId.HasValue && deletedSet.Contains(x.ParentCategoryId.Value) && !deletedSet.Contains(x.Id)))
+        {
+            retainedChild.ParentCategoryId = null;
+            retainedChild.Level = 1;
+        }
+        if (existing.Any(x => x.ParentCategoryId.HasValue && deletedSet.Contains(x.ParentCategoryId.Value) && !deletedSet.Contains(x.Id)))
+            await db.SaveChangesAsync(ct);
+        db.Categories.RemoveRange(deleted);
+        if (deleted.Length > 0) await db.SaveChangesAsync(ct);
+        var bySlug = existing.Where(x => !deletedSet.Contains(x.Id)).ToDictionary(x => x.Slug, StringComparer.Ordinal);
+        var pending = rows.ToArray();
+        foreach (var row in pending.Where(x => x.ParentSlug is null))
+        {
+            if (bySlug.TryGetValue(row.Slug, out var category))
+            {
+                category.Name = row.Name.Trim();
+                category.ParentCategoryId = null;
+                category.Level = 1;
+                if (row.SortOrder.ValueKind == System.Text.Json.JsonValueKind.Number && row.SortOrder.TryGetInt32(out var suppliedSortOrder))
+                    category.SortOrder = suppliedSortOrder;
+            }
+            else
+            {
+                category = new Category
+                {
+                    Slug = row.Slug,
+                    Name = row.Name.Trim(),
+                    Level = 1,
+                    SortOrder = row.SortOrder.ValueKind == System.Text.Json.JsonValueKind.Number && row.SortOrder.TryGetInt32(out var suppliedSortOrder)
+                        ? suppliedSortOrder
+                        : 0
+                };
+                db.Categories.Add(category);
+                bySlug.Add(category.Slug, category);
+            }
+        }
+        await db.SaveChangesAsync(ct);
+        foreach (var row in pending)
+        {
+            if (row.ParentSlug is null) continue;
+            int? parentId = row.ParentSlug is null ? null : bySlug[row.ParentSlug].Id;
+            if (bySlug.TryGetValue(row.Slug, out var category))
+            {
+                category.Name = row.Name.Trim();
+                category.ParentCategoryId = parentId;
+                category.Level = parentId.HasValue ? (byte)2 : (byte)1;
+                if (row.SortOrder.ValueKind == System.Text.Json.JsonValueKind.Number && row.SortOrder.TryGetInt32(out var suppliedSortOrder))
+                    category.SortOrder = suppliedSortOrder;
+            }
+            else
+            {
+                category = new Category
+                {
+                    Slug = row.Slug,
+                    Name = row.Name.Trim(),
+                    ParentCategoryId = parentId,
+                    Level = 2,
+                    SortOrder = row.SortOrder.ValueKind == System.Text.Json.JsonValueKind.Number && row.SortOrder.TryGetInt32(out var suppliedSortOrder)
+                        ? suppliedSortOrder
+                        : 0
+                };
+                db.Categories.Add(category);
+                bySlug.Add(category.Slug, category);
+            }
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
     public Task<Page<AdminShop>> Shops(int page, int size, CancellationToken ct) => PageOf(db.PartnerShops.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder)), page, size, ct);
     public Task<AdminShop?> Shop(int id, CancellationToken ct) => db.PartnerShops.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder)).SingleOrDefaultAsync(ct);
     public async Task<AdminShop> SaveShop(int? id, ShopInput input, CancellationToken ct)

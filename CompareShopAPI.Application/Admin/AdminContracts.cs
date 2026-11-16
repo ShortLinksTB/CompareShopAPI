@@ -23,6 +23,17 @@ public static class AdminPermissions
 }
 
 public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId);
+public sealed record CategoryImportRow(int? Id, string Slug, string Name, string? ParentSlug, JsonElement SortOrder = default);
+public sealed record CategoryImportJson(int SchemaVersion, DateTimeOffset? ExportedAt, IReadOnlyList<CategoryImportRow>? Categories);
+public sealed record CategoryImportStoredCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId, string? ParentSlug, int SortOrder, int ProductCount);
+public sealed record CategoryImportChange(string Action, string Slug, object? Before, object? After);
+public sealed record CategoryImportBlocker(string Slug, string Name, int ProductCount);
+public sealed record CategoryImportSummary(int Create, int Update, int Delete);
+public sealed record CategoryImportPreview(bool Valid, bool Blocked, IReadOnlyList<string> Errors, IReadOnlyList<CategoryImportBlocker> Blockers, CategoryImportSummary Summary, IReadOnlyList<CategoryImportChange> Changes);
+public sealed record CategoryExportDocument(int SchemaVersion, DateTimeOffset ExportedAt, IReadOnlyList<CategoryExportRow> Categories);
+public sealed record CategoryExportRow(int Id, string Slug, string Name, string? ParentSlug, int SortOrder);
+public sealed record CategoryImportAudit(int Created, int Updated, int Deleted, IReadOnlyList<string> CreatedSlugs, IReadOnlyList<string> UpdatedSlugs, IReadOnlyList<string> DeletedSlugs, string OriginalFilename);
+public sealed record CategoryImportCommitResult(CategoryImportSummary Summary, IReadOnlyList<CategoryImportChange> Changes);
 public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive, bool ShowOnHome, int? HomeDisplayOrder);
 public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null)
 {
@@ -110,6 +121,8 @@ public interface IAdminData
     Task<AdminCategory?> Category(int id, CancellationToken ct);
     Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct);
     Task<bool> DeleteCategory(int id, CancellationToken ct);
+    Task<IReadOnlyList<CategoryImportStoredCategory>> CategoryImportSnapshot(CancellationToken ct);
+    Task ApplyCategoryImport(IReadOnlyList<CategoryImportRow> rows, IReadOnlyList<int> deletedCategoryIds, CancellationToken ct);
     Task<Page<AdminShop>> Shops(int page, int pageSize, CancellationToken ct);
     Task<AdminShop?> Shop(int id, CancellationToken ct);
     Task<AdminShop> SaveShop(int? id, ShopInput input, CancellationToken ct);

@@ -29,6 +29,12 @@ public static class AdminEndpoints
         admin.MapPost("/categories", (HttpContext c, CategoryInput input, AdminService s, CancellationToken ct) => Run(() => s.CreateCategory(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapPut("/categories/{id:int}", (HttpContext c, int id, CategoryInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateCategory(Subject(c), id, input, ct)));
         admin.MapDelete("/categories/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => { await s.DeleteCategory(Subject(c), id, ct); return Results.NoContent(); }));
+        admin.MapGet("/categories/export", (HttpContext context, CategoryImportService service, CancellationToken ct) =>
+            RunCategoryExport(context, service, ct));
+        admin.MapPost("/categories/import/dry-run", async (HttpContext context, CategoryImportService service, CancellationToken ct) =>
+            await RunCategoryImport(context, service, ct, commit: false)).DisableAntiforgery();
+        admin.MapPost("/categories/import/commit", async (HttpContext context, CategoryImportService service, CancellationToken ct) =>
+            await RunCategoryImport(context, service, ct, commit: true)).DisableAntiforgery();
 
         admin.MapGet("/shops", (HttpContext c, int? page, int? pageSize, AdminService s, CancellationToken ct) => Run(() => s.Shops(Subject(c), page ?? 1, pageSize ?? 20, ct)));
         admin.MapGet("/shops/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => await s.Shop(Subject(c), id, ct) is { } x ? Results.Ok(x) : Results.NotFound()));
@@ -145,6 +151,47 @@ public static class AdminEndpoints
     }
 
     private static string? Subject(HttpContext context) => context.User.FindFirst("sub")?.Value;
+    public static async Task<IResult> RunCategoryExport(HttpContext context, CategoryImportService service, CancellationToken ct)
+    {
+        try
+        {
+            var document = await service.Export(Subject(context), ct);
+            var json = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(document, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+            var filename = $"categories-{document.ExportedAt.UtcDateTime:yyyy-MM-dd}.json";
+            return Results.File(json, "application/json", filename);
+        }
+        catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
+        catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+    }
+
+    public static async Task<IResult> RunCategoryImport(HttpContext context, CategoryImportService service, CancellationToken ct, bool commit)
+    {
+        try
+        {
+            var form = await context.Request.ReadFormAsync(ct);
+            var file = form.Files.GetFile("file");
+            if (file is null) return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["A JSON file is required."] }, statusCode: StatusCodes.Status422UnprocessableEntity);
+            if (file.Length > CategoryImportService.MaximumFileBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            await using var stream = file.OpenReadStream();
+            using var buffer = new MemoryStream((int)file.Length);
+            await stream.CopyToAsync(buffer, ct);
+            if (buffer.Length > CategoryImportService.MaximumFileBytes) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            var content = buffer.ToArray();
+            if (!commit)
+            {
+                var preview = await service.DryRun(Subject(context), content, ct);
+                return Results.Json(preview, statusCode: preview.Valid ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity);
+            }
+            var result = await service.Commit(Subject(context), file.FileName, form["confirmation"].ToString(), content, ct);
+            return Results.Ok(result);
+        }
+        catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
+        catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (CategoryImportFileTooLargeException) { return Results.StatusCode(StatusCodes.Status413PayloadTooLarge); }
+        catch (CategoryImportValidationException ex) { return Results.Json(new CategoryImportPreview(false, false, ex.Errors, [], new(0, 0, 0), []), statusCode: StatusCodes.Status422UnprocessableEntity); }
+        catch (CategoryImportConflictException ex) { return Results.Json(new { code = "category_in_use", blockers = ex.Blockers }, statusCode: StatusCodes.Status409Conflict); }
+        catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }, statusCode: StatusCodes.Status422UnprocessableEntity); }
+    }
     private static async Task<IResult> Run<T>(Func<Task<T>> operation, int successStatus = StatusCodes.Status200OK)
     {
         try { var result = await operation(); return successStatus == StatusCodes.Status201Created ? Results.Json(result, statusCode: successStatus) : Results.Ok(result); }

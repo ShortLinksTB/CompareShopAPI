@@ -87,6 +87,7 @@ builder.Services.AddScoped<AdminService>(services => new AdminService(
         .Select(section => section.Value).Where(subject => !string.IsNullOrWhiteSpace(subject)).Cast<string>().ToHashSet(StringComparer.Ordinal),
     fileService: services.GetRequiredService<IFileDerivatives>(),
     fileCatalog: services.GetRequiredService<IProductImageFileCatalog>()));
+builder.Services.AddScoped<CategoryImportService>();
 builder.Services.AddScoped<IFileRepository, EfFileRepository>();
 builder.Services.AddScoped<IFileObjectStorage, MinioFileObjectStorage>();
 builder.Services.AddSingleton<IImageDerivativeProcessor, SkiaImageDerivativeProcessor>();

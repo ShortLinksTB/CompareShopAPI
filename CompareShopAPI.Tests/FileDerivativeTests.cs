@@ -313,6 +313,30 @@ public sealed class FileDerivativeTests
     }
 
     [Fact]
+    public async Task Request_after_derivative_deletion_generates_a_fresh_derivative()
+    {
+        var source = new FileAsset(Guid.NewGuid(), "original.png", "image/png", 3, "source", "admin", DateTime.UtcNow);
+        var repository = new Repository(source);
+        var specJson = System.Text.Json.JsonSerializer.Serialize(new DerivativeSpec(1, 32, 32, "cover", 0.5, 0.5,
+            "transparent", "png", 80));
+        var deleted = new FileAsset(Guid.NewGuid(), "original-32x32.png", "image/png", 3, "deleted-object", "admin",
+            DateTime.UtcNow, 32, 32, source.Id, "custom", specJson);
+        deleted.BeginDeletion();
+        deleted.CompleteDeletion();
+        await repository.Add(deleted, default);
+        var service = new FileService(repository, new Storage(MakeImage(10, 10)), new Permissions(), TimeProvider.System,
+            NullLogger<FileService>.Instance, new Processor());
+        var request = new DerivativeRequest(new[] { new DerivativeVariant(32, 32, "cover", null, null, "transparent", "png", 80, null) });
+
+        var regenerated = Assert.Single(await service.CreateDerivatives("admin", source.Id, request, default));
+
+        Assert.True(regenerated.Succeeded);
+        Assert.NotEqual(deleted.Id, regenerated.File!.Id);
+        Assert.Equal("/files/" + regenerated.File.Id.ToString("D"), regenerated.PublicUrl);
+        Assert.Equal(FileLifecycleState.Deleted, deleted.LifecycleState);
+    }
+
+    [Fact]
     public async Task Suffix_exhaustion_and_audit_or_cleanup_failures_do_not_break_variant_results()
     {
         var source = new FileAsset(Guid.NewGuid(), "original.png", "image/png", 3, "source", "admin", DateTime.UtcNow);
@@ -416,7 +440,7 @@ public sealed class FileDerivativeTests
         private readonly Dictionary<Guid, FileAsset> files = [];
         public Task<FilePage> List(int page, int size, string? query, string? type, CancellationToken ct) => Task.FromResult(new FilePage([], page, size, 0, 0));
         public Task<FileAsset?> Get(Guid id, CancellationToken ct) => Task.FromResult<FileAsset?>(id == source.Id ? source : files.GetValueOrDefault(id));
-        public Task<FileAsset?> FindDerivative(Guid sourceId, string preset, string derivativeSpecJson, CancellationToken ct) => Task.FromResult(files.Values.FirstOrDefault(x => x.DerivedFromFileId == sourceId && x.DerivedPreset == preset && x.DerivativeSpecJson == derivativeSpecJson));
+        public Task<FileAsset?> FindDerivative(Guid sourceId, string preset, string derivativeSpecJson, CancellationToken ct) => Task.FromResult(files.Values.FirstOrDefault(x => x.LifecycleState == FileLifecycleState.Active && x.DerivedFromFileId == sourceId && x.DerivedPreset == preset && x.DerivativeSpecJson == derivativeSpecJson));
         public Task Add(FileAsset file, CancellationToken ct) { AddCount++; files[file.Id] = file; return Task.CompletedTask; }
         public Task ReserveDerivativeAndAdd(FileAsset file, string candidateName, CancellationToken ct)
         {

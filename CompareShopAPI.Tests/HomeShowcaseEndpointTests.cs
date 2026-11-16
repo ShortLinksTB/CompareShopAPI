@@ -33,25 +33,40 @@ public sealed class HomeShowcaseEndpointTests
         Assert.Equal("no-store", admin.Headers.CacheControl?.ToString());
 
         var duplicate = new HomeShowcaseDraftInput(
-            Enumerable.Range(1, 15).Select(index => new HomeShowcaseDraftSlotInput(index, index <= 2 ? 1 : null)).ToArray(),
-            Enumerable.Range(1, 15).Select(index => new HomeShowcaseDraftSlotInput(index, null)).ToArray());
+            Enumerable.Range(1, 15).Select(index => new HomeShowcaseSlotInput(index, index <= 2 ? 1 : null)).ToArray(),
+            Enumerable.Range(1, 15).Select(index => new HomeShowcaseSlotInput(index, null)).ToArray());
         var invalid = await client.PutAsJsonAsync("/admin/home-showcase/draft", duplicate);
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
 
         permissions.Grant(AdminPermissions.HomeShowcaseUpdate);
         var valid = new HomeShowcaseDraftInput(
-            Enumerable.Range(1, 15).Select(index => new HomeShowcaseDraftSlotInput(index, null)).ToArray(),
-            Enumerable.Range(1, 15).Select(index => new HomeShowcaseDraftSlotInput(index, null)).ToArray());
+            Enumerable.Range(1, 15).Select(index => new HomeShowcaseSlotInput(index, null)).ToArray(),
+            Enumerable.Range(1, 15).Select(index => new HomeShowcaseSlotInput(index, null)).ToArray());
         var accepted = await client.PutAsJsonAsync("/admin/home-showcase/draft", valid);
         Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
         Assert.Equal(1, store.DraftWrites);
 
         var invalidIndex = new HomeShowcaseDraftInput(
-            [new HomeShowcaseDraftSlotInput(0, null), .. Enumerable.Range(2, 14).Select(index => new HomeShowcaseDraftSlotInput(index, null))],
+            [new HomeShowcaseSlotInput(0, null), .. Enumerable.Range(2, 14).Select(index => new HomeShowcaseSlotInput(index, null))],
             valid.InterestedComputers);
         var rejected = await client.PutAsJsonAsync("/admin/home-showcase/draft", invalidIndex);
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
         Assert.Equal(1, store.DraftWrites);
+
+        foreach (var field in new[] { "featured", "interestedComputers" })
+        {
+            var featuredSlots = valid.Featured!.Select(slot => (HomeShowcaseSlotInput?)slot).ToArray();
+            var interestedSlots = valid.InterestedComputers!.Select(slot => (HomeShowcaseSlotInput?)slot).ToArray();
+            if (field == "featured") featuredSlots[2] = null;
+            else interestedSlots[2] = null;
+
+            var nullSlot = new HomeShowcaseDraftInput(featuredSlots, interestedSlots);
+            var nullResponse = await client.PutAsJsonAsync("/admin/home-showcase/draft", nullSlot);
+            Assert.Equal(HttpStatusCode.BadRequest, nullResponse.StatusCode);
+            using var problem = await System.Text.Json.JsonDocument.ParseAsync(await nullResponse.Content.ReadAsStreamAsync());
+            Assert.True(problem.RootElement.GetProperty("errors").TryGetProperty($"{field}[3]", out _));
+            Assert.Equal(1, store.DraftWrites);
+        }
 
         var tokenResponse = await client.PostAsync("/admin/home-showcase/preview-token", content: null);
         Assert.Equal((HttpStatusCode)429, tokenResponse.StatusCode);

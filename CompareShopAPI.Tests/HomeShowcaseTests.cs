@@ -13,10 +13,11 @@ public sealed class HomeShowcaseTests
     [Fact]
     public void Slot_rules_require_exactly_fifteen_unique_positive_product_ids()
     {
-        Assert.Equal(15, HomeShowcaseRules.ValidateSlots(new int?[15], "featured").Count);
-        Assert.Throws<ArgumentException>(() => HomeShowcaseRules.ValidateSlots(new int?[14], "featured"));
-        Assert.Throws<ArgumentException>(() => HomeShowcaseRules.ValidateSlots([1, 1, .. new int?[13]], "featured"));
-        Assert.Throws<ArgumentException>(() => HomeShowcaseRules.ValidateSlots([0, .. new int?[14]], "featured"));
+        Assert.Equal(15, HomeShowcaseRules.ValidateSlots(Records(new int?[15]), "featured").Count);
+        Assert.Throws<ArgumentException>(() => HomeShowcaseRules.ValidateSlots(Records(new int?[14]), "featured"));
+        Assert.Throws<ArgumentException>(() => HomeShowcaseRules.ValidateSlots(Records([1, 1, .. new int?[13]]), "featured"));
+        Assert.Throws<ArgumentException>(() => HomeShowcaseRules.ValidateSlots(Records([0, .. new int?[14]]), "featured"));
+        Assert.Throws<ArgumentException>(() => HomeShowcaseRules.ValidateSlots([.. Records(new int?[14]), null], "featured"));
     }
 
     [Fact]
@@ -67,7 +68,7 @@ public sealed class HomeShowcaseTests
 
     private static HomeShowcaseProductData Product(int id, string slug) => new(id, slug, slug, null, null,
         new(1, slug, slug, null, 1), new(null, null, 0), true);
-    private static HomeShowcaseDraftSlotInput[] Records(int?[] ids) => ids.Select((id, index) => new HomeShowcaseDraftSlotInput(index + 1, id)).ToArray();
+    private static HomeShowcaseSlotInput[] Records(int?[] ids) => ids.Select((id, index) => new HomeShowcaseSlotInput(index + 1, id)).ToArray();
     private static HomeShowcaseService Service(FakeStore store, FakePermissions? permissions = null) =>
         new(store, new FakeAudit(), permissions ?? new FakePermissions(AdminPermissions.HomeShowcaseRead, AdminPermissions.HomeShowcaseUpdate, AdminPermissions.HomeShowcasePublish), new TestClock(Now));
 

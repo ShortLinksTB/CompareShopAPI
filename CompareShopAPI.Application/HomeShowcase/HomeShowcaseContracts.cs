@@ -11,8 +11,7 @@ public sealed record HomeShowcaseSectionDto(IReadOnlyList<HomeShowcaseSlotDto> F
 public sealed record HomeShowcaseDiff(int SlotIndex, HomeShowcaseAdminProduct? Before, HomeShowcaseAdminProduct? After, string Section);
 public sealed record HomeShowcaseAdminResponse(HomeShowcaseSectionDto Draft, HomeShowcaseSectionDto Published, int ChangedSlotCount, IReadOnlyList<HomeShowcaseDiff> Changes);
 public sealed record HomeShowcasePublicResponse(IReadOnlyList<HomeShowcaseProduct> Featured, IReadOnlyList<HomeShowcaseProduct> InterestedComputers);
-public sealed record HomeShowcaseDraftSlotInput(int SlotIndex, int? ProductId);
-public sealed record HomeShowcaseDraftInput(IReadOnlyList<HomeShowcaseDraftSlotInput>? Featured, IReadOnlyList<HomeShowcaseDraftSlotInput>? InterestedComputers);
+public sealed record HomeShowcaseDraftInput(IReadOnlyList<HomeShowcaseSlotInput?>? Featured, IReadOnlyList<HomeShowcaseSlotInput?>? InterestedComputers);
 public sealed record HomeShowcaseProductData(int Id, string Slug, string Name, string? ImageUrl, string? Brand, CategoryDto Category, OfferSummaryDto OfferSummary, bool IsActive);
 
 public interface IHomeShowcaseStore
@@ -52,8 +51,8 @@ public sealed class HomeShowcaseService(IHomeShowcaseStore store, IHomeShowcaseA
     public async Task<HomeShowcaseAdminResponse> ReplaceDraft(string? actor, HomeShowcaseDraftInput input, CancellationToken ct)
     {
         var subject = await Authorize(actor, AdminPermissions.HomeShowcaseUpdate, ct);
-        var featured = ValidateDraftSlots(input.Featured, "featured");
-        var interested = ValidateDraftSlots(input.InterestedComputers, "interestedComputers");
+        var featured = HomeShowcaseRules.ValidateSlots(input.Featured, "featured");
+        var interested = HomeShowcaseRules.ValidateSlots(input.InterestedComputers, "interestedComputers");
         var ids = featured.Concat(interested).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
         IReadOnlyDictionary<int, HomeShowcaseProductData> products;
         try { products = await store.Products(ids, ct); }
@@ -200,30 +199,6 @@ public sealed class HomeShowcaseService(IHomeShowcaseStore store, IHomeShowcaseA
 
     private static IReadOnlyList<HomeShowcaseSlotDto> ToSlotRecords(IReadOnlyList<int?> ids, IReadOnlyDictionary<int, HomeShowcaseProductData> products) =>
         Enumerable.Range(1, HomeShowcaseRules.SlotCount).Select(index => new HomeShowcaseSlotDto(index, ids[index - 1] is int id && products.TryGetValue(id, out var p) ? ToAdminProduct(p) : null)).ToArray();
-
-    private static IReadOnlyList<int?> ValidateDraftSlots(IReadOnlyList<HomeShowcaseDraftSlotInput>? slots, string field)
-    {
-        if (slots is null || slots.Count != HomeShowcaseRules.SlotCount)
-            throw new ArgumentException($"{field} must contain exactly {HomeShowcaseRules.SlotCount} slot records.", field);
-        var byIndex = new HomeShowcaseDraftSlotInput?[HomeShowcaseRules.SlotCount];
-        foreach (var slot in slots)
-        {
-            if (slot.SlotIndex is < 1 or > HomeShowcaseRules.SlotCount)
-                throw new ArgumentException($"Slot index {slot.SlotIndex} must be between 1 and {HomeShowcaseRules.SlotCount}.", $"{field}[{slot.SlotIndex}].slotIndex");
-            if (byIndex[slot.SlotIndex - 1] is not null)
-                throw new ArgumentException($"Slot index {slot.SlotIndex} is duplicated.", $"{field}[{slot.SlotIndex}].slotIndex");
-            if (slot.ProductId is <= 0)
-                throw new ArgumentException("Product IDs must be positive or null.", $"{field}[{slot.SlotIndex}].productId");
-            byIndex[slot.SlotIndex - 1] = slot;
-        }
-        var missing = Array.FindIndex(byIndex, slot => slot is null);
-        if (missing >= 0)
-            throw new ArgumentException($"Slot index {missing + 1} is missing.", $"{field}[{missing + 1}].slotIndex");
-        var ids = byIndex.Select(slot => slot!.ProductId).ToArray();
-        if (ids.Where(id => id.HasValue).GroupBy(id => id).Any(group => group.Count() > 1))
-            throw new ArgumentException($"{field} cannot contain a product more than once.", field);
-        return ids;
-    }
 
     private static IReadOnlyList<HomeShowcaseDiff> Diff(HomeShowcaseSectionDto draft, HomeShowcaseSectionDto published)
     {

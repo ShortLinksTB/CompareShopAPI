@@ -277,8 +277,8 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
                 var variants = new List<DerivativeVariant>();
                 var cardIndex = -1;
                 var detailIndex = -1;
-                if (cardStatus != "ready") { cardIndex = variants.Count; variants.Add(new(600, 600, "cover", null, null, "#ffffff", "webp", 85, $"product-{id}-{image.SortOrder}-600x600.webp")); }
-                if (detailStatus != "ready") { detailIndex = variants.Count; variants.Add(new(1000, 1000, "cover", null, null, "#ffffff", "webp", 85, $"product-{id}-{image.SortOrder}-1000x1000.webp")); }
+                if (cardStatus != "ready") { cardIndex = variants.Count; variants.Add(new(600, 600, "cover", null, null, "#ffffff", "webp", 80, $"product-{id}-{image.SortOrder}-600x600.webp")); }
+                if (detailStatus != "ready") { detailIndex = variants.Count; variants.Add(new(1000, 1000, "cover", null, null, "#ffffff", "webp", 80, $"product-{id}-{image.SortOrder}-1000x1000.webp")); }
                 var outcomes = await fileService.CreateDerivatives(actor, image.FileId!.Value, new DerivativeRequest(variants), ct);
                 var card = cardIndex >= 0 ? outcomes.ElementAtOrDefault(cardIndex)?.File : null;
                 var detail = detailIndex >= 0 ? outcomes.ElementAtOrDefault(detailIndex)?.File : null;

@@ -154,6 +154,30 @@ public sealed class FileDerivativeTests
     }
 
     [Fact]
+    public async Task Deleted_derivative_is_regenerated_instead_of_returning_a_stale_url()
+    {
+        var source = new FileAsset(Guid.NewGuid(), "original.png", "image/png", 3, "source", "admin", DateTime.UtcNow, 80, 40);
+        var specJson = System.Text.Json.JsonSerializer.Serialize(new DerivativeSpec(1, 32, 32, "cover", 0.5, 0.5,
+            "transparent", "png", 80));
+        var deletedDerivative = new FileAsset(Guid.NewGuid(), "original-32x32.png", "image/png", 3, "deleted-derivative", "admin",
+            DateTime.UtcNow, 32, 32, source.Id, "custom", specJson);
+        deletedDerivative.CompleteDeletion();
+        var repository = new Repository(source, [deletedDerivative]);
+        var storage = new Storage(MakeImage(80, 40));
+        var service = new FileService(repository, storage, new Permissions(), TimeProvider.System,
+            NullLogger<FileService>.Instance, new Processor());
+        var request = new DerivativeRequest([new DerivativeVariant(32, 32, "cover", null, null, "transparent", "png", 80, "repeat")]);
+
+        var outcome = Assert.Single(await service.CreateDerivatives("admin", source.Id, request, default));
+
+        Assert.True(outcome.Succeeded);
+        Assert.NotEqual(deletedDerivative.Id, outcome.File!.Id);
+        Assert.NotEqual("/files/" + deletedDerivative.Id.ToString("D"), outcome.PublicUrl);
+        Assert.Equal(1, repository.AddCount);
+        Assert.Equal(1, storage.PutCount);
+    }
+
+    [Fact]
     public async Task Variant_boundaries_and_contain_focal_fields_return_stable_errors()
     {
         var source = new FileAsset(Guid.NewGuid(), "original.png", "image/png", 3, "source", "admin", DateTime.UtcNow);
@@ -407,16 +431,22 @@ public sealed class FileDerivativeTests
     {
         public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) => Task.FromResult(permission == FilePermissions.Write);
     }
-    private sealed class Repository(FileAsset source) : IFileRepository
+    private sealed class Repository : IFileRepository
     {
+        private readonly FileAsset source;
         public int AddCount { get; private set; }
         public bool FailReservation { get; init; }
         public bool FailAudit { get; init; }
         public bool AlwaysCollide { get; init; }
         private readonly Dictionary<Guid, FileAsset> files = [];
+        public Repository(FileAsset source, IReadOnlyList<FileAsset>? existingDerivatives = null)
+        {
+            this.source = source;
+            foreach (var derivative in existingDerivatives ?? []) files[derivative.Id] = derivative;
+        }
         public Task<FilePage> List(int page, int size, string? query, string? type, CancellationToken ct) => Task.FromResult(new FilePage([], page, size, 0, 0));
         public Task<FileAsset?> Get(Guid id, CancellationToken ct) => Task.FromResult<FileAsset?>(id == source.Id ? source : files.GetValueOrDefault(id));
-        public Task<FileAsset?> FindDerivative(Guid sourceId, string preset, string derivativeSpecJson, CancellationToken ct) => Task.FromResult(files.Values.FirstOrDefault(x => x.DerivedFromFileId == sourceId && x.DerivedPreset == preset && x.DerivativeSpecJson == derivativeSpecJson));
+        public Task<FileAsset?> FindDerivative(Guid sourceId, string preset, string derivativeSpecJson, CancellationToken ct) => Task.FromResult(files.Values.FirstOrDefault(x => x.LifecycleState == FileLifecycleState.Active && x.DerivedFromFileId == sourceId && x.DerivedPreset == preset && x.DerivativeSpecJson == derivativeSpecJson));
         public Task Add(FileAsset file, CancellationToken ct) { AddCount++; files[file.Id] = file; return Task.CompletedTask; }
         public Task ReserveDerivativeAndAdd(FileAsset file, string candidateName, CancellationToken ct)
         {

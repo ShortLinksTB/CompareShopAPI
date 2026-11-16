@@ -170,6 +170,44 @@ public sealed class FileRepositoryIntegrationTests(SqlServerTestFixture sqlServe
         }
     }
 
+    [Fact]
+    public async Task FindDerivative_does_not_return_deleted_derivative_for_regeneration()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString)
+        {
+            InitialCatalog = $"CompareShopDeletedDerivative_{Guid.NewGuid():N}"
+        }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            var sourceId = Guid.NewGuid();
+            var specJson = System.Text.Json.JsonSerializer.Serialize(new DerivativeSpec(1, 32, 32, "cover", 0.5, 0.5,
+                "transparent", "png", 80));
+            var derivative = new FileAsset(Guid.NewGuid(), "source-32x32.png", "image/png", 1, "deleted-derivative", "test",
+                DateTime.UtcNow, 32, 32, sourceId, "custom", specJson);
+            derivative.CompleteDeletion();
+
+            await using (var db = new CompareShopDbContext(options))
+            {
+                await db.Database.MigrateAsync();
+                await new EfFileRepository(db).Add(new FileAsset(sourceId, "source.png", "image/png", 1, "source", "test", DateTime.UtcNow), default);
+                await db.Files.AddAsync(derivative);
+                await db.SaveChangesAsync();
+            }
+
+            await using (var db = new CompareShopDbContext(options))
+            {
+                var existing = await new EfFileRepository(db).FindDerivative(sourceId, "custom", specJson, default);
+                Assert.Null(existing);
+            }
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
     private static async Task<bool> ReserveName(string connection, Guid sourceId, string name)
     {
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;

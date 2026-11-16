@@ -5,6 +5,7 @@ namespace CompareShopAPI.Api.Files;
 
 public static class FileEndpoints
 {
+    public sealed record BulkDeleteRequest(IReadOnlyList<Guid> FileIds);
     public static RouteGroupBuilder MapAdminFileEndpoints(this RouteGroupBuilder admin)
     {
         admin.MapGet("/files", async (HttpContext context, int? page, int? pageSize, string? q, string? type,
@@ -52,9 +53,24 @@ public static class FileEndpoints
             }
             return Results.Ok(outcomes);
         }).DisableAntiforgery();
+        admin.MapPost("/files/bulk-delete", async (HttpContext context, BulkDeleteRequest? request, FileService service, CancellationToken ct) =>
+        {
+            try { return Results.Ok(new { results = await service.BulkDelete(Subject(context), request?.FileIds, ct) }); }
+            catch (Exception ex) { return Error(ex); }
+        });
         admin.MapDelete("/files/{id:guid}", async (HttpContext context, Guid id, FileService service, CancellationToken ct) =>
         {
-            try { return await service.Delete(Subject(context), id, ct) ? Results.NoContent() : Results.NotFound(); }
+            try
+            {
+                var outcome = await service.BulkDelete(Subject(context), [id], ct);
+                return outcome[0].Status switch
+                {
+                    "deleted" => Results.NoContent(),
+                    "not_found" => Results.NotFound(),
+                    "in_use" => Results.Conflict(new { outcome = outcome[0] }),
+                    _ => Results.Problem(outcome[0].Reason, statusCode: StatusCodes.Status503ServiceUnavailable)
+                };
+            }
             catch (Exception ex) { return Error(ex); }
         });
         return admin;

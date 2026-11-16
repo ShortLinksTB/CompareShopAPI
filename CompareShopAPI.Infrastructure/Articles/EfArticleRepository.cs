@@ -4,6 +4,7 @@ using CompareShopAPI.Application.Articles;
 using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Articles;
 using CompareShopAPI.Infrastructure.Persistence;
+using CompareShopAPI.Infrastructure.Files;
 using CompareShopAPI.Application.UserCommerce;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -38,16 +39,28 @@ public sealed class EfArticleRepository(CompareShopDbContext db) : IArticleRepos
     public async Task<BlogArticleDto?> BlogAdminGet(int id,CancellationToken ct) { var row=await BlogRows().SingleOrDefaultAsync(x=>x.Id==id,ct); return row is null?null:(await AdminDtos([row],ct)).Single(); }
     public async Task<BlogArticleDto> BlogCreate(BlogArticleInput input,string actor,string authorName,DateTime nowUtc,CancellationToken ct)
     {
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
+        var coverId = ParseCoverFileId(input.CoverFileId);
+        var fileLocks = new EfFileRepository(db);
+        if (coverId.HasValue) { await fileLocks.AcquireFileLocks([coverId.Value], ct); await fileLocks.VerifyActiveFiles([coverId.Value], ct); }
         var article=new Article(input.Slug,input.Title,input.ExcerptText,null,actor,authorName,null,1,input.ContentMarkdown,ArticleSeo.Create(null,null,null,null,true),Array.Empty<int>(),nowUtc);
-        article.UpdateBlogFields(input.Slug,input.Title,input.Category,input.ExcerptText,input.ContentMarkdown,ParseCoverFileId(input.CoverFileId),System.Text.Json.JsonSerializer.Serialize(input.Tags.Select(x=>x.Trim()).ToArray()),nowUtc);
+        article.UpdateBlogFields(input.Slug,input.Title,input.Category,input.ExcerptText,input.ContentMarkdown,coverId,System.Text.Json.JsonSerializer.Serialize(input.Tags.Select(x=>x.Trim()).ToArray()),nowUtc);
         db.Articles.Add(article); try { await db.SaveChangesAsync(ct); } catch(DbUpdateException ex) when(IsUniqueViolation(ex)){db.Entry(article).State=EntityState.Detached;throw new ArticleSlugConflictException();}
+        if (tx is not null) await tx.CommitAsync(ct);
         return (await AdminDtos([article],ct)).Single();
     }
     public async Task<BlogArticleDto> BlogUpdate(int id,BlogArticleInput input,DateTime nowUtc,CancellationToken ct)
     {
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var article=await db.Articles.SingleOrDefaultAsync(x=>x.Id==id,ct)??throw new KeyNotFoundException();
-        article.UpdateBlogFields(input.Slug,input.Title,input.Category,input.ExcerptText,input.ContentMarkdown,ParseCoverFileId(input.CoverFileId),System.Text.Json.JsonSerializer.Serialize(input.Tags.Select(x=>x.Trim()).ToArray()),nowUtc);
+        var newCoverId = ParseCoverFileId(input.CoverFileId);
+        var fileIds = new[] { article.CoverFileId, newCoverId }.Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+        var fileLocks = new EfFileRepository(db);
+        await fileLocks.AcquireFileLocks(fileIds, ct);
+        if (newCoverId.HasValue) await fileLocks.VerifyActiveFiles([newCoverId.Value], ct);
+        article.UpdateBlogFields(input.Slug,input.Title,input.Category,input.ExcerptText,input.ContentMarkdown,newCoverId,System.Text.Json.JsonSerializer.Serialize(input.Tags.Select(x=>x.Trim()).ToArray()),nowUtc);
         try{await db.SaveChangesAsync(ct);}catch(DbUpdateException ex) when(IsUniqueViolation(ex)){throw new ArticleSlugConflictException();}
+        if (tx is not null) await tx.CommitAsync(ct);
         return (await AdminDtos([article],ct)).Single();
     }
     public async Task BlogDelete(int id,CancellationToken ct)

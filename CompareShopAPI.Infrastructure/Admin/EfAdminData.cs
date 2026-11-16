@@ -7,6 +7,7 @@ using CompareShopAPI.Application.Ingestion;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Domain.Ingestion;
 using CompareShopAPI.Infrastructure.Persistence;
+using CompareShopAPI.Infrastructure.Files;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.SqlClient;
 using DomainFeatureFlag = CompareShopAPI.Domain.Admin.AdminFeatureFlag;
@@ -128,11 +129,23 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     }
     public async Task<AdminProduct> SaveProduct(int? id, ProductInput input, CancellationToken ct)
     {
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         if (!await db.Categories.AnyAsync(x => x.Id == input.CategoryId && x.Level == 2, ct)) throw new ArgumentException("Category does not exist or is not a Level 2 category.");
         var item = id.HasValue ? await db.Products.Include(x => x.Images).SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
         item ??= new Product { Slug = input.Slug, Name = input.Name };
         var previousImageUrl = item.ImageUrl;
+        var oldImages = id.HasValue
+            ? await db.ProductImages.Where(x => x.ProductId == id.Value)
+                .Select(x => new { x.FileId, x.Card600FileId, x.Detail1000FileId }).ToListAsync(ct)
+            : [];
+        var oldFileIds = oldImages.SelectMany(x => new Guid?[] { x.FileId, x.Card600FileId, x.Detail1000FileId })
+            .Where(x => x.HasValue).Select(x => x!.Value).ToArray();
+        var requestedFileId = TryParseFileUrl(input.ImageUrl);
+        var fileIds = oldFileIds.Append(requestedFileId ?? Guid.Empty).Where(x => x != Guid.Empty).Distinct().ToArray();
+        var fileRepository = new EfFileRepository(db);
+        await fileRepository.AcquireFileLocks(fileIds, ct);
+        if (requestedFileId.HasValue) await fileRepository.VerifyActiveFiles([requestedFileId.Value], ct);
         item.Slug = input.Slug; item.Name = input.Name; item.Brand = input.Brand; item.Description = input.Description; item.CategoryId = input.CategoryId; item.IsActive = input.IsActive;
         if (!id.HasValue || !string.Equals(previousImageUrl, input.ImageUrl, StringComparison.Ordinal))
         {
@@ -150,6 +163,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
             db.ProductImages.Add(image);
             await db.SaveChangesAsync(ct);
         }
+        if (tx is not null) await tx.CommitAsync(ct);
         return ToDto(item);
     }
 
@@ -180,9 +194,16 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
 
     public async Task<IReadOnlyList<AdminProductImage>?> ReplaceProductImages(int productId, IReadOnlyList<ProductImageInput> input, DateTime nowUtc, CancellationToken ct)
     {
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var product = await db.Products.SingleOrDefaultAsync(x => x.Id == productId, ct);
         if (product is null) return null;
         var existing = await db.ProductImages.Where(x => x.ProductId == productId).ToListAsync(ct);
+        var affectedIds = existing.SelectMany(x => new Guid?[] { x.FileId, x.Card600FileId, x.Detail1000FileId })
+            .Concat(input.Select(x => x.FileId)).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+        var fileRepository = new EfFileRepository(db);
+        await fileRepository.AcquireFileLocks(affectedIds, ct);
+        var newlyReferencedIds = input.Where(x => x.FileId.HasValue).Select(x => x.FileId!.Value).Distinct().ToArray();
+        await fileRepository.VerifyActiveFiles(newlyReferencedIds, ct);
         foreach (var image in existing) image.SortOrder += 20;
         await db.SaveChangesAsync(ct);
 
@@ -222,6 +243,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var main = result.FirstOrDefault();
         product.ImageUrl = main?.CardUrl;
         await db.SaveChangesAsync(ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         return await ProductImages(productId, ct);
     }
 
@@ -277,24 +299,25 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
     public async Task SaveProductImageDerivatives(string actor, int productId, Guid sourceFileId, Guid? cardFileId, string cardStatus, string? cardError,
         Guid? detailFileId, string detailStatus, string? detailError, DateTime nowUtc, CancellationToken ct)
     {
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
+        var currentImages = await db.ProductImages.Where(x => x.ProductId == productId && x.FileId == sourceFileId)
+            .Select(x => new { x.FileId, x.Card600FileId, x.Detail1000FileId }).ToListAsync(ct);
+        var currentIds = currentImages.SelectMany(x => new Guid?[] { x.FileId, x.Card600FileId, x.Detail1000FileId }).ToArray();
+        var newIds = new[] { sourceFileId, cardFileId, detailFileId }.Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+        var affectedIds = currentIds.Where(x => x.HasValue).Select(x => x!.Value).Concat(newIds).Distinct().ToArray();
+        var fileRepository = new EfFileRepository(db);
+        await fileRepository.AcquireFileLocks(affectedIds, ct);
+        await fileRepository.VerifyActiveFiles(newIds, ct);
         var image = await db.ProductImages.SingleOrDefaultAsync(x => x.ProductId == productId && x.FileId == sourceFileId, ct);
         if (image is null) return;
         var before = new { image.Card600FileId, image.Detail1000FileId, image.Card600Status, image.Detail1000Status, image.Card600Error, image.Detail1000Error };
         var derivativeIds = new[] { cardFileId, detailFileId }.Where(x => x.HasValue).Select(x => x!.Value).ToArray();
         HashSet<Guid> validCard = [];
         HashSet<Guid> validDetail = [];
-        try
-        {
-            var metadata = await db.Files.AsNoTracking().Where(x => derivativeIds.Contains(x.Id) && x.DerivedFromFileId == sourceFileId && x.ContentType.StartsWith("image/"))
-                .Select(x => new { x.Id, x.Width, x.Height, x.DerivedPreset }).ToListAsync(ct);
-            validCard = metadata.Where(x => x.Width == 600 && x.Height == 600 && x.DerivedPreset == "home-600x600").Select(x => x.Id).ToHashSet();
-            validDetail = metadata.Where(x => x.Width == 1000 && x.Height == 1000 && x.DerivedPreset == "product-detail-1000x1000").Select(x => x.Id).ToHashSet();
-        }
-        catch (SqlException)
-        {
-            if (cardFileId.HasValue) cardStatus = "unavailable";
-            if (detailFileId.HasValue) detailStatus = "unavailable";
-        }
+        var metadata = await db.Files.AsNoTracking().Where(x => derivativeIds.Contains(x.Id) && x.DerivedFromFileId == sourceFileId && x.ContentType.StartsWith("image/"))
+            .Select(x => new { x.Id, x.Width, x.Height, x.DerivedPreset }).ToListAsync(ct);
+        validCard = metadata.Where(x => x.Width == 600 && x.Height == 600 && x.DerivedPreset == "home-600x600").Select(x => x.Id).ToHashSet();
+        validDetail = metadata.Where(x => x.Width == 1000 && x.Height == 1000 && x.DerivedPreset == "product-detail-1000x1000").Select(x => x.Id).ToHashSet();
         if (cardFileId.HasValue) image.Card600FileId = validCard.Contains(cardFileId.Value) ? cardFileId : null;
         if (detailFileId.HasValue) image.Detail1000FileId = validDetail.Contains(detailFileId.Value) ? detailFileId : null;
         image.Card600Status = image.Card600FileId.HasValue ? "ready" : cardStatus;
@@ -310,6 +333,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         db.AdminAuditLogs.Add(new DomainAuditLog { ActorSubject = actor, Action = "generate_derivatives", ResourceType = "product_images",
             ResourceId = productId.ToString(), CreatedAtUtc = nowUtc, BeforeJson = Redact(before), AfterJson = Redact(new { image.Card600FileId, image.Detail1000FileId, image.Card600Status, image.Detail1000Status, image.Card600Error, image.Detail1000Error }) });
         await db.SaveChangesAsync(ct);
+        if (tx is not null) await tx.CommitAsync(ct);
     }
     public async Task<bool> DeleteProduct(int id, CancellationToken ct)
     {

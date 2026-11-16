@@ -2,6 +2,7 @@ using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Application.Files;
 using CompareShopAPI.Domain.Files;
 using CompareShopAPI.Infrastructure.Files;
+using CompareShopAPI.Api.Files;
 using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Http;
@@ -77,6 +78,30 @@ public sealed class FileServiceTests
         Assert.Equal(new[] { "application/octet-stream" }, contentTypes);
         Assert.Equal("attachment", contentDisposition);
         Assert.Equal("no-store", cacheControl);
+    }
+
+    [Fact]
+    public async Task Minio_storage_accepts_idempotent_delete_response_for_missing_object()
+    {
+        string? method = null;
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        await using var server = builder.Build();
+        server.MapMethods("/{**path}", ["DELETE"], (HttpContext context) =>
+        {
+            method = context.Request.Method;
+            return Results.NoContent(); // S3-compatible DeleteObject succeeds when the key is already absent.
+        });
+        await server.StartAsync();
+        var address = server.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Minio:Endpoint"] = address, ["Minio:AccessKey"] = "test-access", ["Minio:SecretKey"] = "test-secret", ["Minio:Bucket"] = "compareshop-files"
+        }).Build();
+
+        await new MinioFileObjectStorage(configuration).Delete("already-absent", default);
+
+        Assert.Equal("DELETE", method);
     }
 
     [Fact]
@@ -182,6 +207,111 @@ public sealed class FileServiceTests
     }
 
     [Fact]
+    public async Task Bulk_delete_returns_independent_usage_lookup_storage_and_missing_outcomes()
+    {
+        var repository = new FakeRepository();
+        var storage = new FakeStorage();
+        var service = Create(repository, storage, new FakePermissions(FilePermissions.Write));
+        var used = await service.Upload("operator", new("used.png", "image/png", 1, new MemoryStream([1])), default);
+        var lookupFails = await service.Upload("operator", new("lookup.png", "image/png", 1, new MemoryStream([1])), default);
+        var storageFails = await service.Upload("operator", new("storage.png", "image/png", 1, new MemoryStream([1])), default);
+        var deleted = await service.Upload("operator", new("deleted.png", "image/png", 1, new MemoryStream([1])), default);
+        repository.InUse.Add(used.Id);
+        repository.FailUsageLookup.Add(lookupFails.Id);
+        storage.DeleteFailuresRemaining = 2;
+
+        var outcomes = await service.BulkDelete("operator", [used.Id, lookupFails.Id, storageFails.Id, deleted.Id, Guid.NewGuid()], default);
+
+        Assert.Equal(new[] { "in_use", "failed", "failed", "deleted", "not_found" }, outcomes.Select(x => x.Status));
+        Assert.Single(outcomes[0].UsedBy);
+        Assert.Equal("product", outcomes[0].UsedBy[0].Type);
+        Assert.Equal(3, storage.DeleteCount); // two attempts on the failed file, then the independent success
+    }
+
+    [Fact]
+    public async Task Bulk_delete_requires_existing_write_permission()
+    {
+        var service = Create(new FakeRepository(), new FakeStorage(), new FakePermissions(FilePermissions.Read));
+        await Assert.ThrowsAsync<AdminForbiddenException>(() => service.BulkDelete("viewer", [Guid.NewGuid()], default));
+    }
+
+    [Fact]
+    public async Task Finalization_failure_stays_pending_and_a_retry_completes()
+    {
+        var repository = new FakeRepository { FailFinalize = true };
+        var storage = new FakeStorage();
+        var service = Create(repository, storage, new FakePermissions(FilePermissions.Write));
+        var uploaded = await service.Upload("operator", new("retry.png", "image/png", 1, new MemoryStream([1])), default);
+
+        var first = Assert.Single(await service.BulkDelete("operator", [uploaded.Id], default));
+        Assert.Equal("failed", first.Status);
+        Assert.Contains(uploaded.Id, repository.PendingDeletionIds);
+        repository.FailFinalize = false;
+        var retry = Assert.Single(await service.BulkDelete("operator", [uploaded.Id], default));
+        Assert.Equal("deleted", retry.Status);
+        Assert.DoesNotContain(uploaded.Id, repository.PendingDeletionIds);
+    }
+
+    [Fact]
+    public async Task Reconciler_resumes_and_finalizes_a_pending_tombstone()
+    {
+        var repository = new FakeRepository { FailFinalize = true };
+        var storage = new FakeStorage();
+        var service = Create(repository, storage, new FakePermissions(FilePermissions.Write));
+        var uploaded = await service.Upload("operator", new("reconcile.png", "image/png", 1, new MemoryStream([1])), default);
+        Assert.Equal("failed", Assert.Single(await service.BulkDelete("operator", [uploaded.Id], default)).Status);
+        repository.FailFinalize = false;
+
+        using var provider = new ServiceCollection().AddSingleton<IFileRepository>(repository)
+            .AddSingleton<IFileObjectStorage>(storage).BuildServiceProvider();
+        var reconciler = new FileDeletionReconciler(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<FileDeletionReconciler>.Instance);
+        await reconciler.ReconcilePendingFiles(default);
+
+        Assert.DoesNotContain(uploaded.Id, repository.PendingDeletionIds);
+        Assert.Equal(2, storage.DeleteCount);
+    }
+
+    [Fact]
+    public async Task Reconciler_treats_a_missing_object_as_deleted_and_finalizes()
+    {
+        var repository = new FakeRepository();
+        var storage = new FakeStorage { DeleteFailuresRemaining = 2 };
+        var service = Create(repository, storage, new FakePermissions(FilePermissions.Write));
+        var uploaded = await service.Upload("operator", new("missing.png", "image/png", 1, new MemoryStream([1])), default);
+        Assert.Equal("failed", Assert.Single(await service.BulkDelete("operator", [uploaded.Id], default)).Status);
+        storage.MissingOnDelete = true;
+
+        using var provider = new ServiceCollection().AddSingleton<IFileRepository>(repository)
+            .AddSingleton<IFileObjectStorage>(storage).BuildServiceProvider();
+        var reconciler = new FileDeletionReconciler(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<FileDeletionReconciler>.Instance);
+        await reconciler.ReconcilePendingFiles(default);
+
+        Assert.DoesNotContain(uploaded.Id, repository.PendingDeletionIds);
+    }
+
+    [Fact]
+    public async Task Reconciler_keeps_tombstone_after_bounded_storage_retries()
+    {
+        var repository = new FakeRepository();
+        var storage = new FakeStorage { DeleteFailuresRemaining = 2 };
+        var service = Create(repository, storage, new FakePermissions(FilePermissions.Write));
+        var uploaded = await service.Upload("operator", new("outage.png", "image/png", 1, new MemoryStream([1])), default);
+        Assert.Equal("failed", Assert.Single(await service.BulkDelete("operator", [uploaded.Id], default)).Status);
+        storage.DeleteFailuresRemaining = 10;
+
+        using var provider = new ServiceCollection().AddSingleton<IFileRepository>(repository)
+            .AddSingleton<IFileObjectStorage>(storage).BuildServiceProvider();
+        var reconciler = new FileDeletionReconciler(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<FileDeletionReconciler>.Instance);
+        await reconciler.ReconcilePendingFiles(default);
+
+        Assert.Contains(uploaded.Id, repository.PendingDeletionIds);
+        Assert.Equal(5, storage.DeleteCount); // two request attempts plus three bounded reconciliation attempts
+    }
+
+    [Fact]
     public void File_asset_enforces_id_filename_type_size_and_dimensions()
     {
         var now = DateTime.UtcNow;
@@ -241,6 +371,13 @@ public sealed class FileServiceTests
         Assert.Equal("public, max-age=31536000, immutable", redirect.Headers.CacheControl?.ToString());
         Assert.Equal($"https://files.example.test/compareshop/{metadata.Id:N}", redirect.Headers.Location?.ToString());
         Assert.Empty(redirect.Headers.Location!.Query);
+        repository.InUse.Add(metadata.Id);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.DeleteAsync($"/admin/files/{metadata.Id:D}")).StatusCode);
+        repository.InUse.Remove(metadata.Id);
+        using var bulkMissing = await client.PostAsJsonAsync("/admin/files/bulk-delete", new { fileIds = new[] { Guid.NewGuid() } });
+        Assert.Equal(HttpStatusCode.OK, bulkMissing.StatusCode);
+        using (var payload = await bulkMissing.Content.ReadFromJsonAsync<System.Text.Json.JsonDocument>())
+            Assert.Equal("not_found", payload!.RootElement.GetProperty("results")[0].GetProperty("status").GetString());
         Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/admin/files/{metadata.Id:D}")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/files/{metadata.Id:D}")).StatusCode);
         permissions.Allowed.Remove(FilePermissions.Write);
@@ -327,6 +464,11 @@ public sealed class FileServiceTests
     private sealed class FakeRepository : IFileRepository
     {
         public bool FailAdd { get; init; }
+        public HashSet<Guid> InUse { get; } = [];
+        public HashSet<Guid> FailUsageLookup { get; } = [];
+        public HashSet<Guid> PendingDeletionIds { get; } = [];
+        public bool FailFinalize { get; set; }
+        public bool FailDeletingFiles { get; set; }
         private readonly Dictionary<Guid, FileAsset> assets = [];
         public Task<FilePage> List(int page, int pageSize, string? query, string? type, CancellationToken ct)
         {
@@ -351,7 +493,25 @@ public sealed class FileServiceTests
             return Task.CompletedTask;
         }
         public Task AuditDerivative(string actor, Guid sourceId, int variantIndex, string parameters, string? resultFileId, string? errorCode, CancellationToken ct) => Task.CompletedTask;
-        public Task<bool> Delete(Guid id, CancellationToken ct) => Task.FromResult(assets.Remove(id));
+        public Task<FileDeletePreparation> BeginDelete(Guid id, CancellationToken ct)
+        {
+            if (FailUsageLookup.Contains(id)) return Task.FromException<FileDeletePreparation>(new InvalidOperationException("usage query failure"));
+            if (!assets.TryGetValue(id, out var asset)) return Task.FromResult(new FileDeletePreparation("not_found", null, []));
+            if (InUse.Contains(id)) return Task.FromResult(new FileDeletePreparation("in_use", asset.ObjectKey,
+                [new FileUsage("product", "5", "Sản phẩm #5: Test")]));
+            PendingDeletionIds.Add(id);
+            return Task.FromResult(new FileDeletePreparation("deleting", asset.ObjectKey, []));
+        }
+        public Task<bool> FinalizeDelete(Guid id, CancellationToken ct)
+        {
+            if (FailFinalize) return Task.FromResult(false);
+            PendingDeletionIds.Remove(id);
+            return Task.FromResult(assets.Remove(id));
+        }
+        public Task<IReadOnlyList<(Guid Id, string ObjectKey)>> DeletingFiles(CancellationToken ct) => FailDeletingFiles
+            ? Task.FromException<IReadOnlyList<(Guid, string)>>(new InvalidOperationException("listing failure"))
+            : Task.FromResult<IReadOnlyList<(Guid, string)>>(
+                PendingDeletionIds.Where(assets.ContainsKey).Select(id => (id, assets[id].ObjectKey)).ToArray());
     }
 
     private sealed class FakeStorage : IFileObjectStorage
@@ -359,6 +519,8 @@ public sealed class FileServiceTests
         public int PutCount { get; private set; }
         public int DeleteCount { get; private set; }
         public bool FailNextPut { get; set; }
+        public int DeleteFailuresRemaining { get; set; }
+        public bool MissingOnDelete { get; set; }
         public byte[] ReadBytes { get; init; } = [];
         public string PublicUrl(string key) => $"https://files.example.test/compareshop/{key}";
         public Task Put(string key, Stream content, long size, string contentType, CancellationToken ct)
@@ -367,7 +529,13 @@ public sealed class FileServiceTests
             if (FailNextPut) { FailNextPut = false; return Task.FromException(new InvalidOperationException("storage failure")); }
             return Task.CompletedTask;
         }
-        public Task Delete(string key, CancellationToken ct) { DeleteCount++; return Task.CompletedTask; }
+        public Task Delete(string key, CancellationToken ct)
+        {
+            DeleteCount++;
+            if (MissingOnDelete) return Task.FromException(new InvalidOperationException("NoSuchKey"));
+            if (DeleteFailuresRemaining > 0) { DeleteFailuresRemaining--; return Task.FromException(new TimeoutException("ambiguous timeout")); }
+            return Task.CompletedTask;
+        }
         public Task<StoredFileContent> OpenRead(string key, CancellationToken ct) => Task.FromResult(new StoredFileContent(new MemoryStream(ReadBytes), ReadBytes.Length));
     }
 

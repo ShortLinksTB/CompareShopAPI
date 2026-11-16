@@ -10,11 +10,14 @@ public static class FilePermissions
 }
 
 public sealed record DerivedFromMetadata(Guid Id, string OriginalFileName);
+public sealed record FileUsage(string Type, string Id, string Label);
+public sealed record FileDeleteOutcome(Guid FileId, string Status, IReadOnlyList<FileUsage> UsedBy, string? Reason = null);
 public sealed record DerivativeSpec(int Version, int Width, int Height, string Fit, double? FocalX, double? FocalY,
     string Background, string Format, int Quality);
 public sealed record FileMetadata(Guid Id, string OriginalFileName, string ContentType, long SizeBytes,
     int? Width, int? Height, string UploadedBy, DateTime UploadedAtUtc,
-    DerivedFromMetadata? DerivedFrom = null, string? DerivedPreset = null, DerivativeSpec? DerivativeSpec = null);
+    DerivedFromMetadata? DerivedFrom = null, string? DerivedPreset = null, DerivativeSpec? DerivativeSpec = null,
+    IReadOnlyList<FileUsage>? UsedBy = null);
 public sealed record FilePage(IReadOnlyList<FileMetadata> Items, int Page, int PageSize, int TotalItems, int TotalPages);
 public sealed record FileUpload(string FileName, string ContentType, long SizeBytes, Stream Content);
 public sealed record FileUploadOutcome(string FileName, FileMetadata? File, int StatusCode, string? Error)
@@ -29,8 +32,12 @@ public interface IFileRepository
     Task Add(FileAsset file, CancellationToken ct);
     Task ReserveDerivativeAndAdd(FileAsset file, string candidateName, CancellationToken ct);
     Task AuditDerivative(string actor, Guid sourceId, int variantIndex, string parameters, string? resultFileId, string? errorCode, CancellationToken ct);
-    Task<bool> Delete(Guid id, CancellationToken ct);
+    Task<FileDeletePreparation> BeginDelete(Guid id, CancellationToken ct);
+    Task<bool> FinalizeDelete(Guid id, CancellationToken ct);
+    Task<IReadOnlyList<(Guid Id, string ObjectKey)>> DeletingFiles(CancellationToken ct);
 }
+
+public sealed record FileDeletePreparation(string State, string? ObjectKey, IReadOnlyList<FileUsage> UsedBy);
 
 public interface IFileObjectStorage
 {
@@ -117,11 +124,60 @@ public sealed class FileService(IFileRepository files, IFileObjectStorage storag
     {
         await Authorize(subject, FilePermissions.Write, ct);
         ValidateId(id);
-        var file = await files.Get(id, ct);
-        if (file is null) return false;
-        if (!await files.Delete(id, ct)) return false;
-        await storage.Delete(file.ObjectKey, ct);
-        return true;
+        var result = await DeleteOne(id, ct);
+        return result.Status == "deleted";
+    }
+
+    public async Task<IReadOnlyList<FileDeleteOutcome>> BulkDelete(string? subject, IReadOnlyList<Guid>? ids, CancellationToken ct)
+    {
+        await Authorize(subject, FilePermissions.Write, ct);
+        if (ids is null || ids.Count == 0 || ids.Any(x => x == Guid.Empty))
+            throw new ArgumentException("fileIds must contain at least one valid GUID.");
+        var outcomes = new List<FileDeleteOutcome>(ids.Count);
+        foreach (var id in ids)
+        {
+            ct.ThrowIfCancellationRequested();
+            try { outcomes.Add(await DeleteOne(id, ct)); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "File deletion failed for {FileId}", id);
+                outcomes.Add(new(id, "failed", [], "Deletion could not be completed. Retry this file."));
+            }
+        }
+        return outcomes;
+    }
+
+    private async Task<FileDeleteOutcome> DeleteOne(Guid id, CancellationToken ct)
+    {
+        var preparation = await files.BeginDelete(id, ct);
+        if (preparation.State == "not_found") return new(id, "not_found", []);
+        if (preparation.State == "in_use") return new(id, "in_use", preparation.UsedBy);
+        if (preparation.State == "deleted") return new(id, "deleted", []);
+        try { await DeleteObjectIdempotently(preparation.ObjectKey!, id, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Object deletion remains pending for {FileId}", id);
+            return new(id, "failed", [], "Storage deletion is pending. Retry this file.");
+        }
+        if (!await files.FinalizeDelete(id, ct))
+            return new(id, "failed", [], "Deletion finalization is pending. Retry this file.");
+        return new(id, "deleted", []);
+    }
+
+    private static bool IsObjectMissing(Exception exception) => exception.Message.Contains("NoSuchKey", StringComparison.OrdinalIgnoreCase)
+        || exception.Message.Contains("NoSuchObject", StringComparison.OrdinalIgnoreCase)
+        || exception.Message.Contains("ObjectNotFound", StringComparison.OrdinalIgnoreCase);
+
+    private async Task DeleteObjectIdempotently(string key, Guid id, CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try { await storage.Delete(key, ct); return; }
+            catch (Exception ex) when (ex is not OperationCanceledException && IsObjectMissing(ex)) { return; }
+            catch (Exception ex) when (ex is not OperationCanceledException && attempt == 0)
+            { logger.LogWarning(ex, "Retrying an ambiguous object deletion for {FileId}", id); }
+        }
     }
 
     public async Task<string?> PublicObjectUrl(Guid id, CancellationToken ct)

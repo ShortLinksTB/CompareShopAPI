@@ -90,6 +90,8 @@ public sealed class ProductImageApplicationTests
         var image = Assert.Single(result!);
         Assert.Equal("failed", image.Derivative600Status);
         Assert.Equal("failed", image.Derivative1000Status);
+        Assert.Equal("storage_failed", image.Derivative600Error);
+        Assert.Equal("storage_failed", image.Derivative1000Error);
         Assert.Equal($"/files/{sourceId:D}", image.Url600);
         Assert.Equal($"/files/{sourceId:D}", image.Url1000);
         Assert.Equal($"/files/{sourceId:D}", (await db.Products.SingleAsync(x => x.Id == product.Id)).ImageUrl);
@@ -97,8 +99,12 @@ public sealed class ProductImageApplicationTests
         Assert.Contains(await db.AdminAuditLogs.ToListAsync(), entry => entry.ResourceType == "product_images" && entry.Action == "generate_derivatives");
         Assert.Equal(1, derivatives.CallCount);
 
-        await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
+        var retryResult = await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
         Assert.Equal(2, derivatives.CallCount);
+        Assert.Equal("failed", retryResult!.Derivative600Status);
+        Assert.Equal("storage_failed", retryResult.Derivative600Error);
+        Assert.Equal("failed", retryResult.Derivative1000Status);
+        Assert.Equal("storage_failed", retryResult.Derivative1000Error);
     }
 
     [Fact]
@@ -137,6 +143,8 @@ public sealed class ProductImageApplicationTests
 
         Assert.Equal("ready", retried!.Derivative600Status);
         Assert.Equal("ready", retried.Derivative1000Status);
+        Assert.Null(retried.Derivative600Error);
+        Assert.Null(retried.Derivative1000Error);
         Assert.NotEqual($"/files/{sourceId:D}", retried.Url600);
         Assert.NotEqual($"/files/{sourceId:D}", retried.Url1000);
         Assert.Equal(2, derivatives.Requests.Count);
@@ -146,6 +154,46 @@ public sealed class ProductImageApplicationTests
                 variant => { Assert.Equal(600, variant.Width); Assert.Equal(600, variant.Height); Assert.Equal(80, variant.Quality); },
                 variant => { Assert.Equal(1000, variant.Width); Assert.Equal(1000, variant.Height); Assert.Equal(80, variant.Quality); });
         });
+    }
+
+    [Theory]
+    [InlineData("forbidden", "permission_denied")]
+    [InlineData("missing", "source_not_found")]
+    [InlineData("unexpected", "derivative_service_failed")]
+    public async Task Retry_persists_concrete_failure_code_when_derivative_service_throws(string failure, string expectedError)
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        await using var db = new CompareShopDbContext(options);
+        const string subject = "product-image-operator";
+        var user = new User(subject, DateTime.UtcNow);
+        var role = new AdminRole { Name = "product-image-operator" };
+        var permission = new AdminPermission { Key = AdminPermissions.ProductsUpdate };
+        var category = new Category { Slug = "category", Name = "Category" };
+        var sourceId = Guid.NewGuid();
+        var product = new Product { Slug = "retry-error", Name = "Retry Error", Category = category };
+        db.Users.Add(user);
+        db.AdminRoles.Add(role);
+        db.AdminPermissions.Add(permission);
+        db.Products.Add(product);
+        db.Files.Add(new FileAsset(sourceId, "source.jpg", "image/jpeg", 20, "source", subject, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+        db.AdminUserRoles.Add(new AdminUserRole { UserId = user.Id, RoleId = role.Id });
+        db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = role.Id, PermissionId = permission.Id });
+        await db.SaveChangesAsync();
+        var derivatives = new ThrowingDerivatives(failure);
+        var service = new AdminService(new EfAdminData(db, TimeProvider.System), fileService: derivatives);
+        var image = Assert.Single((await service.ReplaceProductImages(subject, product.Id,
+            [new ProductImageInput(null, 0, "Front", sourceId, null)], default))!);
+
+        var retried = await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
+
+        Assert.Equal("failed", retried!.Derivative600Status);
+        Assert.Equal(expectedError, retried.Derivative600Error);
+        Assert.Equal("failed", retried.Derivative1000Status);
+        Assert.Equal(expectedError, retried.Derivative1000Error);
     }
 
     [Fact]
@@ -199,6 +247,17 @@ public sealed class ProductImageApplicationTests
             return Task.FromResult<IReadOnlyList<DerivativeVariantOutcome>>(request.Variants.Select((_, index) =>
                 new DerivativeVariantOutcome(index, null, null, "storage_failed", [])).ToArray());
         }
+    }
+
+    private sealed class ThrowingDerivatives(string failure) : IFileDerivatives
+    {
+        public Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct) =>
+            Task.FromException<IReadOnlyList<DerivativeVariantOutcome>>(failure switch
+            {
+                "forbidden" => new AdminForbiddenException(),
+                "missing" => new KeyNotFoundException(),
+                _ => new InvalidOperationException("service unavailable")
+            });
     }
 
     private sealed class RetryableDerivatives(CompareShopDbContext db) : IFileDerivatives

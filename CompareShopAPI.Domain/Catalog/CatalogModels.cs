@@ -27,6 +27,8 @@ public sealed class ProductImage
     public Guid? Detail1000FileId { get; set; }
     public string Card600Status { get; set; } = "pending";
     public string Detail1000Status { get; set; } = "pending";
+    public string? Card600Error { get; set; }
+    public string? Detail1000Error { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
 

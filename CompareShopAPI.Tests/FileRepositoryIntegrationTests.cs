@@ -83,6 +83,40 @@ public sealed class FileRepositoryIntegrationTests(SqlServerTestFixture sqlServe
     }
 
     [Fact]
+    public async Task Find_derivative_ignores_deleted_rows_so_they_can_be_regenerated()
+    {
+        var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString) { InitialCatalog = $"CompareShopDeletedDerivative_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var sourceId = Guid.NewGuid();
+        const string spec = "{\"Version\":1,\"Width\":32,\"Height\":32,\"Fit\":\"cover\",\"FocalX\":0.5,\"FocalY\":0.5,\"Background\":\"transparent\",\"Format\":\"png\",\"Quality\":80}";
+        try
+        {
+            await using var db = new CompareShopDbContext(options);
+            await db.Database.MigrateAsync();
+            var repository = new EfFileRepository(db);
+            await repository.Add(new FileAsset(sourceId, "source.png", "image/png", 3, "source", "operator", DateTime.UtcNow), default);
+            var deleted = new FileAsset(Guid.NewGuid(), "source-32x32.png", "image/png", 3, "deleted-derivative", "operator",
+                DateTime.UtcNow, 32, 32, sourceId, "custom", spec);
+            deleted.BeginDeletion();
+            deleted.CompleteDeletion();
+            await db.Files.AddAsync(deleted);
+            await db.SaveChangesAsync();
+
+            Assert.Null(await repository.FindDerivative(sourceId, "custom", spec, default));
+
+            var replacement = new FileAsset(Guid.NewGuid(), "source-32x32-2.png", "image/png", 3, "replacement", "operator",
+                DateTime.UtcNow, 32, 32, sourceId, "custom", spec);
+            await repository.ReserveDerivativeAndAdd(replacement, replacement.OriginalFileName, default);
+            Assert.Equal(replacement.Id, (await repository.FindDerivative(sourceId, "custom", spec, default))!.Id);
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task Migration_seeds_file_permissions_and_repository_filters_and_deletes_files()
     {
         var connection = new SqlConnectionStringBuilder(sqlServer.ConnectionString)

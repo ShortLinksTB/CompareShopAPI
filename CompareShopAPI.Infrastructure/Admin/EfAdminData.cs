@@ -208,6 +208,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
                     match.Card600FileId = null;
                     match.Detail1000FileId = null;
                     match.Card600Status = match.Detail1000Status = "pending";
+                    match.Card600Error = match.Detail1000Error = null;
                 }
                 match.SortOrder = item.SortOrder;
                 match.AltText = item.AltText?.Trim();
@@ -269,15 +270,16 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         var url1000 = image.Detail1000FileId.HasValue ? $"/files/{image.Detail1000FileId.Value:D}" : source;
         return new AdminProductImage(image.Id, image.SortOrder, image.AltText, image.FileId, source, url600, url1000, sourceAvailable,
             image.Card600FileId.HasValue ? available.Contains(image.Card600FileId.Value) ? "ready" : "unavailable" : image.Card600Status,
-            image.Detail1000FileId.HasValue ? available.Contains(image.Detail1000FileId.Value) ? "ready" : "unavailable" : image.Detail1000Status);
+            image.Detail1000FileId.HasValue ? available.Contains(image.Detail1000FileId.Value) ? "ready" : "unavailable" : image.Detail1000Status,
+            image.Card600Error, image.Detail1000Error);
     }
 
-    public async Task SaveProductImageDerivatives(string actor, int productId, Guid sourceFileId, Guid? cardFileId, string cardStatus,
-        Guid? detailFileId, string detailStatus, DateTime nowUtc, CancellationToken ct)
+    public async Task SaveProductImageDerivatives(string actor, int productId, Guid sourceFileId, Guid? cardFileId, string cardStatus, string? cardError,
+        Guid? detailFileId, string detailStatus, string? detailError, DateTime nowUtc, CancellationToken ct)
     {
         var image = await db.ProductImages.SingleOrDefaultAsync(x => x.ProductId == productId && x.FileId == sourceFileId, ct);
         if (image is null) return;
-        var before = new { image.Card600FileId, image.Detail1000FileId, image.Card600Status, image.Detail1000Status };
+        var before = new { image.Card600FileId, image.Detail1000FileId, image.Card600Status, image.Detail1000Status, image.Card600Error, image.Detail1000Error };
         var derivativeIds = new[] { cardFileId, detailFileId }.Where(x => x.HasValue).Select(x => x!.Value).ToArray();
         HashSet<Guid> validCard = [];
         HashSet<Guid> validDetail = [];
@@ -297,6 +299,8 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         if (detailFileId.HasValue) image.Detail1000FileId = validDetail.Contains(detailFileId.Value) ? detailFileId : null;
         image.Card600Status = image.Card600FileId.HasValue ? "ready" : cardStatus;
         image.Detail1000Status = image.Detail1000FileId.HasValue ? "ready" : detailStatus;
+        image.Card600Error = image.Card600FileId.HasValue ? null : cardError;
+        image.Detail1000Error = image.Detail1000FileId.HasValue ? null : detailError;
         image.UpdatedAtUtc = nowUtc;
         if (image.SortOrder == 0)
         {
@@ -304,7 +308,7 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
             product.ImageUrl = image.CardUrl;
         }
         db.AdminAuditLogs.Add(new DomainAuditLog { ActorSubject = actor, Action = "generate_derivatives", ResourceType = "product_images",
-            ResourceId = productId.ToString(), CreatedAtUtc = nowUtc, BeforeJson = Redact(before), AfterJson = Redact(new { image.Card600FileId, image.Detail1000FileId, image.Card600Status, image.Detail1000Status }) });
+            ResourceId = productId.ToString(), CreatedAtUtc = nowUtc, BeforeJson = Redact(before), AfterJson = Redact(new { image.Card600FileId, image.Detail1000FileId, image.Card600Status, image.Detail1000Status, image.Card600Error, image.Detail1000Error }) });
         await db.SaveChangesAsync(ct);
     }
     public async Task<bool> DeleteProduct(int id, CancellationToken ct)

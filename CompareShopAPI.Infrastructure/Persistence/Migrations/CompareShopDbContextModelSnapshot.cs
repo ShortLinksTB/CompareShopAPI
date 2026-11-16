@@ -814,6 +814,10 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("Card600FileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("Card600Error")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<string>("Card600Status")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -824,6 +828,10 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid?>("Detail1000FileId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Detail1000Error")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
 
                     b.Property<string>("Detail1000Status")
                         .IsRequired()

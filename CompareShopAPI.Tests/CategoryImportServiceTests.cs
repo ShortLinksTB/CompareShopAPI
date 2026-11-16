@@ -12,6 +12,8 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using System.Security.Claims;
+using System.Data.Common;
+using Microsoft.Data.SqlClient;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -286,5 +288,152 @@ public sealed class CategoryImportServiceTests
         var file = new FormFile(stream, 0, stream.Length, "file", "categories.json");
         context.Request.Form = new FormCollection(fields ?? new(), includeFile ? new FormFileCollection { file } : new FormFileCollection());
         return context;
+    }
+}
+
+[Collection(SqlServerTestCollection.Name)]
+public sealed class CategoryImportRollbackIntegrationTests(SqlServerTestFixture fixture)
+{
+    [Fact]
+    public async Task Commit_rolls_back_category_mutations_and_audit_when_sql_command_fails()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString)
+        {
+            InitialCatalog = $"CompareShopCategoryRollback_{Guid.NewGuid():N}"
+        }.ConnectionString;
+        var setupOptions = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var interceptor = new FailAfterCategoryMutationInterceptor();
+        var commitOptions = new DbContextOptionsBuilder<CompareShopDbContext>()
+            .UseSqlServer(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+        const string actor = "category-rollback-writer";
+
+        try
+        {
+            await using (var setup = new CompareShopDbContext(setupOptions))
+            {
+                await setup.Database.MigrateAsync();
+                var root = new Category { Slug = "root", Name = "Root before", IsActive = false, Level = 1, SortOrder = 5 };
+                var child = new Category { Slug = "child", Name = "Child before", IsActive = true, ParentCategory = root, Level = 2, SortOrder = 8 };
+                setup.Categories.AddRange(root, child);
+                var user = new User(actor, DateTime.UtcNow);
+                var role = new AdminRole { Name = "category-rollback-writer" };
+                var permissions = await setup.AdminPermissions.Where(permission =>
+                    permission.Key == AdminPermissions.CategoriesCreate ||
+                    permission.Key == AdminPermissions.CategoriesUpdate ||
+                    permission.Key == AdminPermissions.CategoriesDelete).ToArrayAsync();
+                setup.Users.Add(user);
+                setup.AdminRoles.Add(role);
+                await setup.SaveChangesAsync();
+                setup.AdminUserRoles.Add(new AdminUserRole { UserId = user.Id, RoleId = role.Id });
+                setup.AdminRolePermissions.AddRange(permissions.Select(permission => new AdminRolePermission
+                {
+                    RoleId = role.Id,
+                    PermissionId = permission.Id
+                }));
+                await setup.SaveChangesAsync();
+            }
+
+            CategorySnapshot[] before;
+            await using (var readBefore = new CompareShopDbContext(setupOptions))
+                before = await Snapshot(readBefore);
+
+            var content = Encoding.UTF8.GetBytes("""{"schemaVersion":1,"categories":[{"slug":"root","name":"Root after","parentSlug":null,"sortOrder":13},{"slug":"new","name":"New category","parentSlug":null}]}""");
+            await using (var commitDb = new CompareShopDbContext(commitOptions))
+            {
+                var service = new CategoryImportService(new EfAdminData(commitDb, TimeProvider.System));
+                var failure = await Assert.ThrowsAsync<DbUpdateException>(() =>
+                    service.Commit(actor, "rollback.json", "GHI ĐÈ", content, default));
+                Assert.IsType<InjectedCategoryMutationException>(failure.InnerException);
+            }
+
+            Assert.True(interceptor.InjectionFired);
+            await using var verify = new CompareShopDbContext(setupOptions);
+            Assert.Equal(before, await Snapshot(verify));
+            Assert.False(await verify.AdminAuditLogs.AnyAsync(entry => entry.Action == "replace_all"));
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(setupOptions);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    private static async Task<CategorySnapshot[]> Snapshot(CompareShopDbContext db) =>
+        await db.Categories.AsNoTracking().OrderBy(category => category.Id)
+            .Select(category => new CategorySnapshot(category.Id, category.Slug, category.Name, category.IsActive,
+                category.ParentCategoryId, category.Level, category.SortOrder))
+            .ToArrayAsync();
+
+    private sealed record CategorySnapshot(int Id, string Slug, string Name, bool IsActive, int? ParentId, byte Level, int SortOrder);
+
+    private sealed class InjectedCategoryMutationException() : Exception("Injected failure after a successful Categories mutation.");
+
+    private sealed class FailAfterCategoryMutationInterceptor : DbCommandInterceptor
+    {
+        private int fired;
+
+        public bool InjectionFired => Volatile.Read(ref fired) == 1;
+
+        public override int NonQueryExecuted(DbCommand command, CommandExecutedEventData eventData, int result)
+        {
+            ThrowAfterMutation(command);
+            return result;
+        }
+
+        public override ValueTask<int> NonQueryExecutedAsync(DbCommand command, CommandExecutedEventData eventData, int result, CancellationToken cancellationToken = default)
+        {
+            ThrowAfterMutation(command);
+            return ValueTask.FromResult(result);
+        }
+
+        public override DbDataReader ReaderExecuted(DbCommand command, CommandExecutedEventData eventData, DbDataReader result)
+        {
+            if (ShouldFailAfterMutation(command))
+            {
+                result.Dispose();
+                throw new InjectedCategoryMutationException();
+            }
+            return result;
+        }
+
+        public override ValueTask<DbDataReader> ReaderExecutedAsync(DbCommand command, CommandExecutedEventData eventData, DbDataReader result, CancellationToken cancellationToken = default)
+        {
+            if (ShouldFailAfterMutation(command))
+            {
+                result.Dispose();
+                throw new InjectedCategoryMutationException();
+            }
+            return ValueTask.FromResult(result);
+        }
+
+        public override object? ScalarExecuted(DbCommand command, CommandExecutedEventData eventData, object? result)
+        {
+            ThrowAfterMutation(command);
+            return result;
+        }
+
+        public override ValueTask<object?> ScalarExecutedAsync(DbCommand command, CommandExecutedEventData eventData, object? result, CancellationToken cancellationToken = default)
+        {
+            ThrowAfterMutation(command);
+            return ValueTask.FromResult(result);
+        }
+
+        private void ThrowAfterMutation(DbCommand command)
+        {
+            if (ShouldFailAfterMutation(command))
+                throw new InjectedCategoryMutationException();
+        }
+
+        private bool ShouldFailAfterMutation(DbCommand command)
+        {
+            var sql = command.CommandText;
+            return command.Transaction is not null && sql.Contains("[Categories]", StringComparison.OrdinalIgnoreCase) &&
+                   (sql.Contains("INSERT", StringComparison.OrdinalIgnoreCase) ||
+                    sql.Contains("UPDATE", StringComparison.OrdinalIgnoreCase) ||
+                    sql.Contains("DELETE", StringComparison.OrdinalIgnoreCase)) &&
+                   Interlocked.CompareExchange(ref fired, 1, 0) == 0;
+        }
     }
 }

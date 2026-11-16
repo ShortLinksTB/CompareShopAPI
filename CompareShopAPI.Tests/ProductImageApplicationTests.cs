@@ -156,6 +156,51 @@ public sealed class ProductImageApplicationTests
         });
     }
 
+    [Fact]
+    public async Task Retry_persists_and_returns_mixed_derivative_outcomes()
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        await using var db = new CompareShopDbContext(options);
+        const string subject = "product-image-operator";
+        var user = new User(subject, DateTime.UtcNow);
+        var role = new AdminRole { Name = "product-image-operator" };
+        var permission = new AdminPermission { Key = AdminPermissions.ProductsUpdate };
+        var category = new Category { Slug = "category", Name = "Category" };
+        var sourceId = Guid.NewGuid();
+        var product = new Product { Slug = "mixed-retry", Name = "Mixed Retry", Category = category };
+        db.Users.Add(user);
+        db.AdminRoles.Add(role);
+        db.AdminPermissions.Add(permission);
+        db.Products.Add(product);
+        db.Files.Add(new FileAsset(sourceId, "source.jpg", "image/jpeg", 20, "source", subject, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+        db.AdminUserRoles.Add(new AdminUserRole { UserId = user.Id, RoleId = role.Id });
+        db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = role.Id, PermissionId = permission.Id });
+        await db.SaveChangesAsync();
+        var derivatives = new MixedRetryDerivatives(db);
+        var service = new AdminService(new EfAdminData(db, TimeProvider.System), fileService: derivatives);
+        var initial = Assert.Single((await service.ReplaceProductImages(subject, product.Id,
+            [new ProductImageInput(null, 0, "Front", sourceId, null)], default))!);
+
+        var retried = await service.RetryProductImageDerivatives(subject, product.Id, initial.Id, default);
+        var persisted = await db.ProductImages.SingleAsync(image => image.Id == initial.Id);
+
+        Assert.Equal("ready", persisted.Card600Status);
+        Assert.Equal(derivatives.SuccessfulDerivativeId, persisted.Card600FileId);
+        Assert.Null(persisted.Card600Error);
+        Assert.Equal("failed", persisted.Detail1000Status);
+        Assert.Null(persisted.Detail1000FileId);
+        Assert.Equal("transient_failure", persisted.Detail1000Error);
+        Assert.Equal("ready", retried!.Derivative600Status);
+        Assert.Equal($"/files/{derivatives.SuccessfulDerivativeId:D}", retried.Url600);
+        Assert.Equal("failed", retried.Derivative1000Status);
+        Assert.Equal("transient_failure", retried.Derivative1000Error);
+        Assert.Equal($"/files/{sourceId:D}", retried.Url1000);
+    }
+
     [Theory]
     [InlineData("forbidden", "permission_denied")]
     [InlineData("missing", "source_not_found")]
@@ -290,6 +335,34 @@ public sealed class ProductImageApplicationTests
             }
             await db.SaveChangesAsync(ct);
             return outcomes;
+        }
+    }
+
+    private sealed class MixedRetryDerivatives(CompareShopDbContext db) : IFileDerivatives
+    {
+        private int calls;
+        public Guid SuccessfulDerivativeId { get; } = Guid.NewGuid();
+
+        public async Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid sourceId, DerivativeRequest request, CancellationToken ct)
+        {
+            if (++calls == 1)
+                return request.Variants.Select((_, index) => new DerivativeVariantOutcome(index, null, null, "initial_failure", [])).ToArray();
+
+            var cardVariant = request.Variants[0];
+            var now = DateTime.UtcNow;
+            var asset = new FileAsset(SuccessfulDerivativeId, "product-600x600.webp", "image/webp", 50,
+                $"derivatives/{SuccessfulDerivativeId:N}", subject!, now, 600, 600, sourceId, "home-600x600");
+            db.Files.Add(asset);
+            await db.SaveChangesAsync(ct);
+            var card = new FileMetadata(SuccessfulDerivativeId, asset.OriginalFileName, asset.ContentType, asset.SizeBytes,
+                600, 600, subject!, now, new DerivedFromMetadata(sourceId, "source.jpg"), "home-600x600",
+                new DerivativeSpec(1, cardVariant.Width, cardVariant.Height, cardVariant.Fit, cardVariant.FocalX,
+                    cardVariant.FocalY, cardVariant.Background, cardVariant.Format, cardVariant.Quality));
+            return
+            [
+                new DerivativeVariantOutcome(0, card, $"/files/{SuccessfulDerivativeId:D}", null, []),
+                new DerivativeVariantOutcome(1, null, null, "transient_failure", [])
+            ];
         }
     }
 }

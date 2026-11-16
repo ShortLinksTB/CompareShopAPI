@@ -108,6 +108,49 @@ public sealed class ProductImageApplicationTests
     }
 
     [Fact]
+    public async Task Retry_persists_and_returns_source_pixel_limit_failure_for_each_size()
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        await using var db = new CompareShopDbContext(options);
+        const string subject = "product-image-operator";
+        var user = new User(subject, DateTime.UtcNow);
+        var role = new AdminRole { Name = "product-image-operator" };
+        var permission = new AdminPermission { Key = AdminPermissions.ProductsUpdate };
+        var category = new Category { Slug = "category", Name = "Category" };
+        var sourceId = Guid.NewGuid();
+        var product = new Product { Slug = "oversized-source-retry", Name = "Oversized Source Retry", Category = category };
+        db.Users.Add(user);
+        db.AdminRoles.Add(role);
+        db.AdminPermissions.Add(permission);
+        db.Products.Add(product);
+        db.Files.Add(new FileAsset(sourceId, "qc-sl2370-25mp.png", "image/png", 20, "source", subject, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+        db.AdminUserRoles.Add(new AdminUserRole { UserId = user.Id, RoleId = role.Id });
+        db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = role.Id, PermissionId = permission.Id });
+        await db.SaveChangesAsync();
+        var derivatives = new FailedDerivatives("source_pixel_limit_exceeded");
+        var service = new AdminService(new EfAdminData(db, TimeProvider.System), fileService: derivatives);
+        var image = Assert.Single((await service.ReplaceProductImages(subject, product.Id,
+            [new ProductImageInput(null, 0, "Front", sourceId, null)], default))!);
+
+        var retried = await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
+        var persisted = await db.ProductImages.SingleAsync(x => x.Id == image.Id);
+
+        Assert.Equal("failed", retried!.Derivative600Status);
+        Assert.Equal("source_pixel_limit_exceeded", retried.Derivative600Error);
+        Assert.Equal("failed", retried.Derivative1000Status);
+        Assert.Equal("source_pixel_limit_exceeded", retried.Derivative1000Error);
+        Assert.Equal("failed", persisted.Card600Status);
+        Assert.Equal("source_pixel_limit_exceeded", persisted.Card600Error);
+        Assert.Equal("failed", persisted.Detail1000Status);
+        Assert.Equal("source_pixel_limit_exceeded", persisted.Detail1000Error);
+        Assert.Equal(2, derivatives.CallCount);
+    }
+
+    [Fact]
     public async Task Automatic_derivatives_and_manual_retry_use_supported_quality_and_retry_succeeds()
     {
         var options = new DbContextOptionsBuilder<CompareShopDbContext>()
@@ -284,13 +327,17 @@ public sealed class ProductImageApplicationTests
 
     private sealed class FailedDerivatives : IFileDerivatives
     {
+        private readonly string error;
+
+        public FailedDerivatives(string error = "storage_failed") => this.error = error;
+
         public int CallCount { get; private set; }
 
         public Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct)
         {
             CallCount++;
             return Task.FromResult<IReadOnlyList<DerivativeVariantOutcome>>(request.Variants.Select((_, index) =>
-                new DerivativeVariantOutcome(index, null, null, "storage_failed", [])).ToArray());
+                new DerivativeVariantOutcome(index, null, null, error, [])).ToArray());
         }
     }
 

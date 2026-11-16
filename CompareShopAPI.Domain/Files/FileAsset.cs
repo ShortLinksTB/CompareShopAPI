@@ -1,5 +1,7 @@
 namespace CompareShopAPI.Domain.Files;
 
+public enum FileLifecycleState { Active = 0, Deleting = 1, Deleted = 2 }
+
 public sealed class FileAsset
 {
     private FileAsset() { }
@@ -42,9 +44,18 @@ public sealed class FileAsset
     public DateTime UploadedAtUtc { get; private set; }
     public string ObjectKey { get; private set; } = string.Empty;
     public Guid? DerivedFromFileId { get; private set; }
+    public FileLifecycleState LifecycleState { get; private set; } = FileLifecycleState.Active;
     public string? DerivedPreset { get; private set; }
     public string? DerivativeSpecJson { get; private set; }
     public FileAsset? DerivedFromFile { get; private set; }
+
+    public void BeginDeletion()
+    {
+        if (LifecycleState == FileLifecycleState.Deleted) return;
+        LifecycleState = FileLifecycleState.Deleting;
+    }
+
+    public void CompleteDeletion() => LifecycleState = FileLifecycleState.Deleted;
 }
 
 public static class FileUploadPolicy

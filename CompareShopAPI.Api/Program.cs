@@ -92,6 +92,7 @@ builder.Services.AddScoped<IFileObjectStorage, MinioFileObjectStorage>();
 builder.Services.AddSingleton<IImageDerivativeProcessor, SkiaImageDerivativeProcessor>();
 builder.Services.AddScoped<IFilePermissionGate, AdminFilePermissionGate>();
 builder.Services.AddScoped<FileService>();
+builder.Services.AddHostedService<FileDeletionReconciler>();
 builder.Services.AddScoped<IFileDerivatives, DeferredFileDerivatives>();
 builder.Services.AddSingleton<MigrationState>();
 builder.Services.AddHealthChecks().AddCheck<DatabaseHealth>("database", tags: ["ready"]);

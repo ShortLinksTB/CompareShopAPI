@@ -427,7 +427,9 @@ public sealed class FileDerivativeTests
         }
         public Task AuditDerivative(string actor, Guid sourceId, int variantIndex, string parameters, string? resultFileId, string? errorCode, CancellationToken ct) =>
             FailAudit ? Task.FromException(new InvalidOperationException("audit unavailable")) : Task.CompletedTask;
-        public Task<bool> Delete(Guid id, CancellationToken ct) => Task.FromResult(false);
+        public Task<FileDeletePreparation> BeginDelete(Guid id, CancellationToken ct) => Task.FromResult(new FileDeletePreparation("not_found", null, []));
+        public Task<bool> FinalizeDelete(Guid id, CancellationToken ct) => Task.FromResult(false);
+        public Task<IReadOnlyList<(Guid Id, string ObjectKey)>> DeletingFiles(CancellationToken ct) => Task.FromResult<IReadOnlyList<(Guid, string)>>([]);
     }
     private sealed class Storage(byte[] source) : IFileObjectStorage
     {

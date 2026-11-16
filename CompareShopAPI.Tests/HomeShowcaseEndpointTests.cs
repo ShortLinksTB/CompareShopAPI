@@ -53,6 +53,15 @@ public sealed class HomeShowcaseEndpointTests
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
         Assert.Equal(1, store.DraftWrites);
 
+        var nullSlot = new HomeShowcaseDraftInput(
+            [null!, .. valid.Featured!.Skip(1)],
+            valid.InterestedComputers);
+        var nullSlotResponse = await client.PutAsJsonAsync("/admin/home-showcase/draft", nullSlot);
+        Assert.Equal(HttpStatusCode.BadRequest, nullSlotResponse.StatusCode);
+        var validation = await nullSlotResponse.Content.ReadAsStringAsync();
+        Assert.Contains("featured[1].slotIndex", validation);
+        Assert.Equal(1, store.DraftWrites);
+
         var tokenResponse = await client.PostAsync("/admin/home-showcase/preview-token", content: null);
         Assert.Equal((HttpStatusCode)429, tokenResponse.StatusCode);
 

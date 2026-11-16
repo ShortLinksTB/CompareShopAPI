@@ -206,8 +206,11 @@ public sealed class HomeShowcaseService(IHomeShowcaseStore store, IHomeShowcaseA
         if (slots is null || slots.Count != HomeShowcaseRules.SlotCount)
             throw new ArgumentException($"{field} must contain exactly {HomeShowcaseRules.SlotCount} slot records.", field);
         var byIndex = new HomeShowcaseDraftSlotInput?[HomeShowcaseRules.SlotCount];
-        foreach (var slot in slots)
+        for (var position = 0; position < slots.Count; position++)
         {
+            var slot = slots[position];
+            if (slot is null)
+                throw new ArgumentException($"Slot record at position {position + 1} cannot be null.", $"{field}[{position + 1}].slotIndex");
             if (slot.SlotIndex is < 1 or > HomeShowcaseRules.SlotCount)
                 throw new ArgumentException($"Slot index {slot.SlotIndex} must be between 1 and {HomeShowcaseRules.SlotCount}.", $"{field}[{slot.SlotIndex}].slotIndex");
             if (byIndex[slot.SlotIndex - 1] is not null)

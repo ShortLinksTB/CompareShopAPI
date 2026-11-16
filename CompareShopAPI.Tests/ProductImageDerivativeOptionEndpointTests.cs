@@ -33,7 +33,11 @@ public sealed class ProductImageDerivativeOptionEndpointTests
             services.AddDbContext<CompareShopDbContext>(options => options.UseInMemoryDatabase(database)
                 .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning)));
             services.RemoveAll<IFileDerivatives>();
-            services.AddSingleton<IFileDerivatives>(derivatives);
+            services.AddSingleton<IFileDerivatives>(provider =>
+            {
+                derivatives.Configure(provider.GetRequiredService<DbContextOptions<CompareShopDbContext>>());
+                return derivatives;
+            });
         });
         int omittedProductId;
         int enabledProductId;
@@ -85,8 +89,18 @@ public sealed class ProductImageDerivativeOptionEndpointTests
         Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
         Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
         Assert.Equal(2, derivatives.CallCount);
+        Assert.Equal(2, derivatives.Requests.Count);
+        Assert.All(derivatives.Requests, variants => Assert.All(variants, variant => Assert.Equal(80, variant.Quality)));
         await using var verifyScope = app.Services.CreateAsyncScope();
         var verify = verifyScope.ServiceProvider.GetRequiredService<CompareShopDbContext>();
+        foreach (var productId in new[] { omittedProductId, enabledProductId })
+        {
+            var generated = Assert.Single(await verify.ProductImages.Where(image => image.ProductId == productId).ToListAsync());
+            Assert.Equal("ready", generated.Card600Status);
+            Assert.Equal("ready", generated.Detail1000Status);
+            Assert.NotNull(generated.Card600FileId);
+            Assert.NotNull(generated.Detail1000FileId);
+        }
         var disabledImage = Assert.Single(await verify.ProductImages.Where(image => image.ProductId == disabledProductId).ToListAsync());
         Assert.Equal(disabledFileId, disabledImage.FileId);
         Assert.Equal("Disabled", disabledImage.AltText);
@@ -95,12 +109,28 @@ public sealed class ProductImageDerivativeOptionEndpointTests
 
     private sealed class CountingDerivatives : IFileDerivatives
     {
+        private DbContextOptions<CompareShopDbContext> options = null!;
         public int CallCount { get; private set; }
+        public List<IReadOnlyList<DerivativeVariant>> Requests { get; } = [];
+        public void Configure(DbContextOptions<CompareShopDbContext> dbOptions) => options = dbOptions;
 
-        public Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct)
+        public async Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct)
         {
             CallCount++;
-            return Task.FromResult<IReadOnlyList<DerivativeVariantOutcome>>([]);
+            Requests.Add(request.Variants);
+            await using var db = new CompareShopDbContext(options);
+            var outcomes = request.Variants.Select((variant, index) =>
+            {
+                var fileId = Guid.NewGuid();
+                var preset = variant.Width == 600 ? "home-600x600" : "product-detail-1000x1000";
+                db.Files.Add(new FileAsset(fileId, variant.Name!, "image/webp", 100, fileId.ToString("N"), subject!, DateTime.UtcNow,
+                    variant.Width, variant.Height, id, preset));
+                return new DerivativeVariantOutcome(index,
+                    new FileMetadata(fileId, variant.Name!, "image/webp", 100, variant.Width, variant.Height, subject!, DateTime.UtcNow,
+                        new DerivedFromMetadata(id, "source.jpg"), preset), $"/files/{fileId:D}", null, []);
+            }).ToArray();
+            await db.SaveChangesAsync(ct);
+            return outcomes;
         }
     }
 }

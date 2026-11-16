@@ -81,7 +81,8 @@ public sealed class ProductImageApplicationTests
         db.AdminUserRoles.Add(new AdminUserRole { UserId = user.Id, RoleId = role.Id });
         db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = role.Id, PermissionId = permission.Id });
         await db.SaveChangesAsync();
-        var service = new AdminService(new EfAdminData(db, TimeProvider.System), fileService: new FailedDerivatives());
+        var derivatives = new FailedDerivatives();
+        var service = new AdminService(new EfAdminData(db, TimeProvider.System), fileService: derivatives);
 
         var result = await service.ReplaceProductImages(subject, product.Id,
             [new ProductImageInput(null, 0, "Front", sourceId, null)], default);
@@ -94,12 +95,62 @@ public sealed class ProductImageApplicationTests
         Assert.Equal($"/files/{sourceId:D}", (await db.Products.SingleAsync(x => x.Id == product.Id)).ImageUrl);
         Assert.Single(await db.ProductImages.Where(x => x.ProductId == product.Id).ToListAsync());
         Assert.Contains(await db.AdminAuditLogs.ToListAsync(), entry => entry.ResourceType == "product_images" && entry.Action == "generate_derivatives");
+        Assert.Equal(1, derivatives.CallCount);
+
+        await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
+        Assert.Equal(2, derivatives.CallCount);
+    }
+
+    [Fact]
+    public async Task Replace_images_with_derivatives_disabled_persists_file_and_external_images_without_generating()
+    {
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        await using var db = new CompareShopDbContext(options);
+        const string subject = "product-image-operator";
+        var user = new User(subject, DateTime.UtcNow);
+        var role = new AdminRole { Name = "product-image-operator" };
+        var permission = new AdminPermission { Key = AdminPermissions.ProductsUpdate };
+        var category = new Category { Slug = "category", Name = "Category" };
+        var sourceId = Guid.NewGuid();
+        var product = new Product { Slug = "phone", Name = "Phone", Category = category };
+        db.Users.Add(user);
+        db.AdminRoles.Add(role);
+        db.AdminPermissions.Add(permission);
+        db.Products.Add(product);
+        db.Files.Add(new FileAsset(sourceId, "source.jpg", "image/jpeg", 20, "source", subject, DateTime.UtcNow));
+        await db.SaveChangesAsync();
+        db.AdminUserRoles.Add(new AdminUserRole { UserId = user.Id, RoleId = role.Id });
+        db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = role.Id, PermissionId = permission.Id });
+        await db.SaveChangesAsync();
+        var derivatives = new FailedDerivatives();
+        var service = new AdminService(new EfAdminData(db, TimeProvider.System), fileService: derivatives);
+
+        var result = await service.ReplaceProductImages(subject, product.Id,
+            [
+                new ProductImageInput(null, 0, "Front", sourceId, null),
+                new ProductImageInput(null, 1, "External", null, "https://images.example.test/back.jpg")
+            ], default, createDerivatives: false);
+
+        Assert.Equal(0, derivatives.CallCount);
+        Assert.Collection(result!,
+            image => { Assert.Equal("Front", image.AltText); Assert.Equal(0, image.SortOrder); Assert.Equal("pending", image.Derivative600Status); },
+            image => { Assert.Equal("External", image.AltText); Assert.Equal(1, image.SortOrder); Assert.Null(image.FileId); });
+        Assert.Equal(2, await db.ProductImages.CountAsync(image => image.ProductId == product.Id));
+        Assert.Equal($"/files/{sourceId:D}", (await db.Products.SingleAsync(x => x.Id == product.Id)).ImageUrl);
     }
 
     private sealed class FailedDerivatives : IFileDerivatives
     {
-        public Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<DerivativeVariantOutcome>>(request.Variants.Select((_, index) =>
+        public int CallCount { get; private set; }
+
+        public Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            return Task.FromResult<IReadOnlyList<DerivativeVariantOutcome>>(request.Variants.Select((_, index) =>
                 new DerivativeVariantOutcome(index, null, null, "storage_failed", [])).ToArray());
+        }
     }
 }

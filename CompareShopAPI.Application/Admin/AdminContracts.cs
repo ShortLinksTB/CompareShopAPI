@@ -226,7 +226,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         await Authorize(subject, AdminPermissions.ProductsRead, ct);
         return await data.ProductImages(id, ct);
     }
-    public async Task<IReadOnlyList<AdminProductImage>?> ReplaceProductImages(string? subject, int id, IReadOnlyList<ProductImageInput> input, CancellationToken ct)
+    public async Task<IReadOnlyList<AdminProductImage>?> ReplaceProductImages(string? subject, int id, IReadOnlyList<ProductImageInput> input, CancellationToken ct, bool createDerivatives = true)
     {
         var actor = await Authorize(subject, AdminPermissions.ProductsUpdate, ct);
         ValidateProductImages(input);
@@ -243,7 +243,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         }, ct); }
         catch (ArgumentException exception) { throw new ProductImageValidationException(exception.Message); }
         if (replaced is null) return null;
-        await CreateMissingProductImageDerivatives(actor, id, replaced, retryFailed: false, ct);
+        if (createDerivatives) await CreateMissingProductImageDerivatives(actor, id, replaced, retryFailed: false, ct);
         return await data.ProductImages(id, ct);
     }
 

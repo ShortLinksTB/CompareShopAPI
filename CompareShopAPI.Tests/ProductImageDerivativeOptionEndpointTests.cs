@@ -85,6 +85,8 @@ public sealed class ProductImageDerivativeOptionEndpointTests
         Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
         Assert.Equal(HttpStatusCode.OK, disabled.StatusCode);
         Assert.Equal(2, derivatives.CallCount);
+        Assert.Equal(2, derivatives.Requests.Count);
+        Assert.All(derivatives.Requests, variants => Assert.All(variants, variant => Assert.Equal(80, variant.Quality)));
         await using var verifyScope = app.Services.CreateAsyncScope();
         var verify = verifyScope.ServiceProvider.GetRequiredService<CompareShopDbContext>();
         var disabledImage = Assert.Single(await verify.ProductImages.Where(image => image.ProductId == disabledProductId).ToListAsync());
@@ -96,10 +98,12 @@ public sealed class ProductImageDerivativeOptionEndpointTests
     private sealed class CountingDerivatives : IFileDerivatives
     {
         public int CallCount { get; private set; }
+        public List<IReadOnlyList<DerivativeVariant>> Requests { get; } = [];
 
         public Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct)
         {
             CallCount++;
+            Requests.Add(request.Variants);
             return Task.FromResult<IReadOnlyList<DerivativeVariantOutcome>>([]);
         }
     }

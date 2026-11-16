@@ -25,7 +25,7 @@ public sealed class HomeShowcaseTests
         var store = new FakeStore { CategoryAvailable = false };
         store.ProductsById[7] = Product(7, "computers");
         var service = Service(store);
-        var input = new HomeShowcaseDraftInput(new int?[15], [7, .. new int?[14]]);
+        var input = new HomeShowcaseDraftInput(Records(new int?[15]), Records([7, .. new int?[14]]));
 
         await Assert.ThrowsAsync<ArgumentException>(() => service.ReplaceDraft("admin", input, default));
         Assert.Equal(0, store.ReplaceCalls);
@@ -37,7 +37,7 @@ public sealed class HomeShowcaseTests
         var store = new FakeStore();
         store.ProductsById[7] = Product(7, "computers");
         var service = Service(store);
-        var input = new HomeShowcaseDraftInput([7, .. new int?[14]], [7, .. new int?[14]]);
+        var input = new HomeShowcaseDraftInput(Records([7, .. new int?[14]]), Records([7, .. new int?[14]]));
 
         var result = await service.ReplaceDraft("admin", input, default);
 
@@ -67,6 +67,7 @@ public sealed class HomeShowcaseTests
 
     private static HomeShowcaseProductData Product(int id, string slug) => new(id, slug, slug, null, null,
         new(1, slug, slug, null, 1), new(null, null, 0), true);
+    private static HomeShowcaseDraftSlotInput[] Records(int?[] ids) => ids.Select((id, index) => new HomeShowcaseDraftSlotInput(index + 1, id)).ToArray();
     private static HomeShowcaseService Service(FakeStore store, FakePermissions? permissions = null) =>
         new(store, new FakeAudit(), permissions ?? new FakePermissions(AdminPermissions.HomeShowcaseRead, AdminPermissions.HomeShowcaseUpdate, AdminPermissions.HomeShowcasePublish), new TestClock(Now));
 

@@ -19,7 +19,13 @@ public static class AdminEndpoints
         admin.MapGet("/products/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => await s.Product(Subject(c), id, ct) is { } x ? Results.Ok(x) : Results.NotFound()));
         admin.MapGet("/products/{id:int}/images", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => await s.ProductImages(Subject(c), id, ct) is { } x ? Results.Ok(new { items = x }) : Results.NotFound()));
         admin.MapPut("/products/{id:int}/images", (HttpContext c, int id, ProductImageInput[] input, bool? createDerivatives, AdminService s, CancellationToken ct) => Run(async () => await s.ReplaceProductImages(Subject(c), id, input, ct, createDerivatives ?? true) is { } x ? Results.Ok(new { items = x }) : Results.NotFound()));
-        admin.MapPost("/products/{id:int}/images/{imageId:guid}/derivatives", (HttpContext c, int id, Guid imageId, AdminService s, CancellationToken ct) => Run(async () => await s.RetryProductImageDerivatives(Subject(c), id, imageId, ct) is { } x ? Results.Ok(x) : Results.NotFound()));
+        admin.MapPost("/products/{id:int}/images/{imageId:guid}/derivatives", (HttpContext c, int id, Guid imageId, AdminService s, CancellationToken ct) => Run(async () =>
+        {
+            var image = await s.RetryProductImageDerivatives(Subject(c), id, imageId, ct);
+            if (image is null) return Results.NotFound();
+            var failed = image.Derivative600Status == "failed" || image.Derivative1000Status == "failed";
+            return Results.Json(image, statusCode: failed ? StatusCodes.Status422UnprocessableEntity : StatusCodes.Status200OK);
+        }));
         admin.MapPost("/products", (HttpContext c, ProductInput input, AdminService s, CancellationToken ct) => Run(() => s.CreateProduct(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapPut("/products/{id:int}", (HttpContext c, int id, ProductInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateProduct(Subject(c), id, input, ct)));
         admin.MapDelete("/products/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => { await s.DeleteProduct(Subject(c), id, ct); return Results.NoContent(); }));

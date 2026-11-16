@@ -30,7 +30,11 @@ public sealed record AdminProduct(int Id, string Slug, string Name, string? Bran
 }
 public sealed record ProductImageInput(Guid? Id, int SortOrder, string? AltText, Guid? FileId, string? ExternalUrl);
 public sealed record AdminProductImage(Guid Id, int SortOrder, string? AltText, Guid? FileId, string SourceUrl, string Url600, string Url1000,
-    bool SourceAvailable, string? Derivative600Status, string? Derivative1000Status);
+    bool SourceAvailable, string? Derivative600Status, string? Derivative1000Status)
+{
+    public string? Derivative600Error { get; init; }
+    public string? Derivative1000Error { get; init; }
+}
 public sealed record ProductImageFileCheck(Guid Id, bool Exists, bool IsImage);
 public interface IProductImageFileCatalog
 {
@@ -258,19 +262,28 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         if (sourceCheck.Any(x => !x.Exists || !x.IsImage)) throw new ProductImageValidationException("The source file is missing or is not an image.");
         var images = await data.ProductImages(productId, ct) ?? throw new KeyNotFoundException();
         var image = images.Single(x => x.Id == imageId);
-        await CreateMissingProductImageDerivatives(actor, productId, [image], retryFailed: true, ct);
-        return (await data.ProductImages(productId, ct))?.SingleOrDefault(x => x.Id == imageId);
+        var errors = await CreateMissingProductImageDerivatives(actor, productId, [image], retryFailed: true, ct);
+        var refreshed = (await data.ProductImages(productId, ct))?.SingleOrDefault(x => x.Id == imageId);
+        return refreshed is null ? null : refreshed with
+        {
+            Derivative600Error = errors.CardError,
+            Derivative1000Error = errors.DetailError
+        };
     }
 
-    private async Task CreateMissingProductImageDerivatives(string actor, int id, IReadOnlyList<AdminProductImage> images, bool retryFailed, CancellationToken ct)
+    private async Task<(string? CardError, string? DetailError)> CreateMissingProductImageDerivatives(string actor, int id, IReadOnlyList<AdminProductImage> images, bool retryFailed, CancellationToken ct)
     {
-        if (fileService is null) return;
+        if (fileService is null) return (null, null);
+        string? cardError = null;
+        string? detailError = null;
         foreach (var image in images.Where(x => x.FileId.HasValue))
         {
             if (image.Derivative600Status == "ready" && image.Derivative1000Status == "ready") continue;
             if (!retryFailed && image.Derivative600Status != "pending" && image.Derivative1000Status != "pending") continue;
             var cardId = (Guid?)null;
             var detailId = (Guid?)null;
+            string? imageCardError = null;
+            string? imageDetailError = null;
             var cardStatus = image.Derivative600Status == "ready" ? "ready" : "unavailable";
             var detailStatus = image.Derivative1000Status == "ready" ? "ready" : "unavailable";
             try
@@ -285,15 +298,39 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
                 var detail = detailIndex >= 0 ? outcomes.ElementAtOrDefault(detailIndex)?.File : null;
                 cardId = card?.DerivedFrom?.Id == image.FileId && card.Width == 600 && card.Height == 600 && card.DerivedPreset == "home-600x600" ? card.Id : null;
                 detailId = detail?.DerivedFrom?.Id == image.FileId && detail.Width == 1000 && detail.Height == 1000 && detail.DerivedPreset == "product-detail-1000x1000" ? detail.Id : null;
-                if (cardIndex >= 0) cardStatus = cardId.HasValue ? "ready" : "failed";
-                if (detailIndex >= 0) detailStatus = detailId.HasValue ? "ready" : "failed";
+                if (cardIndex >= 0)
+                {
+                    cardStatus = cardId.HasValue ? "ready" : "failed";
+                    imageCardError = cardId.HasValue ? null : outcomes.ElementAtOrDefault(cardIndex)?.Error ?? "invalid_derivative_result";
+                }
+                if (detailIndex >= 0)
+                {
+                    detailStatus = detailId.HasValue ? "ready" : "failed";
+                    imageDetailError = detailId.HasValue ? null : outcomes.ElementAtOrDefault(detailIndex)?.Error ?? "invalid_derivative_result";
+                }
             }
-            catch (AdminForbiddenException) { }
-            catch (KeyNotFoundException) { cardStatus = detailStatus = "failed"; }
+            catch (AdminForbiddenException)
+            {
+                if (cardStatus != "ready") { cardStatus = "failed"; imageCardError = "derivative_permission_denied"; }
+                if (detailStatus != "ready") { detailStatus = "failed"; imageDetailError = "derivative_permission_denied"; }
+            }
+            catch (KeyNotFoundException)
+            {
+                if (cardStatus != "ready") { cardStatus = "failed"; imageCardError = "source_file_not_found"; }
+                if (detailStatus != "ready") { detailStatus = "failed"; imageDetailError = "source_file_not_found"; }
+            }
             catch (Exception) when (!ct.IsCancellationRequested)
-            { cardStatus = detailStatus = "failed"; }
+            {
+                if (cardStatus != "ready") { cardStatus = "failed"; imageCardError = "derivative_processing_failed"; }
+                if (detailStatus != "ready") { detailStatus = "failed"; imageDetailError = "derivative_processing_failed"; }
+            }
+            if (cardStatus == "failed") imageCardError ??= "derivative_processing_failed";
+            if (detailStatus == "failed") imageDetailError ??= "derivative_processing_failed";
             await data.SaveProductImageDerivatives(actor, id, image.FileId!.Value, cardId, cardStatus, detailId, detailStatus, Clock.GetUtcNow().UtcDateTime, ct);
+            cardError = imageCardError;
+            detailError = imageDetailError;
         }
+        return (cardError, detailError);
     }
     public Task<AdminProduct> CreateProduct(string? s, ProductInput i, CancellationToken ct) => Write<AdminProduct>(s, AdminPermissions.ProductsCreate, "create", "product", null, async t => (await data.SaveProduct(null, Validate(i), t), null, i), ct);
     public Task<AdminProduct> UpdateProduct(string? s, int id, ProductInput i, CancellationToken ct) => Write(s, AdminPermissions.ProductsUpdate, "update", "product", id.ToString(), async t => { var before = await data.Product(id, t); return before is null ? (null, null, null) : (await data.SaveProduct(id, Validate(i), t), before, i); }, ct);

@@ -20,6 +20,65 @@ namespace CompareShopAPI.Tests;
 public sealed class ProductImageDerivativeOptionEndpointTests
 {
     [Fact]
+    public async Task Failed_retry_returns_422_with_each_derivatives_failure_code()
+    {
+        const string subject = "product-image-retry-admin";
+        var database = Guid.NewGuid().ToString("N");
+        await using var app = new ApiFactory(signing: true, configureServices: services =>
+        {
+            services.RemoveAll<DbContextOptions<CompareShopDbContext>>();
+            services.RemoveAll<IDbContextOptionsConfiguration<CompareShopDbContext>>();
+            services.RemoveAll<CompareShopDbContext>();
+            services.AddDbContext<CompareShopDbContext>(options => options.UseInMemoryDatabase(database)
+                .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning)));
+            services.RemoveAll<IFileDerivatives>();
+            services.AddSingleton<IFileDerivatives, FailingDerivatives>();
+        });
+        int productId;
+        Guid sourceId;
+        await using (var scope = app.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CompareShopDbContext>();
+            var subjectUser = new User(subject, DateTime.UtcNow);
+            var role = new AdminRole { Name = "product-image-retry-admin" };
+            var permission = new AdminPermission { Key = AdminPermissions.ProductsUpdate };
+            var category = new Category { Slug = "retry-images", Name = "Retry images" };
+            var product = new Product { Slug = "retry-product", Name = "Retry product", Category = category };
+            var source = new FileAsset(Guid.NewGuid(), "large-source.jpg", "image/jpeg", 20, "source", subject, DateTime.UtcNow);
+            db.Users.Add(subjectUser);
+            db.AdminRoles.Add(role);
+            db.AdminPermissions.Add(permission);
+            db.Categories.Add(category);
+            db.Products.Add(product);
+            db.Files.Add(source);
+            await db.SaveChangesAsync();
+            db.AdminUserRoles.Add(new AdminUserRole { UserId = subjectUser.Id, RoleId = role.Id });
+            db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = role.Id, PermissionId = permission.Id });
+            await db.SaveChangesAsync();
+            productId = product.Id;
+            sourceId = source.Id;
+        }
+
+        using var client = app.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: subject));
+        var added = await client.PutAsJsonAsync($"/admin/products/{productId}/images?createDerivatives=false",
+            new[] { new ProductImageInput(null, 0, "Front", sourceId, null) });
+        Assert.Equal(HttpStatusCode.OK, added.StatusCode);
+        var images = await added.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var imageId = images.GetProperty("items")[0].GetProperty("id").GetGuid();
+
+        var retry = await client.PostAsync($"/admin/products/{productId}/images/{imageId}/derivatives", null);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, retry.StatusCode);
+        var result = await retry.Content.ReadFromJsonAsync<AdminProductImage>();
+        Assert.Equal("failed", result!.Derivative600Status);
+        Assert.Equal("failed", result.Derivative1000Status);
+        Assert.Equal("source_pixel_limit_exceeded", result.Derivative600Error);
+        Assert.Equal("source_pixel_limit_exceeded", result.Derivative1000Error);
+    }
+
+    [Fact]
     public async Task Put_binds_camel_case_option_and_defaults_to_generating_derivatives()
     {
         const string subject = "product-image-option-admin";
@@ -132,5 +191,12 @@ public sealed class ProductImageDerivativeOptionEndpointTests
             await db.SaveChangesAsync(ct);
             return outcomes;
         }
+    }
+
+    private sealed class FailingDerivatives : IFileDerivatives
+    {
+        public Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<DerivativeVariantOutcome>>(request.Variants.Select((_, index) =>
+                new DerivativeVariantOutcome(index, null, null, "source_pixel_limit_exceeded", [])).ToArray());
     }
 }

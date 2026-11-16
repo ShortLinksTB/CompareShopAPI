@@ -97,8 +97,23 @@ public sealed class ProductImageApplicationTests
         Assert.Contains(await db.AdminAuditLogs.ToListAsync(), entry => entry.ResourceType == "product_images" && entry.Action == "generate_derivatives");
         Assert.Equal(1, derivatives.CallCount);
 
-        await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
+        var retry = await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
         Assert.Equal(2, derivatives.CallCount);
+        Assert.Equal("storage_failed", retry!.Derivative600Error);
+        Assert.Equal("storage_failed", retry.Derivative1000Error);
+
+        derivatives.ExceptionToThrow = new AdminForbiddenException();
+        var permissionFailure = await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
+        Assert.Equal("derivative_permission_denied", permissionFailure!.Derivative600Error);
+        Assert.Equal("derivative_permission_denied", permissionFailure.Derivative1000Error);
+        derivatives.ExceptionToThrow = new KeyNotFoundException();
+        var missingSource = await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
+        Assert.Equal("source_file_not_found", missingSource!.Derivative600Error);
+        Assert.Equal("source_file_not_found", missingSource.Derivative1000Error);
+        derivatives.ExceptionToThrow = new InvalidOperationException("worker failed");
+        var processingFailure = await service.RetryProductImageDerivatives(subject, product.Id, image.Id, default);
+        Assert.Equal("derivative_processing_failed", processingFailure!.Derivative600Error);
+        Assert.Equal("derivative_processing_failed", processingFailure.Derivative1000Error);
     }
 
     [Fact]
@@ -137,6 +152,8 @@ public sealed class ProductImageApplicationTests
 
         Assert.Equal("ready", retried!.Derivative600Status);
         Assert.Equal("ready", retried.Derivative1000Status);
+        Assert.Null(retried.Derivative600Error);
+        Assert.Null(retried.Derivative1000Error);
         Assert.NotEqual($"/files/{sourceId:D}", retried.Url600);
         Assert.NotEqual($"/files/{sourceId:D}", retried.Url1000);
         Assert.Equal(2, derivatives.Requests.Count);
@@ -192,10 +209,12 @@ public sealed class ProductImageApplicationTests
     private sealed class FailedDerivatives : IFileDerivatives
     {
         public int CallCount { get; private set; }
+        public Exception? ExceptionToThrow { get; set; }
 
         public Task<IReadOnlyList<DerivativeVariantOutcome>> CreateDerivatives(string? subject, Guid id, DerivativeRequest request, CancellationToken ct)
         {
             CallCount++;
+            if (ExceptionToThrow is { } exception) return Task.FromException<IReadOnlyList<DerivativeVariantOutcome>>(exception);
             return Task.FromResult<IReadOnlyList<DerivativeVariantOutcome>>(request.Variants.Select((_, index) =>
                 new DerivativeVariantOutcome(index, null, null, "storage_failed", [])).ToArray());
         }

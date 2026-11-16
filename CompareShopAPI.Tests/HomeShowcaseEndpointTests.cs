@@ -32,9 +32,26 @@ public sealed class HomeShowcaseEndpointTests
         Assert.Equal(HttpStatusCode.OK, admin.StatusCode);
         Assert.Equal("no-store", admin.Headers.CacheControl?.ToString());
 
-        var duplicate = new HomeShowcaseDraftInput([1, 1, .. new int?[13]], new int?[15]);
+        var duplicate = new HomeShowcaseDraftInput(
+            Enumerable.Range(1, 15).Select(index => new HomeShowcaseDraftSlotInput(index, index <= 2 ? 1 : null)).ToArray(),
+            Enumerable.Range(1, 15).Select(index => new HomeShowcaseDraftSlotInput(index, null)).ToArray());
         var invalid = await client.PutAsJsonAsync("/admin/home-showcase/draft", duplicate);
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+
+        permissions.Grant(AdminPermissions.HomeShowcaseUpdate);
+        var valid = new HomeShowcaseDraftInput(
+            Enumerable.Range(1, 15).Select(index => new HomeShowcaseDraftSlotInput(index, null)).ToArray(),
+            Enumerable.Range(1, 15).Select(index => new HomeShowcaseDraftSlotInput(index, null)).ToArray());
+        var accepted = await client.PutAsJsonAsync("/admin/home-showcase/draft", valid);
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+        Assert.Equal(1, store.DraftWrites);
+
+        var invalidIndex = new HomeShowcaseDraftInput(
+            [new HomeShowcaseDraftSlotInput(0, null), .. Enumerable.Range(2, 14).Select(index => new HomeShowcaseDraftSlotInput(index, null))],
+            valid.InterestedComputers);
+        var rejected = await client.PutAsJsonAsync("/admin/home-showcase/draft", invalidIndex);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Equal(1, store.DraftWrites);
 
         var tokenResponse = await client.PostAsync("/admin/home-showcase/preview-token", content: null);
         Assert.Equal((HttpStatusCode)429, tokenResponse.StatusCode);
@@ -96,11 +113,12 @@ public sealed class HomeShowcaseEndpointTests
     {
         public int PublicReads { get; private set; }
         public int FallbackReads { get; private set; }
+        public int DraftWrites { get; private set; }
         public Task<IReadOnlyList<HomeShowcaseSlot>> Slots(HomeShowcaseSnapshot snapshot, CancellationToken ct) => Task.FromResult<IReadOnlyList<HomeShowcaseSlot>>([]);
         public Task<IReadOnlyDictionary<int, HomeShowcaseProductData>> Products(IReadOnlyCollection<int> ids, CancellationToken ct) => Task.FromResult<IReadOnlyDictionary<int, HomeShowcaseProductData>>(new Dictionary<int, HomeShowcaseProductData>());
         public Task<bool> IsComputersCategoryAvailable(CancellationToken ct) => Task.FromResult(false);
         public Task<bool> AreComputers(IReadOnlyCollection<int> productIds, CancellationToken ct) => Task.FromResult(false);
-        public Task ReplaceSnapshot(HomeShowcaseSnapshot snapshot, IReadOnlyList<int?> featured, IReadOnlyList<int?> interested, CancellationToken ct) => Task.CompletedTask;
+        public Task ReplaceSnapshot(HomeShowcaseSnapshot snapshot, IReadOnlyList<int?> featured, IReadOnlyList<int?> interested, CancellationToken ct) { if (snapshot == HomeShowcaseSnapshot.Draft) DraftWrites++; return Task.CompletedTask; }
         public Task<IReadOnlyList<HomeShowcaseProduct>> PublicProducts(HomeShowcaseSection section, CancellationToken ct) { PublicReads++; return Task.FromResult<IReadOnlyList<HomeShowcaseProduct>>([]); }
         public Task<IReadOnlyList<HomeShowcaseProduct>> LegacyFallback(HomeShowcaseSection section, CancellationToken ct) { FallbackReads++; return Task.FromResult<IReadOnlyList<HomeShowcaseProduct>>([]); }
         public Task<int> PreviewTokensCreatedBy(string actor, DateTime sinceUtc, CancellationToken ct) => Task.FromResult(5);

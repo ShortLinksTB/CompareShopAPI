@@ -29,12 +29,7 @@ public static class AdminEndpoints
         admin.MapPost("/categories", (HttpContext c, CategoryInput input, AdminService s, CancellationToken ct) => Run(() => s.CreateCategory(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapPut("/categories/{id:int}", (HttpContext c, int id, CategoryInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateCategory(Subject(c), id, input, ct)));
         admin.MapDelete("/categories/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => { await s.DeleteCategory(Subject(c), id, ct); return Results.NoContent(); }));
-        admin.MapGet("/categories/export", (HttpContext context, CategoryImportService service, CancellationToken ct) =>
-            RunCategoryExport(context, service, ct));
-        admin.MapPost("/categories/import/dry-run", async (HttpContext context, CategoryImportService service, CancellationToken ct) =>
-            await RunCategoryImport(context, service, ct, commit: false)).DisableAntiforgery();
-        admin.MapPost("/categories/import/commit", async (HttpContext context, CategoryImportService service, CancellationToken ct) =>
-            await RunCategoryImport(context, service, ct, commit: true)).DisableAntiforgery();
+        admin.MapCategoryImportEndpoints();
 
         admin.MapGet("/shops", (HttpContext c, int? page, int? pageSize, AdminService s, CancellationToken ct) => Run(() => s.Shops(Subject(c), page ?? 1, pageSize ?? 20, ct)));
         admin.MapGet("/shops/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => await s.Shop(Subject(c), id, ct) is { } x ? Results.Ok(x) : Results.NotFound()));
@@ -119,6 +114,18 @@ public static class AdminEndpoints
             RunCompliance(() => s.Create(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapDelete("/compliance/bans/{id:int}", (HttpContext c, int id, BannedItemService s, CancellationToken ct) =>
             RunCompliance(async () => await s.Revoke(Subject(c), id, ct) ? Results.NoContent() : Results.NotFound()));
+        return admin;
+    }
+
+    public static RouteGroupBuilder MapCategoryImportEndpoints(this RouteGroupBuilder admin)
+    {
+        admin.MapGet("/categories/export", (HttpContext context, CategoryImportService service, CancellationToken ct) =>
+            RunCategoryExport(context, service, ct));
+        admin.MapPost("/categories/import/dry-run", async (HttpContext context, CategoryImportService service, CancellationToken ct) =>
+            await RunCategoryImport(context, service, ct, commit: false)).DisableAntiforgery();
+        admin.MapPost("/categories/import/commit", async (HttpContext context, CategoryImportService service, CancellationToken ct) =>
+            await RunCategoryImport(context, service, ct, commit: true)).DisableAntiforgery();
+
         return admin;
     }
 

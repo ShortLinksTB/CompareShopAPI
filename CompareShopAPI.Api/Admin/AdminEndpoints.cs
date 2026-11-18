@@ -29,6 +29,18 @@ public static class AdminEndpoints
         admin.MapPost("/categories", (HttpContext c, CategoryInput input, AdminService s, CancellationToken ct) => Run(() => s.CreateCategory(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapPut("/categories/{id:int}", (HttpContext c, int id, CategoryInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateCategory(Subject(c), id, input, ct)));
         admin.MapDelete("/categories/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => { await s.DeleteCategory(Subject(c), id, ct); return Results.NoContent(); }));
+        admin.MapGet("/affiliate-platforms", (HttpContext c, AffiliatePlatformService s, CancellationToken ct) => RunAffiliate(() => s.List(Subject(c), ct)));
+        admin.MapPost("/affiliate-platforms", (HttpContext c, AffiliatePlatformInput input, AffiliatePlatformService s, CancellationToken ct) => RunAffiliate(() => s.Create(Subject(c), input, ct)));
+        admin.MapPut("/affiliate-platforms/{id:int}", (HttpContext c, int id, AffiliatePlatformInput input, AffiliatePlatformService s, CancellationToken ct) =>
+            RunAffiliate(async () => await s.Update(Subject(c), id, input, ct) is { } item ? Results.Ok(item) : Results.NotFound()));
+        admin.MapDelete("/affiliate-platforms/{id:int}", (HttpContext c, int id, AffiliatePlatformService s, CancellationToken ct) =>
+            RunAffiliate(async () => await s.Delete(Subject(c), id, ct) ? Results.NoContent() : Results.NotFound()));
+        admin.MapPost("/affiliate-platforms/bulk-delete", (HttpContext c, AffiliatePlatformBulkDeleteInput input, AffiliatePlatformService s, CancellationToken ct) =>
+            RunAffiliate(() => s.BulkDelete(Subject(c), input.Ids, ct)));
+        admin.MapPost("/affiliate-platforms/import/preview", (HttpContext c, AffiliatePlatformInput[] input, AffiliatePlatformService s, CancellationToken ct) =>
+            RunAffiliate(() => s.Preview(Subject(c), input, ct)));
+        admin.MapPost("/affiliate-platforms/import/commit", (HttpContext c, AffiliatePlatformInput[] input, AffiliatePlatformService s, CancellationToken ct) =>
+            RunAffiliate(() => s.Commit(Subject(c), input, ct)));
         admin.MapGet("/categories/export", (HttpContext context, CategoryImportService service, CancellationToken ct) =>
             RunCategoryExport(context, service, ct));
         admin.MapPost("/categories/import/dry-run", async (HttpContext context, CategoryImportService service, CancellationToken ct) =>
@@ -202,6 +214,19 @@ public static class AdminEndpoints
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (MatchingLaptopCategoryUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "category_unavailable" }); }
         catch (MatchingProductSlugConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "slug_conflict", ["slug"] = ex.Slug }); }
+        catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
+        catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
+    }
+    private static async Task<IResult> RunAffiliate<T>(Func<Task<T>> operation)
+    {
+        try
+        {
+            var result = await operation();
+            return result is IResult httpResult ? httpResult : Results.Ok(result);
+        }
+        catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
+        catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (AffiliatePlatformDuplicateException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
         catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
     }

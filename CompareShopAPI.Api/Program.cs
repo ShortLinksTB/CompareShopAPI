@@ -88,6 +88,8 @@ builder.Services.AddScoped<AdminService>(services => new AdminService(
     fileService: services.GetRequiredService<IFileDerivatives>(),
     fileCatalog: services.GetRequiredService<IProductImageFileCatalog>()));
 builder.Services.AddScoped<CategoryImportService>();
+builder.Services.AddScoped<IAffiliatePlatformStore, EfAffiliatePlatformStore>();
+builder.Services.AddScoped<AffiliatePlatformService>();
 builder.Services.AddScoped<IFileRepository, EfFileRepository>();
 builder.Services.AddScoped<IFileObjectStorage, MinioFileObjectStorage>();
 builder.Services.AddSingleton<IImageDerivativeProcessor, SkiaImageDerivativeProcessor>();

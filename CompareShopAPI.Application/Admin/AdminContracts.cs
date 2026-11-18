@@ -11,6 +11,7 @@ public static class AdminPermissions
 {
     public const string ProductsRead = "products.read", ProductsCreate = "products.create", ProductsUpdate = "products.update", ProductsDelete = "products.delete";
     public const string CategoriesRead = "categories.read", CategoriesCreate = "categories.create", CategoriesUpdate = "categories.update", CategoriesDelete = "categories.delete";
+    public const string AffiliatePlatformsRead = "affiliate_platforms.read", AffiliatePlatformsCreate = "affiliate_platforms.create", AffiliatePlatformsUpdate = "affiliate_platforms.update", AffiliatePlatformsDelete = "affiliate_platforms.delete";
     public const string ShopsRead = "shops.read", ShopsCreate = "shops.create", ShopsUpdate = "shops.update", ShopsDelete = "shops.delete";
     public const string OffersRead = "offers.read", OffersCreate = "offers.create", OffersUpdate = "offers.update", OffersApprove = "offers.approve";
     public const string MatchingRead = "matching.read", MatchingApprove = "matching.approve";

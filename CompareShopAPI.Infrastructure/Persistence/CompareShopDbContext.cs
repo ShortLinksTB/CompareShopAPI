@@ -31,6 +31,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<AdminFeatureFlag> AdminFeatureFlags => Set<AdminFeatureFlag>();
     public DbSet<AdminSetting> AdminSettings => Set<AdminSetting>();
     public DbSet<BannedItem> BannedItems => Set<BannedItem>();
+    public DbSet<AffiliatePlatform> AffiliatePlatforms => Set<AffiliatePlatform>();
     public DbSet<BannedItemOutboxMessage> BannedItemOutboxMessages => Set<BannedItemOutboxMessage>();
     public DbSet<ProductMatching> ProductMatchings => Set<ProductMatching>();
     public DbSet<CompareShopAPI.Domain.Admin.MatchingDecision> MatchingDecisions => Set<CompareShopAPI.Domain.Admin.MatchingDecision>();
@@ -47,6 +48,12 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     protected override void OnModelCreating(ModelBuilder model)
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
+        model.Entity<AffiliatePlatform>().HasKey(x => x.Id);
+        model.Entity<AffiliatePlatform>().Property(x => x.Name).HasMaxLength(200).IsRequired();
+        model.Entity<AffiliatePlatform>().Property(x => x.NormalizedName).UseCollation("Latin1_General_100_BIN2").HasMaxLength(450).IsRequired();
+        model.Entity<AffiliatePlatform>().HasIndex(x => x.NormalizedName).IsUnique();
+        model.Entity<AffiliatePlatform>().Property(x => x.HomeUrl).HasMaxLength(2048);
+        model.Entity<AffiliatePlatform>().Property(x => x.Notes);
         model.Entity<Category>().HasIndex(x => x.ParentCategoryId);
         model.Entity<Category>().Property(x => x.Level).HasDefaultValue((byte)1);
         model.Entity<Category>().Property(x => x.SortOrder).HasDefaultValue(0);

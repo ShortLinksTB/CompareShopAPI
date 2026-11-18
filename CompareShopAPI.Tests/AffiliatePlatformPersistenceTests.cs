@@ -30,6 +30,7 @@ public sealed class AffiliatePlatformPersistenceTests(SqlServerTestFixture fixtu
             await using (var setup = new CompareShopDbContext(options))
             {
                 await setup.Database.MigrateAsync();
+                await setup.Database.ExecuteSqlRawAsync("ALTER TABLE [AffiliatePlatforms] ADD CONSTRAINT [CK_AffiliatePlatforms_ForceImportFailure] CHECK ([Name] <> N'Force import failure')");
                 var writer = new User(writerSubject, DateTime.UtcNow);
                 var viewer = new User(viewerSubject, DateTime.UtcNow);
                 var noPermissionRole = new AdminRole { Name = $"Affiliate Viewer {Guid.NewGuid():N}" };
@@ -115,13 +116,22 @@ public sealed class AffiliatePlatformPersistenceTests(SqlServerTestFixture fixtu
                 Assert.Equal(1, committed.CreatedCount);
                 Assert.Equal(1, committed.UpdatedCount);
                 Assert.Equal(1, committed.FailedCount);
+
+                var conflicted = await service.Commit("admin", [
+                    new("Renamed before failure", null, "must roll back"),
+                    new("Force import failure", null, null)
+                ], default);
+                Assert.Equal(0, conflicted.CreatedCount);
+                Assert.Equal(0, conflicted.UpdatedCount);
+                Assert.Equal(2, conflicted.FailedCount);
+                Assert.Equal(new[] { 0, 1 }, conflicted.Errors.Select(x => x.Index));
             }
 
             await using (var reloaded = new CompareShopDbContext(options))
             {
                 var rows = await new EfAffiliatePlatformStore(reloaded).List(default);
                 Assert.Equal(2, rows.Count);
-                Assert.Contains(rows, x => x.Id == saved.Id && x.Name == "PARTNER  ONE" && x.HomeUrl == "https://updated.example");
+                Assert.Contains(rows, x => x.Id == saved.Id && x.Name == "PARTNER  ONE" && x.HomeUrl == "https://updated.example" && x.Notes is null);
                 Assert.Contains(rows, x => x.Name == "New partner" && x.Notes == "added");
 
                 var store = new EfAffiliatePlatformStore(reloaded);

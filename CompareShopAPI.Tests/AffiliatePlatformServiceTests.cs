@@ -31,9 +31,9 @@ public sealed class AffiliatePlatformServiceTests
             new("New  Platform", "https://example.test", "long notes")
         ], default);
 
-        Assert.Equal(2, preview.CreateCount);
+        Assert.Equal(1, preview.CreateCount);
         Assert.Equal(0, preview.UpdateCount);
-        Assert.Equal(new[] { 1, 2 }, preview.Errors.Select(x => x.Index));
+        Assert.Equal(new[] { 0, 1, 2 }, preview.Errors.Select(x => x.Index));
         Assert.Empty(store.Rows);
     }
 
@@ -51,14 +51,27 @@ public sealed class AffiliatePlatformServiceTests
             new(" fresh ", null, null)
         ], default);
 
-        Assert.Equal(1, result.CreatedCount);
+        Assert.Equal(0, result.CreatedCount);
         Assert.Equal(1, result.UpdatedCount);
-        Assert.Equal(1, result.FailedCount);
-        Assert.Equal(3, store.Rows.Count);
+        Assert.Equal(2, result.FailedCount);
+        Assert.Equal(2, store.Rows.Count);
         Assert.Contains(store.Rows, x => x.Name == "keep me" && x.Notes == "updated");
-        Assert.Contains(store.Rows, x => x.Name == "Fresh");
         Assert.Contains(store.Rows, x => x.Name == "Preserve Me");
-        Assert.Equal(2, Assert.Single(result.Errors).Index);
+        Assert.Equal(new[] { 1, 2 }, result.Errors.Select(x => x.Index));
+    }
+
+    [Fact]
+    public async Task Preview_requires_only_read_and_commit_checks_permissions_for_valid_row_actions()
+    {
+        var store = new MemoryStore();
+        store.Rows.Add(new AffiliatePlatformRecord(7, "Existing", null, null, DateTime.UnixEpoch, DateTime.UnixEpoch) { NormalizedName = "EXISTING" });
+        var service = CreateService(store);
+        var preview = await service.Preview("reader", [new("Existing", null, null)], default);
+        Assert.Equal(1, preview.UpdateCount);
+
+        await Assert.ThrowsAsync<AdminForbiddenException>(() => service.Commit("reader", [new("New", null, null)], default));
+        await service.Commit("updater", [new("Existing", null, "updated")], default);
+        Assert.Equal("updated", Assert.Single(store.Rows).Notes);
     }
 
     [Fact]
@@ -80,7 +93,7 @@ public sealed class AffiliatePlatformServiceTests
         var service = CreateService(new MemoryStore());
         await Assert.ThrowsAsync<ArgumentException>(() => service.Create("writer", new("Name", "/relative", null), default));
         await Assert.ThrowsAsync<ArgumentException>(() => service.Create("writer", new("  ", null, null), default));
-        await Assert.ThrowsAsync<ArgumentException>(() => service.Create("writer", new(new string('n', 301), null, null), default));
+        await Assert.ThrowsAsync<ArgumentException>(() => service.Create("writer", new(new string('n', 201), null, null), default));
         await Assert.ThrowsAsync<ArgumentException>(() => service.Create("writer", new("Name", $"https://example.test/{new string('x', 2049)}", null), default));
     }
 
@@ -90,7 +103,8 @@ public sealed class AffiliatePlatformServiceTests
     private sealed class PermissionReader : IAdminPermissionReader
     {
         public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) =>
-            Task.FromResult(subject == "writer" || subject == "reader" && permission == AdminPermissions.AffiliatePlatformsRead);
+            Task.FromResult(subject == "writer" || subject == "reader" && permission == AdminPermissions.AffiliatePlatformsRead ||
+                subject == "updater" && permission is AdminPermissions.AffiliatePlatformsRead or AdminPermissions.AffiliatePlatformsUpdate);
     }
 
     private sealed class MemoryStore : IAffiliatePlatformStore
@@ -124,7 +138,7 @@ public sealed class AffiliatePlatformServiceTests
         public Task<IReadOnlyDictionary<string, AffiliatePlatformRecord>> FindByNames(IReadOnlyCollection<string> normalizedNames, CancellationToken ct) =>
             Task.FromResult<IReadOnlyDictionary<string, AffiliatePlatformRecord>>(Rows.Where(x => normalizedNames.Contains(x.NormalizedName)).ToDictionary(x => x.NormalizedName, StringComparer.Ordinal));
 
-        public Task<AffiliatePlatformImportWriteResult> CommitImport(IReadOnlyList<AffiliatePlatformNormalizedInput> inputs, DateTime nowUtc, CancellationToken ct)
+        public Task<AffiliatePlatformImportWriteResult> CommitImport(IReadOnlyList<AffiliatePlatformNormalizedInput> inputs, bool canCreate, bool canUpdate, DateTime nowUtc, CancellationToken ct)
         {
             var created = 0;
             var updated = 0;

@@ -17,6 +17,11 @@ public sealed record AffiliatePlatformNormalizedInput(int Index, string Name, st
 public sealed record AffiliatePlatformImportWriteResult(int CreatedCount, int UpdatedCount);
 
 public sealed class AffiliatePlatformDuplicateException() : Exception("An affiliate platform with this name already exists.");
+public sealed class AffiliatePlatformImportConflictException(IReadOnlyList<AffiliatePlatformImportError> errors) : Exception("The affiliate platform import conflicted and was rolled back.")
+{
+    public IReadOnlyList<AffiliatePlatformImportError> Errors { get; } = errors;
+}
+public sealed class AffiliatePlatformImportPermissionException() : Exception("The import requires create and/or update permission for its current actions.");
 
 public interface IAffiliatePlatformStore
 {
@@ -27,14 +32,11 @@ public interface IAffiliatePlatformStore
     Task<bool> Delete(int id, CancellationToken ct);
     Task<IReadOnlyList<AffiliatePlatformDeleteResult>> BulkDelete(IReadOnlyList<int> ids, CancellationToken ct);
     Task<IReadOnlyDictionary<string, AffiliatePlatformRecord>> FindByNames(IReadOnlyCollection<string> normalizedNames, CancellationToken ct);
-    Task<AffiliatePlatformImportWriteResult> CommitImport(IReadOnlyList<AffiliatePlatformNormalizedInput> inputs, DateTime nowUtc, CancellationToken ct);
+    Task<AffiliatePlatformImportWriteResult> CommitImport(IReadOnlyList<AffiliatePlatformNormalizedInput> inputs, bool canCreate, bool canUpdate, DateTime nowUtc, CancellationToken ct);
 }
 
 public sealed class AffiliatePlatformService(IAffiliatePlatformStore store, IAdminPermissionReader permissions, TimeProvider clock)
 {
-    private static readonly string[] ImportPermissions =
-        [AdminPermissions.AffiliatePlatformsCreate, AdminPermissions.AffiliatePlatformsUpdate];
-
     public async Task<IReadOnlyList<AffiliatePlatformRecord>> List(string? subject, CancellationToken ct)
     {
         await Authorize(subject, AdminPermissions.AffiliatePlatformsRead, ct);
@@ -74,7 +76,7 @@ public sealed class AffiliatePlatformService(IAffiliatePlatformStore store, IAdm
 
     public async Task<AffiliatePlatformImportPreview> Preview(string? subject, IReadOnlyList<AffiliatePlatformInput>? rows, CancellationToken ct)
     {
-        await AuthorizeAll(subject, ImportPermissions, ct);
+        await Authorize(subject, AdminPermissions.AffiliatePlatformsRead, ct);
         var validated = ValidateRows(rows);
         var existing = await store.FindByNames(validated.Valid.Select(x => x.NormalizedName).Distinct(StringComparer.Ordinal).ToArray(), ct);
         return new(validated.Valid.Count(x => !existing.ContainsKey(x.NormalizedName)),
@@ -83,9 +85,21 @@ public sealed class AffiliatePlatformService(IAffiliatePlatformStore store, IAdm
 
     public async Task<AffiliatePlatformImportResult> Commit(string? subject, IReadOnlyList<AffiliatePlatformInput>? rows, CancellationToken ct)
     {
-        await AuthorizeAll(subject, ImportPermissions, ct);
+        var authenticatedSubject = await RequireSubject(subject);
         var validated = ValidateRows(rows);
-        var write = await store.CommitImport(validated.Valid, clock.GetUtcNow().UtcDateTime, ct);
+        var existing = await store.FindByNames(validated.Valid.Select(x => x.NormalizedName).Distinct(StringComparer.Ordinal).ToArray(), ct);
+        var needsCreate = validated.Valid.Any(x => !existing.ContainsKey(x.NormalizedName));
+        var needsUpdate = validated.Valid.Any(x => existing.ContainsKey(x.NormalizedName));
+        var canCreate = !needsCreate || await permissions.HasPermission(authenticatedSubject, AdminPermissions.AffiliatePlatformsCreate, ct);
+        var canUpdate = !needsUpdate || await permissions.HasPermission(authenticatedSubject, AdminPermissions.AffiliatePlatformsUpdate, ct);
+        if (!canCreate || !canUpdate) throw new AdminForbiddenException();
+        AffiliatePlatformImportWriteResult write;
+        try { write = await store.CommitImport(validated.Valid, canCreate, canUpdate, clock.GetUtcNow().UtcDateTime, ct); }
+        catch (AffiliatePlatformImportConflictException ex)
+        {
+            var errors = validated.Errors.Concat(ex.Errors).OrderBy(x => x.Index).ToArray();
+            return new(0, 0, errors.Length, errors);
+        }
         return new(write.CreatedCount, write.UpdatedCount, validated.Errors.Count, validated.Errors);
     }
 
@@ -94,35 +108,54 @@ public sealed class AffiliatePlatformService(IAffiliatePlatformStore store, IAdm
 
     private async Task<string> Authorize(string? subject, string permission, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
-        if (!await permissions.HasPermission(subject, permission, ct)) throw new AdminForbiddenException();
-        return subject;
+        var authenticatedSubject = await RequireSubject(subject);
+        if (!await permissions.HasPermission(authenticatedSubject, permission, ct)) throw new AdminForbiddenException();
+        return authenticatedSubject;
     }
 
-    private async Task AuthorizeAll(string? subject, IReadOnlyList<string> required, CancellationToken ct)
+    private static Task<string> RequireSubject(string? subject)
     {
         if (string.IsNullOrWhiteSpace(subject)) throw new AdminUnauthorizedException();
-        foreach (var permission in required)
-            if (!await permissions.HasPermission(subject, permission, ct)) throw new AdminForbiddenException();
+        return Task.FromResult(subject);
     }
 
     private static (IReadOnlyList<AffiliatePlatformNormalizedInput> Valid, IReadOnlyList<AffiliatePlatformImportError> Errors) ValidateRows(IReadOnlyList<AffiliatePlatformInput>? rows)
     {
         if (rows is null) throw new ArgumentException("The request body must be a JSON array.");
         var valid = new List<AffiliatePlatformNormalizedInput>();
-        var errors = new List<AffiliatePlatformImportError>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var parsed = new List<AffiliatePlatformNormalizedInput>();
+        var keyRows = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        var indexedErrors = new Dictionary<int, List<string>>();
         for (var index = 0; index < rows.Count; index++)
         {
+            var candidateKey = CandidateNormalizedName(rows[index]);
+            if (candidateKey is not null)
+            {
+                if (!keyRows.TryGetValue(candidateKey, out var indices)) keyRows[candidateKey] = indices = [];
+                indices.Add(index);
+            }
             try
             {
                 var item = Validate(rows[index], index);
-                if (!seen.Add(item.NormalizedName)) throw new ArgumentException("Name duplicates another row in this import.");
-                valid.Add(item);
+                parsed.Add(item);
             }
-            catch (ArgumentException ex) { errors.Add(new(index, [ex.Message])); }
+            catch (ArgumentException ex) { indexedErrors[index] = [ex.Message]; }
         }
+        foreach (var indices in keyRows.Values.Where(x => x.Count > 1))
+            foreach (var index in indices)
+            {
+                if (!indexedErrors.TryGetValue(index, out var messages)) indexedErrors[index] = messages = [];
+                if (!messages.Contains("Name duplicates another row in this import.")) messages.Add("Name duplicates another row in this import.");
+            }
+        valid.AddRange(parsed.Where(x => !indexedErrors.ContainsKey(x.Index)));
+        var errors = indexedErrors.OrderBy(x => x.Key).Select(x => new AffiliatePlatformImportError(x.Key, x.Value)).ToList();
         return (valid, errors);
+    }
+
+    private static string? CandidateNormalizedName(AffiliatePlatformInput? input)
+    {
+        var name = input?.Name?.Trim();
+        return string.IsNullOrEmpty(name) || name.Length > 200 ? null : name.ToUpperInvariant();
     }
 
     private static AffiliatePlatformNormalizedInput Validate(AffiliatePlatformInput? input, int index)
@@ -130,9 +163,9 @@ public sealed class AffiliatePlatformService(IAffiliatePlatformStore store, IAdm
         if (input is null) throw new ArgumentException("A row is required.");
         var name = input.Name?.Trim();
         if (string.IsNullOrEmpty(name)) throw new ArgumentException("Name is required.");
-        if (name.Length > 300) throw new ArgumentException("Name must be at most 300 characters.");
+        if (name.Length > 200) throw new ArgumentException("Name must be at most 200 characters.");
         var normalized = name.ToUpperInvariant();
-        if (normalized.Length > 300) throw new ArgumentException("The normalized name must be at most 300 characters.");
+        if (normalized.Length > 450) throw new ArgumentException("The normalized name must be at most 450 characters.");
         var homeUrl = string.IsNullOrWhiteSpace(input.HomeUrl) ? null : input.HomeUrl.Trim();
         if (homeUrl?.Length > 2048) throw new ArgumentException("HomeUrl must be at most 2048 characters.");
         if (homeUrl is not null && (!Uri.TryCreate(homeUrl, UriKind.Absolute, out var uri) || string.IsNullOrWhiteSpace(uri.Scheme) || !Uri.IsWellFormedUriString(homeUrl, UriKind.Absolute)))

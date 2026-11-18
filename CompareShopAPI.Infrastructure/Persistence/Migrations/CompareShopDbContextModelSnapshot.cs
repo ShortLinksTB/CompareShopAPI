@@ -231,8 +231,8 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
                     b.Property<DateTime>("CreatedAtUtc").HasColumnType("datetime2");
                     b.Property<string>("HomeUrl").HasMaxLength(2048).HasColumnType("nvarchar(2048)");
-                    b.Property<string>("Name").IsRequired().HasMaxLength(300).HasColumnType("nvarchar(300)");
-                    b.Property<string>("NormalizedName").IsRequired().HasMaxLength(300).HasColumnType("nvarchar(300)").UseCollation("Latin1_General_100_BIN2");
+                    b.Property<string>("Name").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)");
+                    b.Property<string>("NormalizedName").IsRequired().HasMaxLength(450).HasColumnType("nvarchar(450)").UseCollation("Latin1_General_100_BIN2");
                     b.Property<string>("Notes").HasColumnType("nvarchar(max)");
                     b.Property<DateTime>("UpdatedAtUtc").HasColumnType("datetime2");
                     b.HasKey("Id");

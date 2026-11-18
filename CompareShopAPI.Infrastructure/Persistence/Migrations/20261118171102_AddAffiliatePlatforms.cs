@@ -13,8 +13,8 @@ public partial class AddAffiliatePlatforms : Migration
             columns: table => new
             {
                 Id = table.Column<int>(type: "int", nullable: false).Annotation("SqlServer:Identity", "1, 1"),
-                Name = table.Column<string>(type: "nvarchar(300)", maxLength: 300, nullable: false),
-                NormalizedName = table.Column<string>(type: "nvarchar(300)", maxLength: 300, nullable: false, collation: "Latin1_General_100_BIN2"),
+                Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                NormalizedName = table.Column<string>(type: "nvarchar(450)", maxLength: 450, nullable: false, collation: "Latin1_General_100_BIN2"),
                 HomeUrl = table.Column<string>(type: "nvarchar(2048)", maxLength: 2048, nullable: true),
                 Notes = table.Column<string>(type: "nvarchar(max)", nullable: true),
                 CreatedAtUtc = table.Column<DateTime>(type: "datetime2", nullable: false),

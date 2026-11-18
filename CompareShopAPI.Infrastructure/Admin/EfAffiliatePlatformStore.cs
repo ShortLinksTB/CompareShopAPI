@@ -51,35 +51,45 @@ public sealed class EfAffiliatePlatformStore(CompareShopDbContext db) : IAffilia
             .ToDictionaryAsync(x => x.NormalizedName, x => x.Record, StringComparer.Ordinal, ct);
     }
 
-    public async Task<AffiliatePlatformImportWriteResult> CommitImport(IReadOnlyList<AffiliatePlatformNormalizedInput> inputs, DateTime nowUtc, CancellationToken ct)
+    public async Task<AffiliatePlatformImportWriteResult> CommitImport(IReadOnlyList<AffiliatePlatformNormalizedInput> inputs, bool canCreate, bool canUpdate, DateTime nowUtc, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
-        var normalizedNames = inputs.Select(x => x.NormalizedName).Distinct(StringComparer.Ordinal).ToArray();
-        var existing = await db.AffiliatePlatforms.Where(x => normalizedNames.Contains(x.NormalizedName)).ToDictionaryAsync(x => x.NormalizedName, StringComparer.Ordinal, ct);
-        var created = 0;
-        var updated = 0;
-        foreach (var input in inputs)
-        {
-            if (existing.TryGetValue(input.NormalizedName, out var item))
-            {
-                item.Update(input.Name, input.NormalizedName, input.HomeUrl, input.Notes, nowUtc);
-                updated++;
-            }
-            else
-            {
-                item = new AffiliatePlatform(input.Name, input.NormalizedName, input.HomeUrl, input.Notes, nowUtc);
-                db.AffiliatePlatforms.Add(item);
-                existing.Add(input.NormalizedName, item);
-                created++;
-            }
-        }
         try
         {
+            var normalizedNames = inputs.Select(x => x.NormalizedName).Distinct(StringComparer.Ordinal).ToArray();
+            var existing = await db.AffiliatePlatforms.Where(x => normalizedNames.Contains(x.NormalizedName)).ToDictionaryAsync(x => x.NormalizedName, StringComparer.Ordinal, ct);
+            var needsCreate = inputs.Any(x => !existing.ContainsKey(x.NormalizedName));
+            var needsUpdate = inputs.Any(x => existing.ContainsKey(x.NormalizedName));
+            if ((needsCreate && !canCreate) || (needsUpdate && !canUpdate)) throw new AffiliatePlatformImportPermissionException();
+            var created = 0;
+            var updated = 0;
+            foreach (var input in inputs)
+            {
+                if (existing.TryGetValue(input.NormalizedName, out var item))
+                {
+                    item.Update(input.Name, input.NormalizedName, input.HomeUrl, input.Notes, nowUtc);
+                    updated++;
+                }
+                else
+                {
+                    item = new AffiliatePlatform(input.Name, input.NormalizedName, input.HomeUrl, input.Notes, nowUtc);
+                    db.AffiliatePlatforms.Add(item);
+                    existing.Add(input.NormalizedName, item);
+                    created++;
+                }
+            }
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
+            return new(created, updated);
         }
-        catch (DbUpdateException ex) when (IsUniqueNameViolation(ex)) { throw new AffiliatePlatformDuplicateException(); }
-        return new(created, updated);
+        catch (AffiliatePlatformImportPermissionException) { throw; }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            var errors = inputs.Select(x => new AffiliatePlatformImportError(x.Index,
+                [IsUniqueNameViolation(ex) ? "Name conflicts with a concurrent import." : "Persistence conflict; the import was rolled back."])).ToArray();
+            throw new AffiliatePlatformImportConflictException(errors);
+        }
     }
 
     private static System.Linq.Expressions.Expression<Func<AffiliatePlatform, AffiliatePlatformRecord>> ToRecord() =>
@@ -88,5 +98,10 @@ public sealed class EfAffiliatePlatformStore(CompareShopDbContext db) : IAffilia
     private static AffiliatePlatformRecord ToRecord(AffiliatePlatform x) =>
         new(x.Id, x.Name, x.HomeUrl, x.Notes, x.CreatedAtUtc, x.UpdatedAtUtc) { NormalizedName = x.NormalizedName };
 
-    private static bool IsUniqueNameViolation(DbUpdateException exception) => exception.InnerException is SqlException { Number: 2601 or 2627 };
+    private static bool IsUniqueNameViolation(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException!)
+            if (current is SqlException { Number: 2601 or 2627 }) return true;
+        return false;
+    }
 }

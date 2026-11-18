@@ -211,13 +211,13 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<string>("NormalizedName")
                         .IsRequired()
-                        .HasMaxLength(300)
-                        .HasColumnType("nvarchar(300)")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)")
                         .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<string>("Notes")

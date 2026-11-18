@@ -227,6 +227,8 @@ public static class AdminEndpoints
         catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
         catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
         catch (AffiliatePlatformDuplicateException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+        catch (AffiliatePlatformImportPermissionException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (AffiliatePlatformImportConflictException ex) { return Results.Json(new AffiliatePlatformImportResult(0, 0, ex.Errors.Count, ex.Errors), statusCode: StatusCodes.Status409Conflict); }
         catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }
         catch (ArgumentException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["request"] = [ex.Message] }); }
     }

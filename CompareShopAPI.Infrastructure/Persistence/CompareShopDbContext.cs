@@ -49,8 +49,8 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     {
         model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
         model.Entity<AffiliatePlatform>().HasKey(x => x.Id);
-        model.Entity<AffiliatePlatform>().Property(x => x.Name).HasMaxLength(300).IsRequired();
-        model.Entity<AffiliatePlatform>().Property(x => x.NormalizedName).UseCollation("Latin1_General_100_BIN2").HasMaxLength(300).IsRequired();
+        model.Entity<AffiliatePlatform>().Property(x => x.Name).HasMaxLength(200).IsRequired();
+        model.Entity<AffiliatePlatform>().Property(x => x.NormalizedName).UseCollation("Latin1_General_100_BIN2").HasMaxLength(450).IsRequired();
         model.Entity<AffiliatePlatform>().HasIndex(x => x.NormalizedName).IsUnique();
         model.Entity<AffiliatePlatform>().Property(x => x.HomeUrl).HasMaxLength(2048);
         model.Entity<AffiliatePlatform>().Property(x => x.Notes);

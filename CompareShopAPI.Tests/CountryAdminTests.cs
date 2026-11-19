@@ -1,10 +1,15 @@
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Application.Catalog;
+using CompareShopAPI.Api.Admin;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Infrastructure.Catalog;
 using CompareShopAPI.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -43,6 +48,31 @@ public sealed class CountryAdminServiceTests
     public void Country_rejects_codes_outside_iso_alpha2(string code) =>
         Assert.Throws<ArgumentException>(() => new Country(code, "Invalid code"));
 
+    [Fact]
+    public async Task Delete_endpoint_returns_conflict_and_preserves_referenced_country()
+    {
+        var data = new ReferencedCountryData();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton<ICountryAdminData>(data);
+        builder.Services.AddSingleton<IAdminPermissionReader>(new FakePermissionReader(true));
+        builder.Services.AddScoped<CountryAdminService>();
+        await using var app = builder.Build();
+        app.Use(async (context, next) =>
+        {
+            context.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim("sub", "admin")], "test"));
+            await next();
+        });
+        app.MapGroup("/admin").MapCountryAdminEndpoints();
+        await app.StartAsync();
+
+        using var response = await app.GetTestClient().DeleteAsync("/admin/countries/3");
+
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(new AdminCountryDto(3, "US", "United States", true), await data.Get(3, default));
+    }
+
     private sealed class FakeCountryAdminData : ICountryAdminData
     {
         private AdminCountryDto? _country;
@@ -64,6 +94,15 @@ public sealed class CountryAdminServiceTests
     private sealed class FakePermissionReader(bool allowed) : IAdminPermissionReader
     {
         public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) => Task.FromResult(allowed);
+    }
+
+    private sealed class ReferencedCountryData : ICountryAdminData
+    {
+        private readonly AdminCountryDto _country = new(3, "US", "United States", true);
+        public Task<IReadOnlyList<AdminCountryDto>> List(CancellationToken ct) => Task.FromResult<IReadOnlyList<AdminCountryDto>>([_country]);
+        public Task<AdminCountryDto?> Get(int id, CancellationToken ct) => Task.FromResult<AdminCountryDto?>(id == _country.Id ? _country : null);
+        public Task<AdminCountryDto> Save(int? id, CountryInput input, string actor, CancellationToken ct) => throw new NotSupportedException();
+        public Task<bool> Delete(int id, string actor, CancellationToken ct) => throw new CountryInUseException();
     }
 }
 
@@ -98,6 +137,7 @@ public sealed class EfCountryDataTests(SqlServerTestFixture fixture)
             db.PartnerShops.Add(shop);
             await db.SaveChangesAsync();
             await Assert.ThrowsAsync<CountryInUseException>(() => data.Delete(created.Id, "admin", default));
+            Assert.Equal(updated, await data.Get(created.Id, default));
             db.PartnerShops.Remove(shop);
             await db.SaveChangesAsync();
             Assert.True(await data.Delete(created.Id, "admin", default));

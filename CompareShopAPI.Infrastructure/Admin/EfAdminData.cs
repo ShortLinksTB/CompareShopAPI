@@ -74,24 +74,55 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         return true;
     }
 
-    public Task<Page<AdminCategory>> Categories(int countryId, int page, int size, CancellationToken ct) => PageOf(
-        from category in db.Categories.AsNoTracking().Where(x => x.CountryId == countryId).OrderBy(x => x.Id)
-        join country in db.Countries.AsNoTracking() on category.CountryId equals (int?)country.Id into countries
-        from country in countries.DefaultIfEmpty()
-        select new AdminCategory(category.Id, category.Slug, category.Name, category.IsActive, category.ParentCategoryId,
-            country == null ? null : country.Id, country == null ? null : country.Code, country == null ? null : country.Name), page, size, ct);
-    public Task<AdminCategory?> Category(int id, CancellationToken ct) => (
-        from category in db.Categories.AsNoTracking().Where(x => x.Id == id)
-        join country in db.Countries.AsNoTracking() on category.CountryId equals (int?)country.Id into countries
-        from country in countries.DefaultIfEmpty()
-        select new AdminCategory(category.Id, category.Slug, category.Name, category.IsActive, category.ParentCategoryId,
-            country == null ? null : country.Id, country == null ? null : country.Code, country == null ? null : country.Name))
+    public Task<Page<AdminCategory>> Categories(int countryId, int page, int size, CancellationToken ct) => PageOf(db.Categories.AsNoTracking().Where(x => x.CountryId == countryId).OrderBy(x => x.Id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId, x.CountryId, x.Country.Code, x.Country.Name)), page, size, ct);
+    public Task<AdminCategory?> Category(int id, CancellationToken ct) =>
+        (from category in db.Categories.AsNoTracking()
+         where category.Id == id
+         join country in db.Countries.AsNoTracking() on (int?)category.CountryId equals (int?)country.Id into countries
+         from country in countries.DefaultIfEmpty()
+         select new AdminCategory(category.Id, category.Slug, category.Name, category.IsActive, category.ParentCategoryId,
+             (int?)country.Id, country.Code, country.Name))
         .SingleOrDefaultAsync(ct);
     public async Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct)
     {
+        if (!await db.Countries.AnyAsync(x => x.Id == input.CountryId && x.IsActive, ct)) throw new ArgumentException("Country must exist and be active.", nameof(input.CountryId));
+        var legacyCategory = id.HasValue
+            ? await (from category in db.Categories.AsNoTracking()
+                     where category.Id == id.Value
+                     join country in db.Countries.AsNoTracking() on (int?)category.CountryId equals (int?)country.Id into countries
+                     from country in countries.DefaultIfEmpty()
+                     select new { CountryId = (int?)country.Id, category.ParentCategoryId }).SingleOrDefaultAsync(ct)
+            : null;
+        if (id.HasValue && legacyCategory is null) throw new KeyNotFoundException();
+        if (legacyCategory is { CountryId: null })
+        {
+            var categoryId = id.GetValueOrDefault();
+            if (await db.Categories.AnyAsync(x => x.ParentCategoryId == categoryId, ct))
+                throw new ArgumentException("A category with children cannot move to another Country.");
+            var legacyParentCategoryId = input.ClearParentCategory ? null : input.ParentCategoryId ?? legacyCategory.ParentCategoryId;
+            if (input.ClearParentCategory && legacyCategory.ParentCategoryId is not null &&
+                await db.Products.AnyAsync(x => x.CategoryId == categoryId, ct))
+                throw new ArgumentException("A category with products cannot become a Level 1 category.");
+            if (legacyParentCategoryId is int legacyParentId)
+            {
+                if (legacyParentId == id) throw new ArgumentException("A category cannot be its own parent.");
+                var parent = await db.Categories.AsNoTracking().SingleOrDefaultAsync(x => x.Id == legacyParentId, ct);
+                if (parent is null) throw new ArgumentException("Parent category does not exist.");
+                if (parent.Level != 1) throw new ArgumentException("Parent category must be Level 1.");
+                if (parent.CountryId != input.CountryId) throw new ArgumentException("Parent category must belong to the same Country.");
+            }
+
+            await db.Categories.Where(x => x.Id == categoryId).ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.Slug, input.Slug)
+                .SetProperty(x => x.Name, input.Name)
+                .SetProperty(x => x.IsActive, input.IsActive)
+                .SetProperty(x => x.CountryId, input.CountryId)
+                .SetProperty(x => x.ParentCategoryId, legacyParentCategoryId)
+                .SetProperty(x => x.Level, legacyParentCategoryId.HasValue ? (byte)2 : (byte)1), ct);
+            return (await Category(categoryId, ct))!;
+        }
         var item = id.HasValue ? await db.Categories.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
-        if (!await db.Countries.AnyAsync(x => x.Id == input.CountryId && x.IsActive, ct)) throw new ArgumentException("Country must exist and be active.", nameof(input.CountryId));
         if (item is not null && item.CountryId != input.CountryId && await db.Categories.AnyAsync(x => x.ParentCategoryId == item.Id, ct))
             throw new ArgumentException("A category with children cannot move to another Country.");
         var parentCategoryId = input.ClearParentCategory ? null : input.ParentCategoryId ?? item?.ParentCategoryId;
@@ -205,22 +236,49 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
 
     public Task<Page<AdminShop>> Shops(int page, int size, CancellationToken ct) => PageOf(
         from shop in db.PartnerShops.AsNoTracking().OrderBy(x => x.Id)
-        join country in db.Countries.AsNoTracking() on shop.CountryId equals (int?)country.Id into countries
+        join country in db.Countries.AsNoTracking() on (int?)shop.CountryId equals (int?)country.Id into countries
         from country in countries.DefaultIfEmpty()
         select new AdminShop(shop.Id, shop.Slug, shop.Name, shop.WebsiteUrl, shop.IsActive, shop.ShowOnHome,
-            shop.HomeDisplayOrder, country == null ? null : country.Id, country == null ? null : country.Code, country == null ? null : country.Name), page, size, ct);
-    public Task<AdminShop?> Shop(int id, CancellationToken ct) => (
-        from shop in db.PartnerShops.AsNoTracking().Where(x => x.Id == id)
-        join country in db.Countries.AsNoTracking() on shop.CountryId equals (int?)country.Id into countries
-        from country in countries.DefaultIfEmpty()
-        select new AdminShop(shop.Id, shop.Slug, shop.Name, shop.WebsiteUrl, shop.IsActive, shop.ShowOnHome,
-            shop.HomeDisplayOrder, country == null ? null : country.Id, country == null ? null : country.Code, country == null ? null : country.Name))
+            shop.HomeDisplayOrder, (int?)country.Id, country.Code, country.Name), page, size, ct);
+    public Task<AdminShop?> Shop(int id, CancellationToken ct) =>
+        (from shop in db.PartnerShops.AsNoTracking()
+         where shop.Id == id
+         join country in db.Countries.AsNoTracking() on (int?)shop.CountryId equals (int?)country.Id into countries
+         from country in countries.DefaultIfEmpty()
+         select new AdminShop(shop.Id, shop.Slug, shop.Name, shop.WebsiteUrl, shop.IsActive, shop.ShowOnHome,
+             shop.HomeDisplayOrder, (int?)country.Id, country.Code, country.Name))
         .SingleOrDefaultAsync(ct);
     public async Task<AdminShop> SaveShop(int? id, ShopInput input, CancellationToken ct)
     {
+        if (!await db.Countries.AnyAsync(x => x.Id == input.CountryId && x.IsActive, ct)) throw new ArgumentException("Country must exist and be active.", nameof(input.CountryId));
+        var legacyShop = id.HasValue
+            ? await (from shop in db.PartnerShops.AsNoTracking()
+                     where shop.Id == id.Value
+                     join country in db.Countries.AsNoTracking() on (int?)shop.CountryId equals (int?)country.Id into countries
+                     from country in countries.DefaultIfEmpty()
+                     select new { CountryId = (int?)country.Id }).SingleOrDefaultAsync(ct)
+            : null;
+        if (id.HasValue && legacyShop is null) throw new KeyNotFoundException();
+        if (legacyShop is { CountryId: null })
+        {
+            var shopId = id.GetValueOrDefault();
+            var update = db.PartnerShops.Where(x => x.Id == shopId).ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.Slug, input.Slug)
+                .SetProperty(x => x.Name, input.Name)
+                .SetProperty(x => x.WebsiteUrl, input.WebsiteUrl)
+                .SetProperty(x => x.IsActive, input.IsActive)
+                .SetProperty(x => x.CountryId, input.CountryId), ct);
+            await update;
+            if (input.ShowOnHome.HasValue)
+                await db.PartnerShops.Where(x => x.Id == shopId)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.ShowOnHome, input.ShowOnHome.Value), ct);
+            if (input.HomeDisplayOrder.IsSpecified)
+                await db.PartnerShops.Where(x => x.Id == shopId)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.HomeDisplayOrder, input.HomeDisplayOrder.Value), ct);
+            return (await Shop(shopId, ct))!;
+        }
         var item = id.HasValue ? await db.PartnerShops.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
-        if (!await db.Countries.AnyAsync(x => x.Id == input.CountryId && x.IsActive, ct)) throw new ArgumentException("Country must exist and be active.", nameof(input.CountryId));
         item ??= new PartnerShop { Slug = input.Slug, Name = input.Name, CountryId = input.CountryId };
         item.Slug = input.Slug; item.Name = input.Name; item.WebsiteUrl = input.WebsiteUrl; item.IsActive = input.IsActive;
         item.CountryId = input.CountryId;

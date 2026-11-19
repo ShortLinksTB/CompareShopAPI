@@ -541,7 +541,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
                 new("nullable-category-updated", "Updated Nullable Category", CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Equal(CountryTestCompatibility.VnCountryId, updatedCategory.CountryId);
             var updatedShop = await service.UpdateShop(subject, shopForUpdate.Id,
-                new("nullable-shop-updated", "Updated Nullable Shop", null, true, CountryTestCompatibility.VnCountryId), default);
+                new("nullable-shop-updated", "Updated Nullable Shop", null, true, CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Equal(CountryTestCompatibility.VnCountryId, updatedShop.CountryId);
 
             await service.DeleteCategory(subject, categoryForDelete.Id, default);

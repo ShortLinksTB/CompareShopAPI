@@ -528,6 +528,8 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             Assert.Null(category.CountryId);
             Assert.Null(category.CountryCode);
             Assert.Null(category.CountryName);
+            Assert.Contains((await service.Categories(subject, CountryTestCompatibility.VnCountryId, 1, 100, default)).Items,
+                item => item.CountryId == CountryTestCompatibility.VnCountryId && item.CountryCode == "VN");
             var shop = await service.Shop(subject, shopForUpdate.Id, default);
             Assert.NotNull(shop);
             Assert.Null(shop.CountryId);

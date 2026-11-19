@@ -7,11 +7,12 @@ namespace CompareShopAPI.Infrastructure.Catalog;
 
 internal static class VisibleCatalogOffers
 {
-    public static IQueryable<ProductOffer> Query(CompareShopDbContext db, TimeProvider clock)
+    public static IQueryable<ProductOffer> Query(CompareShopDbContext db, TimeProvider clock, int? countryId = null)
     {
         var freshnessCutoff = clock.GetUtcNow().UtcDateTime.AddDays(-CatalogOfferPolicy.FreshnessDays);
-        return BannedItemVisibility.ExcludeBannedProducts(db, db.ProductOffers.AsNoTracking())
-            .Where(o => o.IsActive && !o.IsOutlier && o.UpdatedAtUtc >= freshnessCutoff && o.Product.IsActive && o.PartnerShop.IsActive);
+        return BannedItemVisibility.ExcludeBannedProducts(db, db.ProductOffers.AsNoTracking(), countryId)
+            .Where(o => o.IsActive && !o.IsOutlier && o.UpdatedAtUtc >= freshnessCutoff && o.Product.IsActive && o.Product.Category.IsActive && o.PartnerShop.IsActive
+                && (countryId.HasValue ? o.PartnerShop.CountryId == countryId.Value : o.PartnerShop.Country.Code == "VN"));
     }
 }
 

@@ -1,5 +1,27 @@
 namespace CompareShopAPI.Domain.Catalog;
 
+public sealed class Country
+{
+    private Country() { }
+    public Country(string code, string name, bool isActive = true) => Update(code, name, isActive);
+    public int Id { get; private set; }
+    public string Code { get; private set; } = string.Empty;
+    public string Name { get; private set; } = string.Empty;
+    public bool IsActive { get; private set; }
+    public void Update(string code, string name, bool isActive)
+    {
+        var normalizedCode = code?.Trim().ToUpperInvariant();
+        var normalizedName = name?.Trim();
+        if (normalizedCode is null || normalizedCode.Length != 2 || normalizedCode.Any(c => c is < 'A' or > 'Z'))
+            throw new ArgumentException("Country code must be a two-letter ISO code.", nameof(code));
+        if (string.IsNullOrWhiteSpace(normalizedName) || normalizedName.Length > 100)
+            throw new ArgumentException("Country name is required and must be at most 100 characters.", nameof(name));
+        Code = normalizedCode;
+        Name = normalizedName;
+        IsActive = isActive;
+    }
+}
+
 public sealed class Category
 {
     public int Id { get; set; }
@@ -7,12 +29,14 @@ public sealed class Category
     public required string Name { get; set; }
     public int? ParentCategoryId { get; set; }
     public Category? ParentCategory { get; set; }
+    public int CountryId { get; set; }
+    public Country Country { get; set; } = null!;
     public byte Level { get; set; } = 1;
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
     public List<Category> Children { get; set; } = [];
 }
-public sealed class PartnerShop { public int Id { get; set; } public required string Slug { get; set; } public required string Name { get; set; } public string? WebsiteUrl { get; set; } public bool IsActive { get; set; } = true; public bool ShowOnHome { get; set; } public int? HomeDisplayOrder { get; set; } }
+public sealed class PartnerShop { public int Id { get; set; } public required string Slug { get; set; } public required string Name { get; set; } public string? WebsiteUrl { get; set; } public int CountryId { get; set; } public Country Country { get; set; } = null!; public bool IsActive { get; set; } = true; public bool ShowOnHome { get; set; } public int? HomeDisplayOrder { get; set; } }
 public sealed class Product { public int Id { get; set; } public required string Slug { get; set; } public required string Name { get; set; } public string? Brand { get; set; } public string? Description { get; set; } public string? ImageUrl { get; set; } public string? SeoTitle { get; set; } public string? SeoDescription { get; set; } public int CategoryId { get; set; } public Category Category { get; set; } = null!; public bool IsActive { get; set; } = true; public List<ProductOffer> Offers { get; set; } = []; public List<SpecificationGroup> SpecificationGroups { get; set; } = []; public List<ProductImage> Images { get; set; } = []; }
 
 public sealed class ProductImage

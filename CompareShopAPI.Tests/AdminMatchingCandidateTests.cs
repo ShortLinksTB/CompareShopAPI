@@ -34,7 +34,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 var category = await CategoryTestData.AddLeafAsync(db, "attached-matchings", "Attached matchings");
                 var product = new Product { Slug = "attached-product", Name = "Attached product", CategoryId = category.Id };
                 var otherProduct = new Product { Slug = "other-attached-product", Name = "Other attached product", CategoryId = category.Id };
@@ -141,7 +141,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
         await using var db = new CompareShopDbContext(options);
         try
         {
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var reader = new User("matching-reader", DateTime.UtcNow);
             var denied = new User("matching-denied", DateTime.UtcNow);
             db.Users.AddRange(reader, denied);

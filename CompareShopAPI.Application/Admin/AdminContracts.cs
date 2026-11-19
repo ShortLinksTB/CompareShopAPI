@@ -19,11 +19,12 @@ public static class AdminPermissions
     public const string SeoRead = "seo.read", SeoUpdate = "seo.update", UsersManage = "users.manage", RolesManage = "roles.manage";
     public const string FeatureFlagsRead = "feature_flags.read", FeatureFlagsUpdate = "feature_flags.update", SettingsManage = "settings.manage";
     public const string ComplianceRead = "compliance.read", ComplianceManage = "compliance.manage";
+    public const string CountriesRead = "countries.read", CountriesManage = "countries.manage";
     public const string FilesRead = "files.read", FilesWrite = "files.write";
     public const string HomeShowcaseRead = "home_showcase.read", HomeShowcaseUpdate = "home_showcase.update", HomeShowcasePublish = "home_showcase.publish";
 }
 
-public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId);
+public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId, int CountryId = 0, string? CountryCode = null, string? CountryName = null);
 public sealed record CategoryImportRow(int? Id, string Slug, string Name, string? ParentSlug, JsonElement SortOrder = default);
 public sealed record CategoryImportJson(int SchemaVersion, DateTimeOffset? ExportedAt, IReadOnlyList<CategoryImportRow>? Categories);
 public sealed record CategoryImportStoredCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId, string? ParentSlug, int SortOrder, int ProductCount);
@@ -35,7 +36,7 @@ public sealed record CategoryExportDocument(int SchemaVersion, DateTimeOffset Ex
 public sealed record CategoryExportRow(int Id, string Slug, string Name, string? ParentSlug, int SortOrder);
 public sealed record CategoryImportAudit(int Created, int Updated, int Deleted, IReadOnlyList<string> CreatedSlugs, IReadOnlyList<string> UpdatedSlugs, IReadOnlyList<string> DeletedSlugs, string OriginalFilename);
 public sealed record CategoryImportCommitResult(CategoryImportSummary Summary, IReadOnlyList<CategoryImportChange> Changes);
-public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive, bool ShowOnHome, int? HomeDisplayOrder);
+public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive, bool ShowOnHome, int? HomeDisplayOrder, int CountryId = 0, string? CountryCode = null, string? CountryName = null);
 public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null)
 {
     public bool NeedsStandardImage { get; init; }
@@ -98,8 +99,8 @@ public sealed record AdminFeatureFlag(int Id, string Key, bool Enabled, string? 
 public sealed record AdminSetting(string Key, string Value);
 public sealed record PermissionsResponse(IReadOnlyList<string> Permissions);
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int TotalItems);
-public sealed record CategoryInput(string Slug, string Name, bool IsActive = true, int? ParentCategoryId = null, bool ClearParentCategory = false);
-public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true, bool? ShowOnHome = null)
+public sealed record CategoryInput(string Slug, string Name, bool IsActive = true, int? ParentCategoryId = null, bool ClearParentCategory = false, int CountryId = 0);
+public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true, bool? ShowOnHome = null, int CountryId = 0)
 {
     public OptionalNullableInt HomeDisplayOrder { get; init; }
 }
@@ -118,7 +119,8 @@ public interface IAdminData
     Task<bool> HasPermission(string subject, string permission, CancellationToken ct);
     Task<IReadOnlyList<string>> PermissionsForSubject(string subject, CancellationToken ct);
     Task<bool> BootstrapFirstAdmin(string subject, CancellationToken ct);
-    Task<Page<AdminCategory>> Categories(int page, int pageSize, CancellationToken ct);
+    Task<bool> ActiveCountry(int id, CancellationToken ct);
+    Task<Page<AdminCategory>> Categories(int countryId, int page, int pageSize, CancellationToken ct);
     Task<AdminCategory?> Category(int id, CancellationToken ct);
     Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct);
     Task<bool> DeleteCategory(int id, CancellationToken ct);
@@ -216,16 +218,21 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         return await data.ExecuteAudited(actor, action, resource, id, work, ct);
     }
 
-    public async Task<Page<AdminCategory>> Categories(string? subject, int page, int size, CancellationToken ct) { await Authorize(subject, AdminPermissions.CategoriesRead, ct); ValidatePage(page, size); return await data.Categories(page, size, ct); }
+    public async Task<Page<AdminCategory>> Categories(string? subject, int countryId, int page, int size, CancellationToken ct) { await Authorize(subject, AdminPermissions.CategoriesRead, ct); ValidatePage(page, size); await RequireActiveCountry(countryId, ct); return await data.Categories(countryId, page, size, ct); }
     public async Task<AdminCategory?> Category(string? subject, int id, CancellationToken ct) { await Authorize(subject, AdminPermissions.CategoriesRead, ct); return await data.Category(id, ct); }
-    public Task<AdminCategory> CreateCategory(string? s, CategoryInput i, CancellationToken ct) => Write<AdminCategory>(s, AdminPermissions.CategoriesCreate, "create", "category", null, async t => (await data.SaveCategory(null, Validate(i), t), null, i), ct);
-    public Task<AdminCategory> UpdateCategory(string? s, int id, CategoryInput i, CancellationToken ct) => Write(s, AdminPermissions.CategoriesUpdate, "update", "category", id.ToString(), async t => { var before = await data.Category(id, t); return before is null ? (null, null, null) : (await data.SaveCategory(id, Validate(i), t), before, i); }, ct);
+    public Task<AdminCategory> CreateCategory(string? s, CategoryInput i, CancellationToken ct) => Write<AdminCategory>(s, AdminPermissions.CategoriesCreate, "create", "category", null, async t => { await RequireActiveCountry(i.CountryId, t); return (await data.SaveCategory(null, Validate(i), t), null, i); }, ct);
+    public Task<AdminCategory> UpdateCategory(string? s, int id, CategoryInput i, CancellationToken ct) => Write(s, AdminPermissions.CategoriesUpdate, "update", "category", id.ToString(), async t => { await RequireActiveCountry(i.CountryId, t); var before = await data.Category(id, t); return before is null ? (null, null, null) : (await data.SaveCategory(id, Validate(i), t), before, i); }, ct);
     public async Task DeleteCategory(string? s, int id, CancellationToken ct) { var actor = await Authorize(s, AdminPermissions.CategoriesDelete, ct); await data.ExecuteAudited<bool>(actor, "delete", "category", id.ToString(), async t => { var old = await data.Category(id, t); if (old is null || !await data.DeleteCategory(id, t)) throw new KeyNotFoundException(); return (true, old, null); }, ct); }
 
     public async Task<Page<AdminShop>> Shops(string? subject, int page, int size, CancellationToken ct) { await Authorize(subject, AdminPermissions.ShopsRead, ct); ValidatePage(page, size); return await data.Shops(page, size, ct); }
     public async Task<AdminShop?> Shop(string? subject, int id, CancellationToken ct) { await Authorize(subject, AdminPermissions.ShopsRead, ct); return await data.Shop(id, ct); }
-    public Task<AdminShop> CreateShop(string? s, ShopInput i, CancellationToken ct) => Write<AdminShop>(s, AdminPermissions.ShopsCreate, "create", "shop", null, async t => (await data.SaveShop(null, Validate(i), t), null, i), ct);
-    public Task<AdminShop> UpdateShop(string? s, int id, ShopInput i, CancellationToken ct) => Write(s, AdminPermissions.ShopsUpdate, "update", "shop", id.ToString(), async t => { var before = await data.Shop(id, t); return before is null ? (null, null, null) : (await data.SaveShop(id, Validate(i), t), before, i); }, ct);
+    public Task<AdminShop> CreateShop(string? s, ShopInput i, CancellationToken ct) => Write<AdminShop>(s, AdminPermissions.ShopsCreate, "create", "shop", null, async t => { await RequireActiveCountry(i.CountryId, t); return (await data.SaveShop(null, Validate(i), t), null, i); }, ct);
+    public Task<AdminShop> UpdateShop(string? s, int id, ShopInput i, CancellationToken ct) => Write(s, AdminPermissions.ShopsUpdate, "update", "shop", id.ToString(), async t => { await RequireActiveCountry(i.CountryId, t); var before = await data.Shop(id, t); return before is null ? (null, null, null) : (await data.SaveShop(id, Validate(i), t), before, i); }, ct);
+
+    private async Task RequireActiveCountry(int countryId, CancellationToken ct)
+    {
+        if (countryId <= 0 || !await data.ActiveCountry(countryId, ct)) throw new ArgumentException("An active CountryId is required.", "countryId");
+    }
     public async Task DeleteShop(string? s, int id, CancellationToken ct) { var actor = await Authorize(s, AdminPermissions.ShopsDelete, ct); await data.ExecuteAudited<bool>(actor, "delete", "shop", id.ToString(), async t => { var old = await data.Shop(id, t); if (old is null || !await data.DeleteShop(id, t)) throw new KeyNotFoundException(); return (true, old, null); }, ct); }
 
     public async Task<Page<AdminProduct>> Products(string? subject, int page, int size, bool? isActive, CancellationToken ct) { await Authorize(subject, AdminPermissions.ProductsRead, ct); ValidatePage(page, size); return await data.Products(page, size, isActive, ct); }

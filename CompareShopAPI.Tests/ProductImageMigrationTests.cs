@@ -31,7 +31,7 @@ public sealed class ProductImageMigrationTests(SqlServerTestFixture fixture)
                 var externalProduct = new Product { Slug = "legacy-external", Name = "Legacy external", CategoryId = category.Id, ImageUrl = externalUrl };
                 db.Products.AddRange(fileProduct, externalProduct);
                 await db.SaveChangesAsync();
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
 
                 var fileImage = await db.ProductImages.SingleAsync(x => x.ProductId == fileProduct.Id);
                 var externalImage = await db.ProductImages.SingleAsync(x => x.ProductId == externalProduct.Id);

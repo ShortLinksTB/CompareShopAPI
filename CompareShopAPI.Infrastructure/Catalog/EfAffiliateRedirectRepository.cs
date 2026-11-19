@@ -9,10 +9,12 @@ namespace CompareShopAPI.Infrastructure.Catalog;
 
 public sealed class EfAffiliateRedirectRepository(CompareShopDbContext db, ILogger<EfAffiliateRedirectRepository> logger) : IAffiliateRedirectRepository
 {
-    public Task<AffiliateLink?> FindRedirectableLink(int offerId, CancellationToken ct) => db.AffiliateLinks.AsNoTracking()
+    public Task<AffiliateLink?> FindRedirectableLink(int countryId, int offerId, CancellationToken ct) => db.AffiliateLinks.AsNoTracking()
         .Where(link => link.ProductOfferId == offerId && link.ProductOffer.IsActive && !link.ProductOffer.IsOutlier &&
             link.ProductOffer.Product.IsActive && link.ProductOffer.Product.Category.IsActive && link.ProductOffer.PartnerShop.IsActive &&
+            link.ProductOffer.PartnerShop.CountryId == countryId && link.ProductOffer.Product.Category.CountryId == countryId &&
             !db.BannedItems.Any(ban => ban.IsActive &&
+                (ban.CountryId == null || ban.CountryId == countryId) &&
                 (ban.TargetType == BannedTargetType.Product && ban.ProductId == link.ProductOffer.ProductId
                  || ban.TargetType == BannedTargetType.Brand && link.ProductOffer.Product.Brand != null
                     && ban.NormalizedBrandName == link.ProductOffer.Product.Brand.Trim().ToUpper())))

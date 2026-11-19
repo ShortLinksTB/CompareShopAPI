@@ -97,7 +97,7 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
         int laptopCategoryId;
         await using (var db = new CompareShopDbContext(options))
         {
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var staleMappings = await db.SourceItemMappings.Where(x => x.ExternalSku.StartsWith("QC-SL1815-")).Select(x => x.Id).ToArrayAsync();
             await db.SourceItemMappings.Where(x => staleMappings.Contains(x.Id)).ExecuteDeleteAsync();
             await db.ProductMatchings.Where(x => x.Name.StartsWith("QC-SL1815 ")).ExecuteDeleteAsync();

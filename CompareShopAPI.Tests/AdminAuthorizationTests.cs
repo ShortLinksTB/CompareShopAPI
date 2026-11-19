@@ -30,7 +30,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 var laptopParent = new Category { Slug = $"laptop-parent-{Guid.NewGuid():N}", Name = "Laptop", Level = 1 };
                 db.Categories.Add(laptopParent);
                 await db.SaveChangesAsync();
@@ -118,7 +118,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
     {
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(fixture.ConnectionString).Options;
         var db = new CompareShopDbContext(options);
-        await db.Database.MigrateAsync();
+        await MigrationTestHelpers.MigrateToLatestAsync(db);
         var store = new EfAdminData(db, TimeProvider.System);
         return (db, new AdminService(store));
     }
@@ -168,7 +168,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         var other = $"bootstrap-other-{Guid.NewGuid():N}";
         try
         {
-            await using (var db = new CompareShopDbContext(options)) await db.Database.MigrateAsync();
+            await using (var db = new CompareShopDbContext(options)) await MigrationTestHelpers.MigrateToLatestAsync(db);
             var settings = new Dictionary<string, string?>
             {
                 ["ConnectionStrings:CompareShopDb"] = connection,
@@ -280,7 +280,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 var operatorSub = $"operator-{Guid.NewGuid():N}"; var viewerSub = $"viewer-{Guid.NewGuid():N}";
                 var otherSub = $"other-{Guid.NewGuid():N}";
                 await AddUser(db, operatorSub, 2); await AddUser(db, viewerSub, 4); await AddUser(db, otherSub, 1);
@@ -339,7 +339,7 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
         try
         {
-            await using var db = new CompareShopDbContext(options); await db.Database.MigrateAsync();
+            await using var db = new CompareShopDbContext(options); await MigrationTestHelpers.MigrateToLatestAsync(db);
             var subject = $"root-{Guid.NewGuid():N}"; var userId = await AddUser(db, subject, 1);
             var targetSubject = $"customer-{Guid.NewGuid():N}"; var targetUserId = await AddUser(db, targetSubject, 5);
             var service = new AdminService(new EfAdminData(db, TimeProvider.System));

@@ -29,7 +29,7 @@ public sealed class AdminIdentityProvisioningApiTests(SqlServerTestFixture fixtu
         {
             await using (var setup = new CompareShopDbContext(options))
             {
-                await setup.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(setup);
                 var root = new User(superAdminSubject, DateTime.UtcNow);
                 setup.Users.Add(root);
                 await setup.SaveChangesAsync();

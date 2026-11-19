@@ -313,7 +313,7 @@ public sealed class CategoryImportRollbackIntegrationTests(SqlServerTestFixture 
         {
             await using (var setup = new CompareShopDbContext(setupOptions))
             {
-                await setup.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(setup);
                 var root = new Category { Slug = "root", Name = "Root before", IsActive = false, Level = 1, SortOrder = 5 };
                 var child = new Category { Slug = "child", Name = "Child before", IsActive = true, ParentCategory = root, Level = 2, SortOrder = 8 };
                 setup.Categories.AddRange(root, child);

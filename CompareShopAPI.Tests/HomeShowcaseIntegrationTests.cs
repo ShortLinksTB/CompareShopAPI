@@ -28,8 +28,8 @@ public sealed class HomeShowcaseIntegrationTests(SqlServerTestFixture sqlServer)
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 foreach (var key in new[] { AdminPermissions.HomeShowcaseRead, AdminPermissions.HomeShowcaseUpdate, AdminPermissions.HomeShowcasePublish })
                 {
                     var permissionId = await db.AdminPermissions.Where(permission => permission.Key == key).Select(permission => permission.Id).SingleAsync();

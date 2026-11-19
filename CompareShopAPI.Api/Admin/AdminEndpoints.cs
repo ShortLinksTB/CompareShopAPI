@@ -1,4 +1,5 @@
 using CompareShopAPI.Application.Admin;
+using CompareShopAPI.Application.Catalog;
 using CompareShopAPI.Application.Ingestion;
 
 namespace CompareShopAPI.Api.Admin;
@@ -8,6 +9,11 @@ public static class AdminEndpoints
     public static RouteGroupBuilder MapAdminEndpoints(this RouteGroupBuilder admin)
     {
         admin.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+        admin.MapGet("/countries", (HttpContext c, CountryAdminService s, CancellationToken ct) => Run(async () => Results.Ok(new { items = await s.List(Subject(c), ct) })));
+        admin.MapGet("/countries/{id:int}", (HttpContext c, int id, CountryAdminService s, CancellationToken ct) => Run(async () => await s.Get(Subject(c), id, ct) is { } item ? Results.Ok(item) : Results.NotFound()));
+        admin.MapPost("/countries", (HttpContext c, CountryInput input, CountryAdminService s, CancellationToken ct) => Run(() => s.Create(Subject(c), input, ct), StatusCodes.Status201Created));
+        admin.MapPut("/countries/{id:int}", (HttpContext c, int id, CountryInput input, CountryAdminService s, CancellationToken ct) => Run(() => s.Update(Subject(c), id, input, ct)));
+        admin.MapDelete("/countries/{id:int}", (HttpContext c, int id, CountryAdminService s, CancellationToken ct) => Run(async () => { await s.Delete(Subject(c), id, ct); return Results.NoContent(); }));
         admin.MapGet("/me/permissions", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.MyPermissions(Subject(c), ct)));
         admin.MapPost("/bootstrap/first-admin", (HttpContext c, AdminService s, CancellationToken ct) => Run(async () =>
         {
@@ -24,7 +30,7 @@ public static class AdminEndpoints
         admin.MapPut("/products/{id:int}", (HttpContext c, int id, ProductInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateProduct(Subject(c), id, input, ct)));
         admin.MapDelete("/products/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => { await s.DeleteProduct(Subject(c), id, ct); return Results.NoContent(); }));
 
-        admin.MapGet("/categories", (HttpContext c, int? page, int? pageSize, AdminService s, CancellationToken ct) => Run(() => s.Categories(Subject(c), page ?? 1, pageSize ?? 20, ct)));
+        admin.MapGet("/categories", (HttpContext c, int countryId, int? page, int? pageSize, AdminService s, CancellationToken ct) => Run(() => s.Categories(Subject(c), countryId, page ?? 1, pageSize ?? 20, ct)));
         admin.MapGet("/categories/{id:int}", (HttpContext c, int id, AdminService s, CancellationToken ct) => Run(async () => await s.Category(Subject(c), id, ct) is { } x ? Results.Ok(x) : Results.NotFound()));
         admin.MapPost("/categories", (HttpContext c, CategoryInput input, AdminService s, CancellationToken ct) => Run(() => s.CreateCategory(Subject(c), input, ct), StatusCodes.Status201Created));
         admin.MapPut("/categories/{id:int}", (HttpContext c, int id, CategoryInput input, AdminService s, CancellationToken ct) => Run(() => s.UpdateCategory(Subject(c), id, input, ct)));
@@ -174,6 +180,8 @@ public static class AdminEndpoints
         }
         catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
         catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (CountryCodeConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+        catch (CountryInUseException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
     }
 
     public static async Task<IResult> RunCategoryImport(HttpContext context, CategoryImportService service, CancellationToken ct, bool commit)

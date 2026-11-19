@@ -14,7 +14,11 @@ public sealed class ProductImageCatalogProjectionTests
     {
         var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
         await using var db = new CompareShopDbContext(options);
-        var category = new Category { Slug = "phones", Name = "Phones", IsActive = true };
+        var vn = new Country("VN", "Vietnam");
+        db.Countries.Add(vn);
+        await db.SaveChangesAsync();
+        var category = new Category { Slug = "phones", Name = "Phones", IsActive = true, CountryId = vn.Id, Country = vn };
+        var shop = new PartnerShop { Slug = "shop", Name = "Shop", IsActive = true, CountryId = vn.Id, Country = vn };
         var firstFile = Guid.NewGuid();
         var firstCard = Guid.NewGuid();
         var firstDetail = Guid.NewGuid();
@@ -29,12 +33,13 @@ public sealed class ProductImageCatalogProjectionTests
                 new ProductImage { Id = Guid.NewGuid(), SortOrder = 2, FileId = Guid.NewGuid(), CreatedAtUtc = DateTime.UtcNow, UpdatedAtUtc = DateTime.UtcNow }
             ]
         };
+        product.Offers.Add(new ProductOffer { PartnerShop = shop, PriceVnd = 100, UpdatedAtUtc = DateTime.UtcNow, IsActive = true });
         db.Products.Add(product);
         await db.SaveChangesAsync();
 
         var queries = new EfCatalogQueries(db, TimeProvider.System);
         var result = await queries.Product(product.Slug, default);
-        var list = await queries.Products(new ProductFilter(1, 10), default);
+        var list = await queries.Products(new ProductFilter(1, 10, CountryId: CountryTestCompatibility.VnCountryId), default);
 
         Assert.NotNull(result);
         Assert.Equal($"/files/{firstCard:D}", result.ImageUrl);

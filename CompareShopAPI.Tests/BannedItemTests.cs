@@ -58,7 +58,7 @@ public sealed class BannedItemTests(SqlServerTestFixture fixture)
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 db.Users.Add(new User(subject, DateTime.UtcNow));
                 db.Users.Add(new User(editorSubject, DateTime.UtcNow));
                 var category = await CategoryTestData.AddLeafAsync(db, "banned-test-category", "Banned test");

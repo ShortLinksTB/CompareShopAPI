@@ -32,7 +32,7 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
                     (N'another-shop', N'Another Shop', 1);
                 """);
 
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var shops = await db.PartnerShops.OrderBy(x => x.Id).ToListAsync();
             Assert.Equal(existingShopCount + 5, shops.Count);
             var bySlug = shops.ToDictionary(x => x.Slug);
@@ -91,9 +91,9 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
         try
         {
             await using var db = new CompareShopDbContext(options);
-            await db.Database.MigrateAsync();
-            await db.Database.MigrateAsync();
-            db.PartnerShops.Add(new PartnerShop { Slug = "existing-unrelated-shop", Name = "Existing Shop", WebsiteUrl = "https://existing.example.test", IsActive = true });
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
+            db.PartnerShops.Add(new PartnerShop { Slug = "existing-unrelated-shop", Name = "Existing Shop", WebsiteUrl = "https://existing.example.test", IsActive = true, CountryId = CountryTestCompatibility.VnCountryId });
             await db.SaveChangesAsync();
             await CatalogSeed.SeedAsync(db);
             var homepageShop = await db.PartnerShops.SingleAsync(x => x.Slug == "north-shop");
@@ -161,14 +161,14 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
                 Assert.Equal(rootCategories[0].Id, category.ParentId);
                 Assert.Equal(2, category.Level);
             });
-            var inactiveParent = new Category { Slug = "inactive-category-parent", Name = "Inactive Parent", IsActive = false };
+            var inactiveParent = new Category { Slug = "inactive-category-parent", Name = "Inactive Parent", IsActive = false, CountryId = CountryTestCompatibility.VnCountryId };
             db.Categories.Add(inactiveParent);
             await db.SaveChangesAsync();
-            db.Categories.Add(new Category { Slug = "hidden-category-child", Name = "Hidden Child", IsActive = true, ParentCategoryId = inactiveParent.Id, Level = 2 });
+            db.Categories.Add(new Category { Slug = "hidden-category-child", Name = "Hidden Child", IsActive = true, CountryId = CountryTestCompatibility.VnCountryId, ParentCategoryId = inactiveParent.Id, Level = 2 });
             await db.SaveChangesAsync();
             Assert.Empty(await queries.Categories(inactiveParent.Id, default));
-            var first = await queries.Products(new ProductFilter(Page: 1, PageSize: 5), default);
-            var second = await queries.Products(new ProductFilter(Page: 2, PageSize: 5), default);
+            var first = await queries.Products(new ProductFilter(Page: 1, PageSize: 5, CountryId: CountryTestCompatibility.VnCountryId), default);
+            var second = await queries.Products(new ProductFilter(Page: 2, PageSize: 5, CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Equal(30, first.TotalItems); Assert.Equal(6, first.TotalPages); Assert.Equal(5, second.Items.Count);
             Assert.True(string.CompareOrdinal(first.Items[^1].Name, second.Items[0].Name) < 0);
             Assert.Equal(first.Items.Select(x => x.Id), first.Items.OrderBy(x => x.Name).ThenBy(x => x.Id).Select(x => x.Id));
@@ -194,7 +194,7 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             var noOffers = await queries.Product("sample-product-10", default);
             Assert.NotNull(noOffers); Assert.Equal(0, noOffers.OfferSummary.OfferCount); Assert.Null(noOffers.OfferSummary.MinPrice); Assert.Empty((await queries.Offers(noOffers.Id, default))!);
             Assert.Equal("https://images.example.test/admin-no-offer.jpg", noOffers.ImageUrl);
-            var allProducts = await queries.Products(new ProductFilter(PageSize: 100), default);
+            var allProducts = await queries.Products(new ProductFilter(PageSize: 100, CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Equal("https://images.example.test/admin-no-offer.jpg", allProducts.Items.Single(x => x.Slug == "sample-product-10").ImageUrl);
             Assert.Equal("https://images.example.test/mac.jpg", allProducts.Items.Single(x => x.Slug == "sample-product-01").ImageUrl);
             Assert.Equal("https://images.example.test/admin-offer-fallback.jpg", allProducts.Items.Single(x => x.Slug == "sample-product-02").ImageUrl);
@@ -205,15 +205,15 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Equal(2, (await queries.Product("sample-product-03", default))!.OfferSummary.OfferCount);
 
             var filtered = await queries.Products(new ProductFilter(CategoryId: first.Items[0].Category.Id, ShopId: offers[0].ShopId,
-                MinPrice: 1_000_000, MaxPrice: 2_000_000, PageSize: 100), default);
+                MinPrice: 1_000_000, MaxPrice: 2_000_000, PageSize: 100, CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Contains(filtered.Items, x => x.Id == sample.Id);
-            var empty = await queries.Products(new ProductFilter(MaxPrice: 1, PageSize: 10), default); Assert.Empty(empty.Items); Assert.Equal(0, empty.TotalItems);
-            var staleOnlyRange = await queries.Products(new ProductFilter(MinPrice: 1, MaxPrice: 1, PageSize: 100), default);
+            var empty = await queries.Products(new ProductFilter(MaxPrice: 1, PageSize: 10, CountryId: CountryTestCompatibility.VnCountryId), default); Assert.Empty(empty.Items); Assert.Equal(0, empty.TotalItems);
+            var staleOnlyRange = await queries.Products(new ProductFilter(MinPrice: 1, MaxPrice: 1, PageSize: 100, CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Empty(staleOnlyRange.Items); Assert.Equal(0, staleOnlyRange.TotalItems);
-            var outOfRangePage = await queries.Products(new ProductFilter(Page: int.MaxValue, PageSize: 100), default);
+            var outOfRangePage = await queries.Products(new ProductFilter(Page: int.MaxValue, PageSize: 100, CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Empty(outOfRangePage.Items); Assert.Equal(30, outOfRangePage.TotalItems);
 
-            var service = new CatalogService(queries);
+            var service = new CatalogService(queries, CountryTestCompatibility.VnCountrySelection());
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(Page: 0), default));
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(PageSize: 101), default));
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(MinPrice: 2, MaxPrice: 1), default));
@@ -228,7 +228,7 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Equal(30, searchPage1.TotalItems);
             Assert.True(string.CompareOrdinal(searchPage1.Items[^1].Name, searchPage2.Items[0].Name) < 0);
             var combinedSearch = await queries.Products(new ProductFilter(CategoryId: sample.Category.Id, ShopId: offers[0].ShopId,
-                MinPrice: 1_000_000, MaxPrice: 2_000_000, PageSize: 100, Search: "product 01"), default);
+                MinPrice: 1_000_000, MaxPrice: 2_000_000, PageSize: 100, Search: "product 01", CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Contains(combinedSearch.Items, x => x.Id == sample.Id);
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(Search: "x"), default));
 
@@ -237,7 +237,7 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             await db.Database.OpenConnectionAsync();
             var collation = (string)(await collationCommand.ExecuteScalarAsync())!;
             await db.Database.CloseConnectionAsync();
-            var caseSearch = await queries.Products(new ProductFilter(PageSize: 100, Search: "sample product 01"), default);
+            var caseSearch = await queries.Products(new ProductFilter(PageSize: 100, Search: "sample product 01", CountryId: CountryTestCompatibility.VnCountryId), default);
             if (collation.Contains("_CI_", StringComparison.OrdinalIgnoreCase)) Assert.Contains(caseSearch.Items, x => x.Id == sample.Id);
             else Assert.DoesNotContain(caseSearch.Items, x => x.Id == sample.Id);
 

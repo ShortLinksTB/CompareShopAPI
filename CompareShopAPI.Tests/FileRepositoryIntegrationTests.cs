@@ -27,7 +27,7 @@ public sealed class FileRepositoryIntegrationTests(SqlServerTestFixture sqlServe
             Guid fileId = Guid.NewGuid();
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 var parent = new Category { Slug = "race-parent", Name = "Race parent", Level = 1 };
                 var child = new Category { Slug = "race-child", Name = "Race child", Level = 2, ParentCategory = parent };
                 var product = new Product { Slug = "race-product", Name = "Race product", Category = child };
@@ -92,7 +92,7 @@ public sealed class FileRepositoryIntegrationTests(SqlServerTestFixture sqlServe
         try
         {
             await using var db = new CompareShopDbContext(options);
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var repository = new EfFileRepository(db);
             await repository.Add(new FileAsset(sourceId, "source.png", "image/png", 3, "source", "operator", DateTime.UtcNow), default);
             var deleted = new FileAsset(Guid.NewGuid(), "source-32x32.png", "image/png", 3, "deleted-derivative", "operator",
@@ -128,7 +128,7 @@ public sealed class FileRepositoryIntegrationTests(SqlServerTestFixture sqlServe
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 Assert.False(db.Database.HasPendingModelChanges());
                 var readId = await db.AdminPermissions.Where(permission => permission.Key == "files.read").Select(permission => permission.Id).SingleAsync();
                 var writeId = await db.AdminPermissions.Where(permission => permission.Key == "files.write").Select(permission => permission.Id).SingleAsync();

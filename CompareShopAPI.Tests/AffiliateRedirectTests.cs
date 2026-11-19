@@ -57,6 +57,8 @@ public sealed class AffiliateRedirectTests
         {
             services.RemoveAll<IAffiliateRedirectRepository>();
             services.AddSingleton<IAffiliateRedirectRepository>(repository);
+            services.RemoveAll<ICountryCatalog>();
+            services.AddSingleton(CountryTestCompatibility.VnCountryCatalog());
             services.RemoveAll<IClientIpResolver>();
             services.AddSingleton<IClientIpResolver>(ipResolver);
         });
@@ -108,21 +110,21 @@ public sealed class AffiliateRedirectTests
     {
         var repository = new FakeAffiliateRedirectRepository { PersistClicks = false };
         var service = new AffiliateRedirectService(repository, new FakeIpHasher(), TimeProvider.System);
-        var result = await service.Redirect(17, "192.0.2.4", default);
+        var result = await service.Redirect(1, 17, "192.0.2.4", default);
         Assert.True(result.TrackingFailed);
-        Assert.False(result.Found);
-        Assert.Null(result.Destination);
+        Assert.True(result.Found);
+        Assert.Equal(new Uri("https://affiliate-test.example/offer/17"), result.Destination);
     }
 
     [Fact]
-    public async Task Tracking_failure_returns_503_without_location()
+    public async Task Tracking_failure_preserves_redirect_destination()
     {
         var repository = new FakeAffiliateRedirectRepository { PersistClicks = false };
         await using var app = new ApiFactory(configureServices: services => ConfigureAffiliateServices(services, repository));
         using var client = app.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         using var response = await client.GetAsync("/api/v1/go/17");
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        Assert.Null(response.Headers.Location);
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.Equal("https://affiliate-test.example/offer/17", response.Headers.Location?.AbsoluteUri);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
     }
 
@@ -208,9 +210,9 @@ public sealed class AffiliateRedirectTests
         int linkId;
         await using (var db = new CompareShopDbContext(options))
         {
-            var parent = new Category { Id = 2, Slug = "test-parent", Name = "Test Parent", IsActive = true };
-            var category = new Category { Id = 1, Slug = "test", Name = "Test", IsActive = true, ParentCategoryId = parent.Id, ParentCategory = parent, Level = 2 };
-            var shop = new PartnerShop { Id = 1, Slug = "test", Name = "Test", IsActive = true };
+            var parent = new Category { Id = 2, CountryId = 1, Slug = "test-parent", Name = "Test Parent", IsActive = true };
+            var category = new Category { Id = 1, CountryId = 1, Slug = "test", Name = "Test", IsActive = true, ParentCategoryId = parent.Id, ParentCategory = parent, Level = 2 };
+            var shop = new PartnerShop { Id = 1, CountryId = 1, Slug = "test", Name = "Test", IsActive = true };
             var product = new Product { Id = 1, Slug = "test", Name = "Test", Category = category, IsActive = true };
             var offer = new ProductOffer { Id = 17, Product = product, PartnerShop = shop, PriceVnd = 100, UpdatedAtUtc = now, IsActive = true };
             var link = new AffiliateLink { ProductOffer = offer, DestinationUrl = "https://partner.example/path", IsEnabled = true, IsStale = false };
@@ -222,12 +224,12 @@ public sealed class AffiliateRedirectTests
         await using (var db = new CompareShopDbContext(options))
         {
             var repository = new EfAffiliateRedirectRepository(db, NullLogger<EfAffiliateRedirectRepository>.Instance);
-            Assert.NotNull(await repository.FindRedirectableLink(17, default));
-            Assert.Null(await repository.FindRedirectableLink(18, default));
+            Assert.NotNull(await repository.FindRedirectableLink(1, 17, default));
+            Assert.Null(await repository.FindRedirectableLink(1, 18, default));
             var offer = await db.ProductOffers.SingleAsync();
             offer.IsActive = false;
             await db.SaveChangesAsync();
-            Assert.Null(await repository.FindRedirectableLink(17, default));
+            Assert.Null(await repository.FindRedirectableLink(1, 17, default));
             offer.IsActive = true;
             await db.SaveChangesAsync();
             Assert.True(await repository.RecordClick(linkId, now, "0123456789abcdef", default));
@@ -249,7 +251,7 @@ public sealed class AffiliateRedirectTests
         public AffiliateLink Link => link;
         public int RecordedClicks { get; private set; }
         public bool PersistClicks { get; set; } = true;
-        public Task<AffiliateLink?> FindRedirectableLink(int offerId, CancellationToken ct) => Task.FromResult(offerId == 17 ? link : null);
+        public Task<AffiliateLink?> FindRedirectableLink(int countryId, int offerId, CancellationToken ct) => Task.FromResult(countryId == 1 && offerId == 17 ? link : null);
         public Task<bool> RecordClick(int affiliateLinkId, DateTime clickedAtUtc, string? clientIpDigest, CancellationToken ct)
         {
             if (PersistClicks) RecordedClicks++;
@@ -286,6 +288,8 @@ public sealed class AffiliateRedirectTests
     {
         services.RemoveAll<IAffiliateRedirectRepository>();
         services.AddSingleton<IAffiliateRedirectRepository>(repository);
+        services.RemoveAll<ICountryCatalog>();
+        services.AddSingleton(CountryTestCompatibility.VnCountryCatalog());
         services.RemoveAll<IAffiliateRedirectRateLimiter>();
         if (useRealRateLimiter)
         {

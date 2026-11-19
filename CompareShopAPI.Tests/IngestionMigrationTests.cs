@@ -136,7 +136,7 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
         try
         {
             await using var db = new CompareShopDbContext(options);
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var source = await db.DataSources.SingleAsync(x => x.Key == "bhx");
             Assert.Equal("bhx", source.Key);
             Assert.Equal("/bia", source.CategoryPath);
@@ -355,7 +355,7 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
                 ALTER TABLE [ProductOffers] ADD [ImageUrl] nvarchar(2048) NULL;
                 CREATE TABLE [ProductOfferSnapshots] ([Id] bigint IDENTITY(1,1) NOT NULL PRIMARY KEY, [ProductOfferId] int NULL);
                 """);
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var source = await db.DataSources.SingleAsync(x => x.Key == "cellphones");
             Assert.Equal("/laptop/mac.html", source.CategoryPath);
             Assert.Equal("cellphones", await db.PartnerShops.Where(x => x.Id == source.PartnerShopId).Select(x => x.Slug).SingleAsync());
@@ -398,8 +398,8 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
 
             await using (var migrate = new CompareShopDbContext(options))
             {
-                await migrate.Database.MigrateAsync();
-                await migrate.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(migrate);
+                await MigrationTestHelpers.MigrateToLatestAsync(migrate);
                 var mac = await migrate.DataSources.SingleAsync(x => x.Key == "cellphones");
                 Assert.Equal(macId, mac.Id);
                 Assert.Equal(originalPartnerShopId, mac.PartnerShopId);

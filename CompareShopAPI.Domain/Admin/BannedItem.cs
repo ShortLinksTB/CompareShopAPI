@@ -13,7 +13,7 @@ public sealed class BannedItem
     private BannedItem() { }
 
     private BannedItem(BannedTargetType targetType, string? brandName, string? normalizedBrandName, int? productId,
-        string reason, string createdBy, DateTime createdAtUtc)
+        string reason, string createdBy, DateTime createdAtUtc, int? countryId)
     {
         TargetType = targetType;
         BrandName = brandName;
@@ -22,6 +22,7 @@ public sealed class BannedItem
         Reason = reason;
         CreatedBy = createdBy;
         CreatedAtUtc = RequireUtc(createdAtUtc, nameof(createdAtUtc));
+        CountryId = countryId;
         IsActive = true;
     }
 
@@ -31,6 +32,8 @@ public sealed class BannedItem
     public string? NormalizedBrandName { get; private set; }
     public int? ProductId { get; private set; }
     public Product? Product { get; private set; }
+    public int? CountryId { get; private set; }
+    public Country? Country { get; private set; }
     public string Reason { get; private set; } = string.Empty;
     public bool IsActive { get; private set; }
     public string CreatedBy { get; private set; } = string.Empty;
@@ -38,18 +41,18 @@ public sealed class BannedItem
     public string? RevokedBy { get; private set; }
     public DateTime? RevokedAtUtc { get; private set; }
 
-    public static BannedItem ForBrand(string brandName, string reason, string actor, DateTime nowUtc)
+    public static BannedItem ForBrand(string brandName, string reason, string actor, DateTime nowUtc, int? countryId = null)
     {
         var name = RequiredText(brandName, 200, nameof(brandName));
         return new(BannedTargetType.Brand, name, NormalizeBrandName(name), null,
-            RequiredText(reason, 1000, nameof(reason)), RequiredText(actor, 200, nameof(actor)), nowUtc);
+            RequiredText(reason, 1000, nameof(reason)), RequiredText(actor, 200, nameof(actor)), nowUtc, ValidateCountry(countryId));
     }
 
-    public static BannedItem ForProduct(int productId, string reason, string actor, DateTime nowUtc)
+    public static BannedItem ForProduct(int productId, string reason, string actor, DateTime nowUtc, int? countryId = null)
     {
         if (productId <= 0) throw new ArgumentOutOfRangeException(nameof(productId));
         return new(BannedTargetType.Product, null, null, productId,
-            RequiredText(reason, 1000, nameof(reason)), RequiredText(actor, 200, nameof(actor)), nowUtc);
+            RequiredText(reason, 1000, nameof(reason)), RequiredText(actor, 200, nameof(actor)), nowUtc, ValidateCountry(countryId));
     }
 
     public bool Revoke(string actor, DateTime nowUtc)
@@ -62,6 +65,8 @@ public sealed class BannedItem
     }
 
     public static string NormalizeBrandName(string value) => value.Trim().ToUpperInvariant();
+
+    private static int? ValidateCountry(int? countryId) => countryId is <= 0 ? throw new ArgumentOutOfRangeException(nameof(countryId)) : countryId;
 
     private static string RequiredText(string? value, int maxLength, string parameter)
     {

@@ -30,7 +30,7 @@ public sealed class WishlistIntegrationTests(SqlServerTestFixture sqlServer)
             var olderAt = newestAt.AddMinutes(-1);
             await using (var setup = new CompareShopDbContext(options))
             {
-                await setup.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(setup);
                 var category = await CategoryTestData.AddLeafAsync(setup, "wishlist-test-category", "Wishlist Test");
 
                 withImage = new Product

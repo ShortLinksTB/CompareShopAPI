@@ -314,8 +314,8 @@ public sealed class CategoryImportRollbackIntegrationTests(SqlServerTestFixture 
             await using (var setup = new CompareShopDbContext(setupOptions))
             {
                 await MigrationTestHelpers.MigrateToLatestAsync(setup);
-                var root = new Category { Slug = "root", Name = "Root before", IsActive = false, Level = 1, SortOrder = 5 };
-                var child = new Category { Slug = "child", Name = "Child before", IsActive = true, ParentCategory = root, Level = 2, SortOrder = 8 };
+                var root = new Category { Slug = "root", Name = "Root before", IsActive = false, Level = 1, SortOrder = 5, CountryId = CountryTestCompatibility.VnCountryId };
+                var child = new Category { Slug = "child", Name = "Child before", IsActive = true, ParentCategory = root, Level = 2, SortOrder = 8, CountryId = CountryTestCompatibility.VnCountryId };
                 setup.Categories.AddRange(root, child);
                 var user = new User(actor, DateTime.UtcNow);
                 var role = new AdminRole { Name = "category-rollback-writer" };

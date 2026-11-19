@@ -29,7 +29,7 @@ public sealed class AffiliatePlatformPersistenceTests(SqlServerTestFixture fixtu
             var viewerSubject = $"affiliate-viewer-{Guid.NewGuid():N}";
             await using (var setup = new CompareShopDbContext(options))
             {
-                await setup.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(setup);
                 await setup.Database.ExecuteSqlRawAsync("ALTER TABLE [AffiliatePlatforms] ADD CONSTRAINT [CK_AffiliatePlatforms_ForceImportFailure] CHECK ([Name] <> N'Force import failure')");
                 var writer = new User(writerSubject, DateTime.UtcNow);
                 var viewer = new User(viewerSubject, DateTime.UtcNow);

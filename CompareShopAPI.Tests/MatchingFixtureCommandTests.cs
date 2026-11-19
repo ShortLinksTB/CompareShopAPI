@@ -114,10 +114,10 @@ public sealed class MatchingFixtureCommandTests(SqlServerTestFixture sqlServer)
                     ["seed-matching-fixtures"], Environment("Development"), config, services));
                 Assert.False(await db.PartnerShops.AnyAsync(x => x.Slug.StartsWith("qc-sl1815-")));
                 Assert.False(await db.ProductMatchings.AnyAsync(x => x.Name.StartsWith("QC-SL1815")));
-                var laptopParent = new Category { Slug = "test-laptop-parent", Name = "Test laptop parent", Level = 1 };
+                var laptopParent = new Category { Slug = "test-laptop-parent", Name = "Test laptop parent", Level = 1, CountryId = CountryTestCompatibility.VnCountryId };
                 db.Categories.Add(laptopParent);
                 await db.SaveChangesAsync();
-                await db.Database.ExecuteSqlInterpolatedAsync($"SET IDENTITY_INSERT [Categories] ON; INSERT INTO [Categories] ([Id], [Slug], [Name], [IsActive], [Level], [SortOrder], [ParentCategoryId]) VALUES (4008, N'laptop', N'Laptop', 1, 2, 0, {laptopParent.Id}); SET IDENTITY_INSERT [Categories] OFF;");
+                await db.Database.ExecuteSqlInterpolatedAsync($"SET IDENTITY_INSERT [Categories] ON; INSERT INTO [Categories] ([Id], [Slug], [Name], [IsActive], [Level], [SortOrder], [ParentCategoryId], [CountryId]) VALUES (4008, N'laptop', N'Laptop', 1, 2, 0, {laptopParent.Id}, {CountryTestCompatibility.VnCountryId}); SET IDENTITY_INSERT [Categories] OFF;");
             }
             else Assert.True(sharedLaptop.Name.Contains("laptop", StringComparison.OrdinalIgnoreCase) || sharedLaptop.Slug.Contains("laptop", StringComparison.OrdinalIgnoreCase));
             laptopCategoryId = 4008;

@@ -37,14 +37,17 @@ public sealed class HomeShowcaseIntegrationTests(SqlServerTestFixture sqlServer)
                     Assert.Contains(2, await db.AdminRolePermissions.Where(grant => grant.PermissionId == permissionId).Select(grant => grant.RoleId).ToListAsync());
                 }
 
-                var category = new Category { Slug = "computers", Name = "Computers", Level = 1, IsActive = true };
+                var category = new Category { Slug = "computers", Name = "Computers", Level = 1, IsActive = true, CountryId = CountryTestCompatibility.VnCountryId };
                 db.Categories.Add(category);
                 await db.SaveChangesAsync();
                 var active = new Product { Slug = "showcase-active", Name = "A Active", CategoryId = category.Id, IsActive = true };
                 var hidden = new Product { Slug = "showcase-hidden", Name = "B Hidden", CategoryId = category.Id, IsActive = false };
-                db.Products.AddRange(active, hidden);
+                var shop = new PartnerShop { Slug = "showcase-shop", Name = "Showcase Shop", CountryId = CountryTestCompatibility.VnCountryId, IsActive = true };
+                db.AddRange(active, hidden, shop);
                 var user = new User("home-showcase-admin", clock.GetUtcNow().UtcDateTime);
                 db.Users.Add(user);
+                await db.SaveChangesAsync();
+                db.ProductOffers.Add(new ProductOffer { ProductId = active.Id, PartnerShopId = shop.Id, PriceVnd = 1000, UpdatedAtUtc = clock.GetUtcNow().UtcDateTime, IsActive = true });
                 await db.SaveChangesAsync();
                 db.AdminUserRoles.Add(new AdminUserRole { UserId = user.Id, RoleId = 2 });
                 await db.SaveChangesAsync();

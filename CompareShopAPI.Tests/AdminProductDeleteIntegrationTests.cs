@@ -32,7 +32,7 @@ public sealed class AdminProductDeleteIntegrationTests(SqlServerTestFixture fixt
             {
                 await MigrationTestHelpers.MigrateToLatestAsync(setup);
                 var category = await CategoryTestData.AddLeafAsync(setup, "delete-test-category", "Delete Test");
-                var shop = new PartnerShop { Slug = "delete-test-shop", Name = "Delete Test Shop" };
+                var shop = new PartnerShop { Slug = "delete-test-shop", Name = "Delete Test Shop", CountryId = CountryTestCompatibility.VnCountryId };
                 setup.Add(shop);
                 await setup.SaveChangesAsync();
 

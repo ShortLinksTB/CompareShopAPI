@@ -32,7 +32,7 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
             await using (var db = new CompareShopDbContext(options))
             {
                 await MigrationTestHelpers.MigrateToLatestAsync(db);
-                var shop = new PartnerShop { Slug = $"sl-2330-shop-{Guid.NewGuid():N}", Name = "SL-2330 Test Shop" };
+                var shop = new PartnerShop { Slug = $"sl-2330-shop-{Guid.NewGuid():N}", Name = "SL-2330 Test Shop", CountryId = CountryTestCompatibility.VnCountryId };
                 var source = new DataSource(sourceKey, "SL-2330 Test Source", "/qc-sl1815/laptop", null, createdAt);
                 var user = new User(actor, createdAt);
                 var viewer = new User(viewerSubject, createdAt);

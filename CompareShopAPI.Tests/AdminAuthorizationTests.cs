@@ -31,10 +31,10 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             await using (var db = new CompareShopDbContext(options))
             {
                 await MigrationTestHelpers.MigrateToLatestAsync(db);
-                var laptopParent = new Category { Slug = $"laptop-parent-{Guid.NewGuid():N}", Name = "Laptop", Level = 1 };
+                var laptopParent = new Category { Slug = $"laptop-parent-{Guid.NewGuid():N}", Name = "Laptop", Level = 1, CountryId = CountryTestCompatibility.VnCountryId };
                 db.Categories.Add(laptopParent);
                 await db.SaveChangesAsync();
-                var category = new Category { Slug = "slug-availability", Name = "Slug availability", ParentCategoryId = laptopParent.Id, Level = 2 };
+                var category = new Category { Slug = "slug-availability", Name = "Slug availability", ParentCategoryId = laptopParent.Id, Level = 2, CountryId = CountryTestCompatibility.VnCountryId };
                 db.Categories.Add(category);
                 await db.SaveChangesAsync();
                 categoryId = category.Id;
@@ -316,8 +316,8 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
                 Assert.DoesNotContain("users.manage", ownPermissions);
 
                 client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: operatorSub));
-                Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/categories")).StatusCode);
-                var created = await client.PostAsJsonAsync("/admin/categories", new { slug = $"test-{Guid.NewGuid():N}", name = "Test", isActive = true });
+                Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/admin/categories?countryId=1")).StatusCode);
+                var created = await client.PostAsJsonAsync("/admin/categories", new { slug = $"test-{Guid.NewGuid():N}", name = "Test", isActive = true, countryId = 1 });
                 Assert.Equal(HttpStatusCode.Created, created.StatusCode);
                 Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/admin/audit-logs")).StatusCode);
 
@@ -344,35 +344,35 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             var targetSubject = $"customer-{Guid.NewGuid():N}"; var targetUserId = await AddUser(db, targetSubject, 5);
             var service = new AdminService(new EfAdminData(db, TimeProvider.System));
 
-            var rootCategory = await service.CreateCategory(subject, new("admin-root", "Admin Root"), default);
+            var rootCategory = await service.CreateCategory(subject, new("admin-root", "Admin Root", CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Null(rootCategory.ParentCategoryId);
             await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProduct(subject, new("root-category-product", "Invalid Root Product", null, null, rootCategory.Id), default));
-            var category = await service.CreateCategory(subject, new("admin-category", "Admin Category", true, rootCategory.Id), default);
+            var category = await service.CreateCategory(subject, new("admin-category", "Admin Category", true, rootCategory.Id, CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Equal(rootCategory.Id, category.ParentCategoryId);
-            var secondRootCategory = await service.CreateCategory(subject, new("admin-root-two", "Admin Root Two"), default);
-            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateCategory(subject, new("invalid-parent", "Invalid Parent", true, category.Id), default));
-            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateCategory(subject, new("missing-parent", "Missing Parent", true, int.MaxValue), default));
-            await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateCategory(subject, rootCategory.Id, new("admin-root", "Admin Root", true, secondRootCategory.Id), default));
+            var secondRootCategory = await service.CreateCategory(subject, new("admin-root-two", "Admin Root Two", CountryId: CountryTestCompatibility.VnCountryId), default);
+            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateCategory(subject, new("invalid-parent", "Invalid Parent", true, category.Id, CountryId: CountryTestCompatibility.VnCountryId), default));
+            await Assert.ThrowsAsync<ArgumentException>(() => service.CreateCategory(subject, new("missing-parent", "Missing Parent", true, int.MaxValue, CountryId: CountryTestCompatibility.VnCountryId), default));
+            await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateCategory(subject, rootCategory.Id, new("admin-root", "Admin Root", true, secondRootCategory.Id, CountryId: CountryTestCompatibility.VnCountryId), default));
             await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProduct(subject, new("bad-image", "Bad Image", null, null, category.Id, true, "http://images.example.test/a.jpg"), default));
             await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProduct(subject, new("long-image", "Long Image", null, null, category.Id, true, "https://images.example.test/" + new string('x', 2048)), default));
-            await service.UpdateCategory(subject, category.Id, new("admin-category-updated", "Updated Category", false, rootCategory.Id), default);
-            var disposableCategory = await service.CreateCategory(subject, new("delete-category", "Delete Category"), default);
-            var shop = await service.CreateShop(subject, new("admin-shop", "Admin Shop", "https://shop.example"), default);
-            var visibleShop = await service.UpdateShop(subject, shop.Id, new ShopInput("admin-shop", "Admin Shop", "https://shop.example", true, true) with { HomeDisplayOrder = 4 }, default);
+            await service.UpdateCategory(subject, category.Id, new("admin-category-updated", "Updated Category", false, rootCategory.Id, CountryId: CountryTestCompatibility.VnCountryId), default);
+            var disposableCategory = await service.CreateCategory(subject, new("delete-category", "Delete Category", CountryId: CountryTestCompatibility.VnCountryId), default);
+            var shop = await service.CreateShop(subject, new("admin-shop", "Admin Shop", "https://shop.example", CountryId: CountryTestCompatibility.VnCountryId), default);
+            var visibleShop = await service.UpdateShop(subject, shop.Id, new ShopInput("admin-shop", "Admin Shop", "https://shop.example", true, true, CountryTestCompatibility.VnCountryId) with { HomeDisplayOrder = 4 }, default);
             Assert.True(visibleShop.ShowOnHome);
             Assert.Equal(4, visibleShop.HomeDisplayOrder);
-            var legacyShopInput = System.Text.Json.JsonSerializer.Deserialize<ShopInput>("{\"slug\":\"admin-shop\",\"name\":\"Admin Shop\",\"websiteUrl\":\"https://shop.example\",\"isActive\":true}",
+            var legacyShopInput = System.Text.Json.JsonSerializer.Deserialize<ShopInput>("{\"slug\":\"admin-shop\",\"name\":\"Admin Shop\",\"websiteUrl\":\"https://shop.example\",\"isActive\":true,\"countryId\":1}",
                 new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
             var legacyUpdatedShop = await service.UpdateShop(subject, shop.Id, legacyShopInput, default);
             Assert.True(legacyUpdatedShop.ShowOnHome);
             Assert.Equal(4, legacyUpdatedShop.HomeDisplayOrder);
-            var clearOrderInput = System.Text.Json.JsonSerializer.Deserialize<ShopInput>("{\"slug\":\"admin-shop\",\"name\":\"Admin Shop\",\"websiteUrl\":\"https://shop.example\",\"isActive\":true,\"homeDisplayOrder\":null}",
+            var clearOrderInput = System.Text.Json.JsonSerializer.Deserialize<ShopInput>("{\"slug\":\"admin-shop\",\"name\":\"Admin Shop\",\"websiteUrl\":\"https://shop.example\",\"isActive\":true,\"countryId\":1,\"homeDisplayOrder\":null}",
                 new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
             Assert.True(clearOrderInput.HomeDisplayOrder.IsSpecified);
             Assert.Null(clearOrderInput.HomeDisplayOrder.Value);
             var clearedShopOrder = await service.UpdateShop(subject, shop.Id, clearOrderInput, default);
             Assert.Null(clearedShopOrder.HomeDisplayOrder);
-            var setOrderInput = System.Text.Json.JsonSerializer.Deserialize<ShopInput>("{\"slug\":\"admin-shop\",\"name\":\"Admin Shop\",\"websiteUrl\":\"https://shop.example\",\"homeDisplayOrder\":5}",
+            var setOrderInput = System.Text.Json.JsonSerializer.Deserialize<ShopInput>("{\"slug\":\"admin-shop\",\"name\":\"Admin Shop\",\"websiteUrl\":\"https://shop.example\",\"countryId\":1,\"homeDisplayOrder\":5}",
                 new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
             Assert.True(setOrderInput.HomeDisplayOrder.IsSpecified);
             Assert.Equal(5, setOrderInput.HomeDisplayOrder.Value);
@@ -383,12 +383,12 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             var createdProductImage = Assert.Single(await db.ProductImages.Where(x => x.ProductId == product.Id).ToListAsync());
             Assert.Equal("https://images.example.test/product.jpg", createdProductImage.ExternalUrl);
             Assert.Equal(0, createdProductImage.SortOrder);
-            var legacyCategoryInput = System.Text.Json.JsonSerializer.Deserialize<CategoryInput>("{\"slug\":\"admin-category-legacy\",\"name\":\"Legacy Update\",\"isActive\":true}",
+            var legacyCategoryInput = System.Text.Json.JsonSerializer.Deserialize<CategoryInput>("{\"slug\":\"admin-category-legacy\",\"name\":\"Legacy Update\",\"isActive\":true,\"countryId\":1}",
                 new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
             var legacyUpdatedCategory = await service.UpdateCategory(subject, category.Id, legacyCategoryInput, default);
             Assert.Equal(rootCategory.Id, legacyUpdatedCategory.ParentCategoryId);
             await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateCategory(subject, category.Id,
-                new("admin-category-promote", "Unsafe Promotion", true, ClearParentCategory: true), default));
+                new("admin-category-promote", "Unsafe Promotion", true, ClearParentCategory: true, CountryId: CountryTestCompatibility.VnCountryId), default));
             Assert.Equal(rootCategory.Id, (await service.Category(subject, category.Id, default))?.ParentCategoryId);
             await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProduct(subject, product.Id, new("admin-product", "Invalid Root Assignment", "Brand", "Description", rootCategory.Id), default));
             var offer = new CompareShopAPI.Domain.Catalog.ProductOffer { ProductId = product.Id, PartnerShopId = shop.Id, PriceVnd = 100, Url = "https://shop.example/item", UpdatedAtUtc = DateTime.UtcNow, IsActive = false };

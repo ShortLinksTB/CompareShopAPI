@@ -256,7 +256,7 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
             {
                 await setup.Database.EnsureCreatedAsync();
                 var category = await CategoryTestData.AddLeafAsync(setup, "test", "Test");
-                var shop = new PartnerShop { Slug = "bhx", Name = "Bách Hóa Xanh" };
+                var shop = new PartnerShop { Slug = "bhx", Name = "Bách Hóa Xanh", CountryId = CountryTestCompatibility.VnCountryId };
                 setup.Add(shop);
                 await setup.SaveChangesAsync();
 
@@ -319,7 +319,8 @@ public sealed class IngestionMigrationTests(SqlServerTestFixture sqlServer)
         {
             await using var db = new CompareShopDbContext(options);
             await db.Database.EnsureCreatedAsync();
-            var bhxShop = new PartnerShop { Slug = "bhx", Name = "Bách Hóa Xanh" };
+            var vietnam = await CountryTestCompatibility.EnsureVnCountryAsync(db);
+            var bhxShop = new PartnerShop { Slug = "bhx", Name = "Bách Hóa Xanh", CountryId = vietnam.Id };
             var source = new DataSource("cellphones", "CellphoneS", "/laptop/mac.html", null, DateTime.UtcNow);
             var bhx = new DataSource("bhx", "Bách Hóa Xanh", "/bia", null, DateTime.UtcNow);
             db.AddRange(bhxShop, source, bhx);

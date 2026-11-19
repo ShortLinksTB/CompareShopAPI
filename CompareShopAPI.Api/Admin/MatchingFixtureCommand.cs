@@ -110,8 +110,8 @@ public static class MatchingFixtureCommand
             (x.Slug.Contains("laptop") || x.Name.Contains("laptop") || db.Categories.Any(parent => parent.Id == x.ParentCategoryId &&
                 (parent.Slug.Contains("laptop") || parent.Name.Contains("laptop")))));
         if (category is null) throw new MatchingLaptopCategoryUnavailableException();
-        var shopA = new PartnerShop { Slug = Prefix + "shop-a", Name = Owner + " Shop A", WebsiteUrl = "https://shop-a.example.test", IsActive = true };
-        var shopB = new PartnerShop { Slug = Prefix + "shop-b", Name = Owner + " Shop B", WebsiteUrl = "https://shop-b.example.test", IsActive = true };
+        var shopA = new PartnerShop { Slug = Prefix + "shop-a", Name = Owner + " Shop A", WebsiteUrl = "https://shop-a.example.test", IsActive = true, CountryId = category.CountryId };
+        var shopB = new PartnerShop { Slug = Prefix + "shop-b", Name = Owner + " Shop B", WebsiteUrl = "https://shop-b.example.test", IsActive = true, CountryId = category.CountryId };
         db.AddRange(shopA, shopB);
         await db.SaveChangesAsync();
 
@@ -215,6 +215,7 @@ public static class MatchingFixtureCommand
         if (!await db.Categories.AsNoTracking().AnyAsync(x => x.Id == 4008 && x.Level == 2 &&
             (x.Slug.Contains("laptop") || x.Name.Contains("laptop"))))
             throw new InvalidOperationException("QC-SL1815 v3 requires existing Laptop category 4008; no v3 fixture writes were made.");
+        var countryId = await db.Categories.Where(x => x.Id == 4008).Select(x => x.CountryId).SingleAsync();
 
         const string v3Owner = Owner + "-v3";
         const string sku = Owner + "-v3-create-product";
@@ -224,7 +225,7 @@ public static class MatchingFixtureCommand
             || await db.ProductMatchings.AnyAsync(x => x.ExternalSku == sku))
             throw new InvalidOperationException("QC-SL1815 v3 namespace is occupied by records absent from its ownership manifest; refusing to seed.");
 
-        var shop = new PartnerShop { Slug = v3Owner + "-shop", Name = v3Owner + " Shop", WebsiteUrl = "https://v3-shop.example.test", IsActive = true };
+        var shop = new PartnerShop { Slug = v3Owner + "-shop", Name = v3Owner + " Shop", WebsiteUrl = "https://v3-shop.example.test", IsActive = true, CountryId = countryId };
         db.PartnerShops.Add(shop);
         await db.SaveChangesAsync();
         var source = new DataSource(Prefix + "v3-source", v3Owner + " Shop", "/qc-sl1815/laptop", shop.Id, FixtureTime);

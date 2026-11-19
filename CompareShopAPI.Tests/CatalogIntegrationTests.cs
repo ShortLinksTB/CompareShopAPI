@@ -169,7 +169,7 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Empty(await queries.Categories(inactiveParent.Id, default));
             var first = await queries.Products(new ProductFilter(Page: 1, PageSize: 5, CountryId: CountryTestCompatibility.VnCountryId), default);
             var second = await queries.Products(new ProductFilter(Page: 2, PageSize: 5, CountryId: CountryTestCompatibility.VnCountryId), default);
-            Assert.Equal(30, first.TotalItems); Assert.Equal(6, first.TotalPages); Assert.Equal(5, second.Items.Count);
+            Assert.Equal(27, first.TotalItems); Assert.Equal(6, first.TotalPages); Assert.Equal(5, second.Items.Count);
             Assert.True(string.CompareOrdinal(first.Items[^1].Name, second.Items[0].Name) < 0);
             Assert.Equal(first.Items.Select(x => x.Id), first.Items.OrderBy(x => x.Name).ThenBy(x => x.Id).Select(x => x.Id));
 
@@ -192,10 +192,9 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             await db.SaveChangesAsync();
             Assert.Null((await queries.Offers(sample.Id, default))![0].Specifications);
             var noOffers = await queries.Product("sample-product-10", default);
-            Assert.NotNull(noOffers); Assert.Equal(0, noOffers.OfferSummary.OfferCount); Assert.Null(noOffers.OfferSummary.MinPrice); Assert.Empty((await queries.Offers(noOffers.Id, default))!);
-            Assert.Equal("https://images.example.test/admin-no-offer.jpg", noOffers.ImageUrl);
+            Assert.Null(noOffers);
             var allProducts = await queries.Products(new ProductFilter(PageSize: 100, CountryId: CountryTestCompatibility.VnCountryId), default);
-            Assert.Equal("https://images.example.test/admin-no-offer.jpg", allProducts.Items.Single(x => x.Slug == "sample-product-10").ImageUrl);
+            Assert.DoesNotContain(allProducts.Items, x => x.Slug == "sample-product-10");
             Assert.Equal("https://images.example.test/mac.jpg", allProducts.Items.Single(x => x.Slug == "sample-product-01").ImageUrl);
             Assert.Equal("https://images.example.test/admin-offer-fallback.jpg", allProducts.Items.Single(x => x.Slug == "sample-product-02").ImageUrl);
             Assert.Equal("https://images.example.test/admin-offer-fallback.jpg", (await queries.Product("sample-product-02", default))!.ImageUrl);
@@ -211,7 +210,7 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             var staleOnlyRange = await queries.Products(new ProductFilter(MinPrice: 1, MaxPrice: 1, PageSize: 100, CountryId: CountryTestCompatibility.VnCountryId), default);
             Assert.Empty(staleOnlyRange.Items); Assert.Equal(0, staleOnlyRange.TotalItems);
             var outOfRangePage = await queries.Products(new ProductFilter(Page: int.MaxValue, PageSize: 100, CountryId: CountryTestCompatibility.VnCountryId), default);
-            Assert.Empty(outOfRangePage.Items); Assert.Equal(30, outOfRangePage.TotalItems);
+            Assert.Empty(outOfRangePage.Items); Assert.Equal(27, outOfRangePage.TotalItems);
 
             var service = new CatalogService(queries, CountryTestCompatibility.VnCountrySelection());
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(Page: 0), default));
@@ -222,10 +221,10 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Single(trimmedSearch.Items); Assert.Equal(sample.Id, trimmedSearch.Items[0].Id);
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.Products(new ProductFilter(Search: new string('x', 81)), default));
             var blankSearch = await service.Products(new ProductFilter(PageSize: 100, Search: "  "), default);
-            Assert.Equal(30, blankSearch.TotalItems);
+            Assert.Equal(27, blankSearch.TotalItems);
             var searchPage1 = await service.Products(new ProductFilter(Page: 1, PageSize: 3, Search: "Sample Product"), default);
             var searchPage2 = await service.Products(new ProductFilter(Page: 2, PageSize: 3, Search: "Sample Product"), default);
-            Assert.Equal(30, searchPage1.TotalItems);
+            Assert.Equal(27, searchPage1.TotalItems);
             Assert.True(string.CompareOrdinal(searchPage1.Items[^1].Name, searchPage2.Items[0].Name) < 0);
             var combinedSearch = await queries.Products(new ProductFilter(CategoryId: sample.Category.Id, ShopId: offers[0].ShopId,
                 MinPrice: 1_000_000, MaxPrice: 2_000_000, PageSize: 100, Search: "product 01", CountryId: CountryTestCompatibility.VnCountryId), default);
@@ -245,6 +244,11 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             var containsSuggestion = new Product { Slug = "unique-contains", Name = "A Unique Search Product", CategoryId = sample.Category.Id, IsActive = true };
             db.Products.AddRange(prefixSuggestion, containsSuggestion);
             await db.SaveChangesAsync();
+            var suggestionShopId = await db.PartnerShops.Where(x => x.Slug == "north-shop").Select(x => x.Id).SingleAsync();
+            db.ProductOffers.AddRange(
+                new ProductOffer { ProductId = prefixSuggestion.Id, PartnerShopId = suggestionShopId, PriceVnd = 1000, UpdatedAtUtc = FixedClock.GetUtcNow().UtcDateTime, IsActive = true },
+                new ProductOffer { ProductId = containsSuggestion.Id, PartnerShopId = suggestionShopId, PriceVnd = 1000, UpdatedAtUtc = FixedClock.GetUtcNow().UtcDateTime, IsActive = true });
+            await db.SaveChangesAsync();
             var suggestions = await queries.Suggestions("unique search", 10, default);
             Assert.Equal(new[] { prefixSuggestion.Id, containsSuggestion.Id }, suggestions.Select(x => x.Id));
             Assert.Empty(await queries.Suggestions("no such match", 10, default));
@@ -254,7 +258,8 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
 
             var historyStore = new EfPriceHistoryStore(db, FixedClock);
             var historyService = new PriceHistoryService(historyStore, FixedClock);
-            Assert.Empty((await historyService.History(noOffers.Id, null, null, default))!);
+            var noOffersId = await db.Products.Where(x => x.Slug == "sample-product-10").Select(x => x.Id).SingleAsync();
+            Assert.Empty((await historyService.History(noOffersId, null, null, default))!);
             Assert.Null(await historyService.History(int.MaxValue, null, null, default));
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => historyService.History(0, null, null, default));
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => historyService.RecordMinimum(0, default));
@@ -285,8 +290,8 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             await historyService.RecordMinimum(sample.Id, default);
             await historyService.RecordMinimum(sample.Id, default);
             Assert.Equal(beforeRecording + 1, await db.PriceHistoryPoints.CountAsync(point => point.ProductId == sample.Id));
-            await historyService.RecordMinimum(noOffers.Id, default);
-            Assert.Equal(0, await db.PriceHistoryPoints.CountAsync(point => point.ProductId == noOffers.Id));
+            await historyService.RecordMinimum(noOffersId, default);
+            Assert.Equal(0, await db.PriceHistoryPoints.CountAsync(point => point.ProductId == noOffersId));
             var freshnessCutoff = FixedClock.GetUtcNow().UtcDateTime.AddDays(-CatalogOfferPolicy.FreshnessDays);
             var currentMinimumOffer = await db.ProductOffers.Where(offer => offer.ProductId == sample.Id && offer.IsActive && !offer.IsOutlier &&
                     offer.UpdatedAtUtc >= freshnessCutoff && offer.PartnerShop.IsActive)
@@ -340,7 +345,7 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             var emptySuggestionResponse = await client.GetAsync("/api/v1/search/suggestions?q=missing%20thing");
             using (var emptySuggestionJson = System.Text.Json.JsonDocument.Parse(await emptySuggestionResponse.Content.ReadAsStringAsync()))
                 Assert.Empty(emptySuggestionJson.RootElement.GetProperty("items").EnumerateArray());
-            var emptyHistoryResponse = await client.GetAsync($"/api/v1/products/{noOffers.Id}/price-history");
+            var emptyHistoryResponse = await client.GetAsync($"/api/v1/products/{noOffersId}/price-history");
             Assert.Equal(System.Net.HttpStatusCode.OK, emptyHistoryResponse.StatusCode);
             var historyResponse = await client.GetAsync($"/api/v1/products/{sample.Id}/price-history?from=2026-07-01T00:00:00Z&to=2026-10-17T00:00:00Z");
             Assert.Equal(System.Net.HttpStatusCode.OK, historyResponse.StatusCode);
@@ -352,7 +357,7 @@ public sealed class CatalogIntegrationTests(SqlServerTestFixture sqlServer)
             Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/products/{inactiveId}/price-history")).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync("/api/v1/products/sample-product-01")).StatusCode);
             Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.GetAsync("/api/v1/products/inactive-sample-product")).StatusCode);
-            Assert.Equal(System.Net.HttpStatusCode.OK, (await client.GetAsync($"/api/v1/products/{noOffers.Id}/offers")).StatusCode);
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client.GetAsync($"/api/v1/products/{noOffersId}/offers")).StatusCode);
             var offerResponse = await client.GetAsync($"/api/v1/products/{sample.Id}/offers");
             Assert.Equal(System.Net.HttpStatusCode.OK, offerResponse.StatusCode);
             using var offerJson = System.Text.Json.JsonDocument.Parse(await offerResponse.Content.ReadAsStringAsync());

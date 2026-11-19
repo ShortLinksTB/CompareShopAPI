@@ -28,8 +28,8 @@ public sealed class FileRepositoryIntegrationTests(SqlServerTestFixture sqlServe
             await using (var db = new CompareShopDbContext(options))
             {
                 await MigrationTestHelpers.MigrateToLatestAsync(db);
-                var parent = new Category { Slug = "race-parent", Name = "Race parent", Level = 1 };
-                var child = new Category { Slug = "race-child", Name = "Race child", Level = 2, ParentCategory = parent };
+                var parent = new Category { Slug = "race-parent", Name = "Race parent", Level = 1, CountryId = CountryTestCompatibility.VnCountryId };
+                var child = new Category { Slug = "race-child", Name = "Race child", Level = 2, ParentCategory = parent, CountryId = CountryTestCompatibility.VnCountryId };
                 var product = new Product { Slug = "race-product", Name = "Race product", Category = child };
                 db.Products.Add(product);
                 await db.SaveChangesAsync();
@@ -137,8 +137,8 @@ public sealed class FileRepositoryIntegrationTests(SqlServerTestFixture sqlServe
                 var repository = new EfFileRepository(db);
                 var sourceId = Guid.NewGuid();
                 await repository.Add(new FileAsset(sourceId, "photo.png", "image/png", 3, "photo", "operator", DateTime.UtcNow), default);
-                var topCategory = new Category { Slug = "top-files", Name = "Top", Level = 1 };
-                var subCategory = new Category { Slug = "sub-files", Name = "Sub", Level = 2, ParentCategory = topCategory };
+                var topCategory = new Category { Slug = "top-files", Name = "Top", Level = 1, CountryId = CountryTestCompatibility.VnCountryId };
+                var subCategory = new Category { Slug = "sub-files", Name = "Sub", Level = 2, ParentCategory = topCategory, CountryId = CountryTestCompatibility.VnCountryId };
                 var product = new Product { Slug = "file-usage-product", Name = "File usage product", Category = subCategory };
                 db.Products.Add(product);
                 await db.SaveChangesAsync();

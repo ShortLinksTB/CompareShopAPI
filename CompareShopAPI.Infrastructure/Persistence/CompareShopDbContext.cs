@@ -48,7 +48,7 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<HomeShowcasePreviewToken> HomeShowcasePreviewTokens => Set<HomeShowcasePreviewToken>();
     protected override void OnModelCreating(ModelBuilder model)
     {
-        model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
+        model.Entity<Category>().HasKey(x => x.Id);
         model.Entity<AffiliatePlatform>().HasKey(x => x.Id);
         model.Entity<AffiliatePlatform>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         model.Entity<AffiliatePlatform>().Property(x => x.NormalizedName).UseCollation("Latin1_General_100_BIN2").HasMaxLength(450).IsRequired();

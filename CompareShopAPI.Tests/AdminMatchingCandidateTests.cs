@@ -174,7 +174,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             var inactive = new Product { Slug = "inactive", Name = "Mac Air", Brand = "Apple", CategoryId = category.Id, IsActive = false };
             db.Products.AddRange(best, fallback, inactive);
             await db.SaveChangesAsync();
-            var shop = new PartnerShop { Slug = "matching-shop", Name = "Matching Shop", WebsiteUrl = "https://shop.example" };
+            var shop = new PartnerShop { Slug = "matching-shop", Name = "Matching Shop", WebsiteUrl = "https://shop.example", CountryId = CountryTestCompatibility.VnCountryId };
             db.PartnerShops.Add(shop);
             await db.SaveChangesAsync();
             source.AttachPartnerShop(shop.Id);

@@ -52,6 +52,16 @@ internal static class CountryTestCompatibility
 
     public static CountrySelectionService VnCountrySelection() => new(new TestCountryCatalog());
     public static ICountryCatalog VnCountryCatalog() => new TestCountryCatalog();
+
+    public static async Task<Country> EnsureVnCountryAsync(CompareShopDbContext db, CancellationToken ct = default)
+    {
+        var country = await db.Countries.SingleOrDefaultAsync(x => x.Code == "VN", ct);
+        if (country is not null) return country;
+        country = new Country("VN", "Vietnam", true);
+        db.Countries.Add(country);
+        await db.SaveChangesAsync(ct);
+        return country;
+    }
 }
 
 internal static class MigrationTestHelpers
@@ -70,6 +80,12 @@ internal static class MigrationTestHelpers
         if (!applied.Contains(LegacyCountrySeedStage, StringComparer.Ordinal))
             await db.Database.MigrateAsync(LegacyCountrySeedStage);
 
-        await MigrationTestHelpers.MigrateToLatestAsync(db);
+        // Existing rows in these SQL integration tests are test fixtures and use the VN catalog.
+        // Production migrations intentionally do not make this broad assignment.
+        var vnId = await db.Countries.Where(x => x.Code == "VN").Select(x => x.Id).SingleAsync();
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE [PartnerShops] SET [CountryId] = {vnId} WHERE [CountryId] IS NULL");
+        await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE [Categories] SET [CountryId] = {vnId} WHERE [CountryId] IS NULL");
+
+        await db.Database.MigrateAsync();
     }
 }

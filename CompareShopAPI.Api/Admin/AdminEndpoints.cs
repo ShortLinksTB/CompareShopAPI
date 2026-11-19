@@ -245,6 +245,7 @@ public static class AdminEndpoints
         try { return await operation(); }
         catch (AdminUnauthorizedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status401Unauthorized); }
         catch (AdminForbiddenException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden); }
+        catch (CountryInUseException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (ProductImageFilesUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable); }
         catch (ProductImageValidationException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["images"] = [ex.Message] }, statusCode: StatusCodes.Status422UnprocessableEntity); }
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }

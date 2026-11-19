@@ -1,10 +1,15 @@
+using System.Net;
+using System.Net.Http.Headers;
 using CompareShopAPI.Application.Admin;
 using CompareShopAPI.Application.Catalog;
+using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Domain.Catalog;
+using CompareShopAPI.Domain.UserCommerce;
 using CompareShopAPI.Infrastructure.Catalog;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Xunit;
 
 namespace CompareShopAPI.Tests;
@@ -71,6 +76,67 @@ public sealed class CountryAdminServiceTests
 public sealed class EfCountryDataTests(SqlServerTestFixture fixture)
 {
     [Fact]
+    public async Task Deleting_referenced_country_returns_conflict_and_preserves_country()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"CountryDelete_{Guid.NewGuid():N}" }.ConnectionString;
+        var raceInterceptor = new InsertCountryReferenceOnSaveInterceptor(connection);
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).AddInterceptors(raceInterceptor).Options;
+        var subject = $"country-admin-{Guid.NewGuid():N}";
+        int countryId;
+        try
+        {
+            await using (var db = new CompareShopDbContext(options))
+            {
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
+                var country = new Country("US", "United States");
+                db.Countries.Add(country);
+                await db.SaveChangesAsync();
+                countryId = country.Id;
+                db.PartnerShops.Add(new PartnerShop { Slug = "country-delete-reference", Name = "Referenced", CountryId = country.Id });
+
+                var permission = await db.AdminPermissions.SingleAsync(x => x.Key == "countries.manage");
+                var role = new AdminRole { Name = $"Country Manager {Guid.NewGuid():N}" };
+                var user = new User(subject, DateTime.UtcNow);
+                db.AddRange(role, user);
+                await db.SaveChangesAsync();
+                db.AdminRolePermissions.Add(new AdminRolePermission { RoleId = role.Id, PermissionId = permission.Id });
+                db.AdminUserRoles.Add(new AdminUserRole { RoleId = role.Id, UserId = user.Id });
+                await db.SaveChangesAsync();
+            }
+
+            await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection }, signing: true);
+            using var client = app.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: subject));
+            using var response = await client.DeleteAsync($"/admin/countries/{countryId}");
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            await using var verify = new CompareShopDbContext(options);
+            var persisted = await verify.Countries.AsNoTracking().SingleAsync(x => x.Id == countryId);
+            Assert.Equal("US", persisted.Code);
+            Assert.Equal("United States", persisted.Name);
+            Assert.True(persisted.IsActive);
+
+            await using (var race = new CompareShopDbContext(options))
+            {
+                race.PartnerShops.Remove(await race.PartnerShops.SingleAsync(x => x.Slug == "country-delete-reference"));
+                await race.SaveChangesAsync();
+                raceInterceptor.Arm();
+                var data = new EfCountryData(race, new FixedClock());
+                await Assert.ThrowsAsync<CountryInUseException>(() => data.Delete(countryId, subject, default));
+            }
+
+            await using var raceVerify = new CompareShopDbContext(options);
+            Assert.True(await raceVerify.Countries.AnyAsync(x => x.Id == countryId));
+            Assert.True(await raceVerify.PartnerShops.AnyAsync(x => x.Slug == "country-delete-race-reference" && x.CountryId == countryId));
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task Country_reads_writes_audit_and_delete_guards_work_in_sql_server()
     {
         var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"CountryAdmin_{Guid.NewGuid():N}" }.ConnectionString;
@@ -114,5 +180,24 @@ public sealed class EfCountryDataTests(SqlServerTestFixture fixture)
     private sealed class FixedClock : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => new(2026, 11, 19, 0, 0, 0, TimeSpan.Zero);
+    }
+
+    private sealed class InsertCountryReferenceOnSaveInterceptor(string connectionString) : SaveChangesInterceptor
+    {
+        private bool _armed;
+
+        public void Arm() => _armed = true;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
+        {
+            if (!_armed) return result;
+            _armed = false;
+            var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connectionString).Options;
+            await using var concurrent = new CompareShopDbContext(options);
+            var country = await concurrent.Countries.AsNoTracking().SingleAsync(x => x.Code == "US", cancellationToken);
+            concurrent.PartnerShops.Add(new PartnerShop { Slug = "country-delete-race-reference", Name = "Concurrent reference", CountryId = country.Id });
+            await concurrent.SaveChangesAsync(cancellationToken);
+            return result;
+        }
     }
 }

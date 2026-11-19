@@ -3,6 +3,7 @@ using CompareShopAPI.Application.Catalog;
 using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Domain.Admin;
 using CompareShopAPI.Infrastructure.Persistence;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace CompareShopAPI.Infrastructure.Catalog;
@@ -49,7 +50,11 @@ public sealed class EfCountryData(CompareShopDbContext db, TimeProvider clock) :
             throw new CountryInUseException();
         db.Countries.Remove(item);
         db.AdminAuditLogs.Add(new AdminAuditLog { ActorSubject = actor, Action = "delete", ResourceType = "country", ResourceId = id.ToString(), CreatedAtUtc = clock.GetUtcNow().UtcDateTime, BeforeJson = JsonSerializer.Serialize(new AdminCountryDto(item.Id, item.Code, item.Name, item.IsActive)) });
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException exception) when (exception.InnerException is SqlException { Number: 547 })
+        {
+            throw new CountryInUseException();
+        }
         return true;
     }
 }

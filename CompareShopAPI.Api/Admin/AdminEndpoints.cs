@@ -9,11 +9,7 @@ public static class AdminEndpoints
     public static RouteGroupBuilder MapAdminEndpoints(this RouteGroupBuilder admin)
     {
         admin.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-        admin.MapGet("/countries", (HttpContext c, CountryAdminService s, CancellationToken ct) => Run(async () => Results.Ok(new { items = await s.List(Subject(c), ct) })));
-        admin.MapGet("/countries/{id:int}", (HttpContext c, int id, CountryAdminService s, CancellationToken ct) => Run(async () => await s.Get(Subject(c), id, ct) is { } item ? Results.Ok(item) : Results.NotFound()));
-        admin.MapPost("/countries", (HttpContext c, CountryInput input, CountryAdminService s, CancellationToken ct) => Run(() => s.Create(Subject(c), input, ct), StatusCodes.Status201Created));
-        admin.MapPut("/countries/{id:int}", (HttpContext c, int id, CountryInput input, CountryAdminService s, CancellationToken ct) => Run(() => s.Update(Subject(c), id, input, ct)));
-        admin.MapDelete("/countries/{id:int}", (HttpContext c, int id, CountryAdminService s, CancellationToken ct) => Run(async () => { await s.Delete(Subject(c), id, ct); return Results.NoContent(); }));
+        admin.MapCountryAdminEndpoints();
         admin.MapGet("/me/permissions", (HttpContext c, AdminService s, CancellationToken ct) => Run(() => s.MyPermissions(Subject(c), ct)));
         admin.MapPost("/bootstrap/first-admin", (HttpContext c, AdminService s, CancellationToken ct) => Run(async () =>
         {
@@ -140,6 +136,16 @@ public static class AdminEndpoints
         return admin;
     }
 
+    public static RouteGroupBuilder MapCountryAdminEndpoints(this RouteGroupBuilder admin)
+    {
+        admin.MapGet("/countries", (HttpContext c, CountryAdminService s, CancellationToken ct) => Run(async () => Results.Ok(new { items = await s.List(Subject(c), ct) })));
+        admin.MapGet("/countries/{id:int}", (HttpContext c, int id, CountryAdminService s, CancellationToken ct) => Run(async () => await s.Get(Subject(c), id, ct) is { } item ? Results.Ok(item) : Results.NotFound()));
+        admin.MapPost("/countries", (HttpContext c, CountryInput input, CountryAdminService s, CancellationToken ct) => Run(() => s.Create(Subject(c), input, ct), StatusCodes.Status201Created));
+        admin.MapPut("/countries/{id:int}", (HttpContext c, int id, CountryInput input, CountryAdminService s, CancellationToken ct) => Run(() => s.Update(Subject(c), id, input, ct)));
+        admin.MapDelete("/countries/{id:int}", (HttpContext c, int id, CountryAdminService s, CancellationToken ct) => Run(async () => { await s.Delete(Subject(c), id, ct); return Results.NoContent(); }));
+        return admin;
+    }
+
     public static RouteGroupBuilder MapSyncJobEndpoints(this RouteGroupBuilder admin)
     {
         admin.MapGet("/sync-jobs", async (HttpContext c, int? page, int? pageSize, string? q, DateTime? startedFrom, DateTime? startedTo, IngestionAdminService s, CancellationToken ct) =>
@@ -248,6 +254,7 @@ public static class AdminEndpoints
         catch (ProductImageFilesUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable); }
         catch (ProductImageValidationException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["images"] = [ex.Message] }, statusCode: StatusCodes.Status422UnprocessableEntity); }
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+        catch (CountryInUseException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (ProductDeleteConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
         catch (MatchingLaptopCategoryUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "category_unavailable" }); }
         catch (MatchingProductSlugConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "slug_conflict", ["slug"] = ex.Slug }); }

@@ -24,7 +24,7 @@ public static class AdminPermissions
     public const string HomeShowcaseRead = "home_showcase.read", HomeShowcaseUpdate = "home_showcase.update", HomeShowcasePublish = "home_showcase.publish";
 }
 
-public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId, int CountryId = 0, string? CountryCode = null, string? CountryName = null);
+public sealed record AdminCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId, int? CountryId = null, string? CountryCode = null, string? CountryName = null);
 public sealed record CategoryImportRow(int? Id, string Slug, string Name, string? ParentSlug, JsonElement SortOrder = default);
 public sealed record CategoryImportJson(int SchemaVersion, DateTimeOffset? ExportedAt, IReadOnlyList<CategoryImportRow>? Categories);
 public sealed record CategoryImportStoredCategory(int Id, string Slug, string Name, bool IsActive, int? ParentCategoryId, string? ParentSlug, int SortOrder, int ProductCount);
@@ -36,7 +36,7 @@ public sealed record CategoryExportDocument(int SchemaVersion, DateTimeOffset Ex
 public sealed record CategoryExportRow(int Id, string Slug, string Name, string? ParentSlug, int SortOrder);
 public sealed record CategoryImportAudit(int Created, int Updated, int Deleted, IReadOnlyList<string> CreatedSlugs, IReadOnlyList<string> UpdatedSlugs, IReadOnlyList<string> DeletedSlugs, string OriginalFilename);
 public sealed record CategoryImportCommitResult(CategoryImportSummary Summary, IReadOnlyList<CategoryImportChange> Changes);
-public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive, bool ShowOnHome, int? HomeDisplayOrder, int CountryId = 0, string? CountryCode = null, string? CountryName = null);
+public sealed record AdminShop(int Id, string Slug, string Name, string? WebsiteUrl, bool IsActive, bool ShowOnHome, int? HomeDisplayOrder, int? CountryId = null, string? CountryCode = null, string? CountryName = null);
 public sealed record AdminProduct(int Id, string Slug, string Name, string? Brand, string? Description, string? SeoTitle, string? SeoDescription, int CategoryId, bool IsActive, string? ImageUrl = null)
 {
     public bool NeedsStandardImage { get; init; }

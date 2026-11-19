@@ -74,8 +74,19 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         return true;
     }
 
-    public Task<Page<AdminCategory>> Categories(int countryId, int page, int size, CancellationToken ct) => PageOf(db.Categories.AsNoTracking().Where(x => x.CountryId == countryId).OrderBy(x => x.Id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId, x.CountryId, x.Country.Code, x.Country.Name)), page, size, ct);
-    public Task<AdminCategory?> Category(int id, CancellationToken ct) => db.Categories.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId, x.CountryId, x.Country.Code, x.Country.Name)).SingleOrDefaultAsync(ct);
+    public Task<Page<AdminCategory>> Categories(int countryId, int page, int size, CancellationToken ct) => PageOf(
+        from category in db.Categories.AsNoTracking().Where(x => x.CountryId == countryId).OrderBy(x => x.Id)
+        join country in db.Countries.AsNoTracking() on category.CountryId equals (int?)country.Id into countries
+        from country in countries.DefaultIfEmpty()
+        select new AdminCategory(category.Id, category.Slug, category.Name, category.IsActive, category.ParentCategoryId,
+            country == null ? null : country.Id, country == null ? null : country.Code, country == null ? null : country.Name), page, size, ct);
+    public Task<AdminCategory?> Category(int id, CancellationToken ct) => (
+        from category in db.Categories.AsNoTracking().Where(x => x.Id == id)
+        join country in db.Countries.AsNoTracking() on category.CountryId equals (int?)country.Id into countries
+        from country in countries.DefaultIfEmpty()
+        select new AdminCategory(category.Id, category.Slug, category.Name, category.IsActive, category.ParentCategoryId,
+            country == null ? null : country.Id, country == null ? null : country.Code, country == null ? null : country.Name))
+        .SingleOrDefaultAsync(ct);
     public async Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct)
     {
         var item = id.HasValue ? await db.Categories.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
@@ -192,8 +203,19 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         await db.SaveChangesAsync(ct);
     }
 
-    public Task<Page<AdminShop>> Shops(int page, int size, CancellationToken ct) => PageOf(db.PartnerShops.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder, x.CountryId, x.Country.Code, x.Country.Name)), page, size, ct);
-    public Task<AdminShop?> Shop(int id, CancellationToken ct) => db.PartnerShops.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder, x.CountryId, x.Country.Code, x.Country.Name)).SingleOrDefaultAsync(ct);
+    public Task<Page<AdminShop>> Shops(int page, int size, CancellationToken ct) => PageOf(
+        from shop in db.PartnerShops.AsNoTracking().OrderBy(x => x.Id)
+        join country in db.Countries.AsNoTracking() on shop.CountryId equals (int?)country.Id into countries
+        from country in countries.DefaultIfEmpty()
+        select new AdminShop(shop.Id, shop.Slug, shop.Name, shop.WebsiteUrl, shop.IsActive, shop.ShowOnHome,
+            shop.HomeDisplayOrder, country == null ? null : country.Id, country == null ? null : country.Code, country == null ? null : country.Name), page, size, ct);
+    public Task<AdminShop?> Shop(int id, CancellationToken ct) => (
+        from shop in db.PartnerShops.AsNoTracking().Where(x => x.Id == id)
+        join country in db.Countries.AsNoTracking() on shop.CountryId equals (int?)country.Id into countries
+        from country in countries.DefaultIfEmpty()
+        select new AdminShop(shop.Id, shop.Slug, shop.Name, shop.WebsiteUrl, shop.IsActive, shop.ShowOnHome,
+            shop.HomeDisplayOrder, country == null ? null : country.Id, country == null ? null : country.Code, country == null ? null : country.Name))
+        .SingleOrDefaultAsync(ct);
     public async Task<AdminShop> SaveShop(int? id, ShopInput input, CancellationToken ct)
     {
         var item = id.HasValue ? await db.PartnerShops.SingleOrDefaultAsync(x => x.Id == id, ct) : null;

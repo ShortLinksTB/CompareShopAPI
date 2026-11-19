@@ -501,6 +501,59 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
 
     }
 
+    [Fact]
+    public async Task NullableCountryCatalogRowsRemainAddressableThroughAdminProjections()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"NullableCountryAdmin_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        try
+        {
+            await using var db = new CompareShopDbContext(options);
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE [Categories] ALTER COLUMN [CountryId] int NULL; ALTER TABLE [PartnerShops] ALTER COLUMN [CountryId] int NULL;");
+
+            var subject = $"nullable-country-admin-{Guid.NewGuid():N}";
+            await AddUser(db, subject, 1);
+            var categoryForUpdate = new Category { Slug = $"nullable-update-{Guid.NewGuid():N}", Name = "Nullable Update", Level = 1, CountryId = CountryTestCompatibility.VnCountryId };
+            var categoryForDelete = new Category { Slug = $"nullable-delete-{Guid.NewGuid():N}", Name = "Nullable Delete", Level = 1, CountryId = CountryTestCompatibility.VnCountryId };
+            var shopForUpdate = new PartnerShop { Slug = $"nullable-update-{Guid.NewGuid():N}", Name = "Nullable Update", CountryId = CountryTestCompatibility.VnCountryId };
+            var shopForDelete = new PartnerShop { Slug = $"nullable-delete-{Guid.NewGuid():N}", Name = "Nullable Delete", CountryId = CountryTestCompatibility.VnCountryId };
+            db.AddRange(categoryForUpdate, categoryForDelete, shopForUpdate, shopForDelete);
+            await db.SaveChangesAsync();
+            await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE [Categories] SET [CountryId] = NULL WHERE [Id] IN ({categoryForUpdate.Id}, {categoryForDelete.Id}); UPDATE [PartnerShops] SET [CountryId] = NULL WHERE [Id] IN ({shopForUpdate.Id}, {shopForDelete.Id});");
+
+            var service = new AdminService(new EfAdminData(db, TimeProvider.System));
+            var category = await service.Category(subject, categoryForUpdate.Id, default);
+            Assert.NotNull(category);
+            Assert.Null(category.CountryId);
+            Assert.Null(category.CountryCode);
+            Assert.Null(category.CountryName);
+            var shop = await service.Shop(subject, shopForUpdate.Id, default);
+            Assert.NotNull(shop);
+            Assert.Null(shop.CountryId);
+            Assert.Null(shop.CountryCode);
+            Assert.Null(shop.CountryName);
+            Assert.Contains((await service.Shops(subject, 1, 100, default)).Items, item => item.Id == shopForUpdate.Id && item.CountryId is null);
+
+            var updatedCategory = await service.UpdateCategory(subject, categoryForUpdate.Id,
+                new("nullable-category-updated", "Updated Nullable Category", CountryId: CountryTestCompatibility.VnCountryId), default);
+            Assert.Equal(CountryTestCompatibility.VnCountryId, updatedCategory.CountryId);
+            var updatedShop = await service.UpdateShop(subject, shopForUpdate.Id,
+                new("nullable-shop-updated", "Updated Nullable Shop", null, true, CountryTestCompatibility.VnCountryId), default);
+            Assert.Equal(CountryTestCompatibility.VnCountryId, updatedShop.CountryId);
+
+            await service.DeleteCategory(subject, categoryForDelete.Id, default);
+            await service.DeleteShop(subject, shopForDelete.Id, default);
+            Assert.False(await db.Categories.AnyAsync(x => x.Id == categoryForDelete.Id));
+            Assert.False(await db.PartnerShops.AnyAsync(x => x.Id == shopForDelete.Id));
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
     private static async Task<string[]> ReadPermissions(HttpResponseMessage response)
     {
         using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());

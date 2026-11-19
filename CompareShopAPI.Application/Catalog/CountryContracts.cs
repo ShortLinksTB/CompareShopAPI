@@ -39,7 +39,13 @@ public sealed class CountryAdminService(ICountryAdminData data, CompareShopAPI.A
     public async Task<IReadOnlyList<AdminCountryDto>> List(string? subject, CancellationToken ct) { await Authorize(subject, "countries.read", ct); return await data.List(ct); }
     public async Task<AdminCountryDto?> Get(string? subject, int id, CancellationToken ct) { await Authorize(subject, "countries.read", ct); return await data.Get(id, ct); }
     public async Task<AdminCountryDto> Create(string? subject, CountryInput input, CancellationToken ct) { var actor = await Authorize(subject, "countries.manage", ct); var country = new Country(input.Code, input.Name, input.IsActive); return await data.Save(null, new(country.Code, country.Name, country.IsActive), actor, ct); }
-    public async Task<AdminCountryDto> Update(string? subject, int id, CountryInput input, CancellationToken ct) { var actor = await Authorize(subject, "countries.manage", ct); var country = new Country(input.Code, input.Name, input.IsActive); return await data.Save(id, new(country.Code, country.Name, country.IsActive), actor, ct); }
+    public async Task<AdminCountryDto> Update(string? subject, int id, CountryInput input, CancellationToken ct)
+    {
+        var actor = await Authorize(subject, "countries.manage", ct);
+        var existing = await data.Get(id, ct) ?? throw new KeyNotFoundException("Country not found.");
+        var country = new Country(existing.Code, input.Name, input.IsActive);
+        return await data.Save(id, new(existing.Code, country.Name, country.IsActive), actor, ct);
+    }
     public async Task Delete(string? subject, int id, CancellationToken ct) { var actor = await Authorize(subject, "countries.manage", ct); if (!await data.Delete(id, actor, ct)) throw new KeyNotFoundException("Country not found."); }
     private async Task<string> Authorize(string? subject, string permission, CancellationToken ct)
     {

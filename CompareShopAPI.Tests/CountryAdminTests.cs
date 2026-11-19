@@ -21,16 +21,27 @@ public sealed class CountryAdminServiceTests
         Assert.Null(await service.Get("admin", 42, default));
         var created = await service.Create("admin", new CountryInput(" id ", " Indonesia "), default);
         Assert.Equal(new AdminCountryDto(1, "ID", "Indonesia", true), created);
-        var updated = await service.Update("admin", created.Id, new CountryInput("id", "Indonesia", false), default);
+        var updated = await service.Update("admin", created.Id, new CountryInput("ZZ", "Indonesia", false), default);
+        Assert.Equal("ID", updated.Code);
         Assert.False(updated.IsActive);
         await service.Delete("admin", created.Id, default);
         await Assert.ThrowsAsync<KeyNotFoundException>(() => service.Delete("admin", 99, default));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.Update("admin", 99, new CountryInput("ID", "Missing"), default));
 
         var missingSubject = new CountryAdminService(data, new FakePermissionReader(true));
         await Assert.ThrowsAsync<AdminUnauthorizedException>(() => missingSubject.List(null, default));
         var forbidden = new CountryAdminService(data, new FakePermissionReader(false));
         await Assert.ThrowsAsync<AdminForbiddenException>(() => forbidden.Create("viewer", new CountryInput("SG", "Singapore"), default));
     }
+
+    [Theory]
+    [InlineData("ZZ")]
+    [InlineData("XK")]
+    [InlineData("A1")]
+    [InlineData("USA")]
+    [InlineData("")]
+    public void Country_rejects_codes_outside_iso_alpha2(string code) =>
+        Assert.Throws<ArgumentException>(() => new Country(code, "Invalid code"));
 
     private sealed class FakeCountryAdminData : ICountryAdminData
     {

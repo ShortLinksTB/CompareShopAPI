@@ -31,8 +31,8 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
             int shopId;
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
-                var shop = new PartnerShop { Slug = $"sl-2330-shop-{Guid.NewGuid():N}", Name = "SL-2330 Test Shop" };
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
+                var shop = new PartnerShop { Slug = $"sl-2330-shop-{Guid.NewGuid():N}", Name = "SL-2330 Test Shop", CountryId = CountryTestCompatibility.VnCountryId };
                 var source = new DataSource(sourceKey, "SL-2330 Test Source", "/qc-sl1815/laptop", null, createdAt);
                 var user = new User(actor, createdAt);
                 var viewer = new User(viewerSubject, createdAt);
@@ -168,7 +168,7 @@ public sealed class DataSourceEndpointTests(SqlServerTestFixture fixture)
             int jobId;
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 await db.Database.ExecuteSqlInterpolatedAsync($"""
                     INSERT INTO [DataSources] ([Key], [DisplayName], [CategoryPath], [PartnerShopId], [State], [IntervalHours], [CreatedAtUtc], [LastCompletedAtUtc], [NextAttemptAtUtc])
                     VALUES ({sourceKey}, N'SL-1452 Test Source', N'/test', NULL, N'Active', 72, {createdAt}, {createdAt.AddHours(3)}, {createdAt.AddHours(10)});

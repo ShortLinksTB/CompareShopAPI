@@ -126,7 +126,7 @@ public sealed class AdminOfferImportIntegrationTests(SqlServerTestFixture fixtur
         try
         {
             await using var db = new CompareShopDbContext(options);
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var category = await CategoryTestData.AddLeafAsync(db, $"category-{Guid.NewGuid():N}", "Test");
             var shop = await db.PartnerShops.SingleAsync(x => x.Slug == "cellphones");
             await db.SaveChangesAsync();

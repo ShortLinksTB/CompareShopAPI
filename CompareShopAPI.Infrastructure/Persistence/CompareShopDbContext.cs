@@ -10,6 +10,7 @@ namespace CompareShopAPI.Infrastructure.Persistence;
 public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> options) : DbContext(options)
 {
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<Country> Countries => Set<Country>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<ProductImage> ProductImages => Set<ProductImage>();
     public DbSet<PartnerShop> PartnerShops => Set<PartnerShop>();
@@ -47,13 +48,17 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
     public DbSet<HomeShowcasePreviewToken> HomeShowcasePreviewTokens => Set<HomeShowcasePreviewToken>();
     protected override void OnModelCreating(ModelBuilder model)
     {
-        model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => x.Slug).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
+        model.Entity<Category>().HasKey(x => x.Id);
         model.Entity<AffiliatePlatform>().HasKey(x => x.Id);
         model.Entity<AffiliatePlatform>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         model.Entity<AffiliatePlatform>().Property(x => x.NormalizedName).UseCollation("Latin1_General_100_BIN2").HasMaxLength(450).IsRequired();
         model.Entity<AffiliatePlatform>().HasIndex(x => x.NormalizedName).IsUnique();
         model.Entity<AffiliatePlatform>().Property(x => x.HomeUrl).HasMaxLength(2048);
         model.Entity<AffiliatePlatform>().Property(x => x.Notes);
+        model.Entity<Country>().HasKey(x => x.Id); model.Entity<Country>().HasIndex(x => x.Code).IsUnique();
+        model.Entity<Country>().Property(x => x.Code).HasMaxLength(2).IsRequired(); model.Entity<Country>().Property(x => x.Name).HasMaxLength(100).IsRequired();
+        model.Entity<Category>().HasKey(x => x.Id); model.Entity<Category>().HasIndex(x => new { x.CountryId, x.Slug }).IsUnique(); model.Entity<Category>().HasIndex(x => x.IsActive);
+        model.Entity<Category>().HasOne(x => x.Country).WithMany().HasForeignKey(x => x.CountryId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<Category>().HasIndex(x => x.ParentCategoryId);
         model.Entity<Category>().Property(x => x.Level).HasDefaultValue((byte)1);
         model.Entity<Category>().Property(x => x.SortOrder).HasDefaultValue(0);
@@ -63,6 +68,8 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<PartnerShop>().HasKey(x => x.Id); model.Entity<PartnerShop>().HasIndex(x => x.Slug).IsUnique(); model.Entity<PartnerShop>().HasIndex(x => x.IsActive);
         model.Entity<PartnerShop>().Property(x => x.Slug).HasMaxLength(160); model.Entity<PartnerShop>().Property(x => x.Name).HasMaxLength(200);
         model.Entity<PartnerShop>().Property(x => x.ShowOnHome).HasDefaultValue(false);
+        model.Entity<PartnerShop>().HasIndex(x => x.CountryId);
+        model.Entity<PartnerShop>().HasOne(x => x.Country).WithMany().HasForeignKey(x => x.CountryId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<HomeShowcaseSlot>().HasKey(x => x.Id);
         model.Entity<HomeShowcaseSlot>().Property(x => x.Snapshot).HasConversion<int>();
         model.Entity<HomeShowcaseSlot>().Property(x => x.Section).HasConversion<int>();
@@ -169,11 +176,12 @@ public sealed class CompareShopDbContext(DbContextOptions<CompareShopDbContext> 
         model.Entity<BannedItem>().Property(x => x.Reason).HasMaxLength(1000).IsRequired();
         model.Entity<BannedItem>().Property(x => x.CreatedBy).HasMaxLength(200).IsRequired();
         model.Entity<BannedItem>().Property(x => x.RevokedBy).HasMaxLength(200);
-        model.Entity<BannedItem>().HasIndex(x => x.NormalizedBrandName).IsUnique()
+        model.Entity<BannedItem>().HasIndex(x => new { x.NormalizedBrandName, x.CountryId }).IsUnique()
             .HasFilter("[IsActive] = 1 AND [TargetType] = N'Brand' AND [NormalizedBrandName] IS NOT NULL");
-        model.Entity<BannedItem>().HasIndex(x => x.ProductId).IsUnique()
+        model.Entity<BannedItem>().HasIndex(x => new { x.ProductId, x.CountryId }).IsUnique()
             .HasFilter("[IsActive] = 1 AND [TargetType] = N'Product' AND [ProductId] IS NOT NULL");
         model.Entity<BannedItem>().HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+        model.Entity<BannedItem>().HasOne(x => x.Country).WithMany().HasForeignKey(x => x.CountryId).OnDelete(DeleteBehavior.Restrict);
         model.Entity<BannedItem>().ToTable(table => table.HasCheckConstraint("CK_BannedItems_TargetShape",
             "([TargetType] = N'Brand' AND [BrandName] IS NOT NULL AND [NormalizedBrandName] IS NOT NULL AND [ProductId] IS NULL) OR ([TargetType] = N'Product' AND [BrandName] IS NULL AND [NormalizedBrandName] IS NULL AND [ProductId] IS NOT NULL)"));
         model.Entity<BannedItemOutboxMessage>().HasKey(x => x.Id);

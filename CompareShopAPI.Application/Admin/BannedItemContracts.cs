@@ -3,17 +3,19 @@ using CompareShopAPI.Domain.Admin;
 namespace CompareShopAPI.Application.Admin;
 
 public sealed record BannedItemDto(int Id, string TargetType, string? BrandName, int? ProductId, string? ProductName,
-    string Reason, bool IsActive, string CreatedBy, DateTime CreatedAtUtc, string? RevokedBy, DateTime? RevokedAtUtc);
-public sealed record BannedItemInput(string TargetType, string? BrandName, int? ProductId, string Reason);
+    string Reason, bool IsActive, string CreatedBy, DateTime CreatedAtUtc, string? RevokedBy, DateTime? RevokedAtUtc,
+    int? CountryId = null, string? CountryCode = null, string? CountryName = null);
+public sealed record BannedItemInput(string TargetType, string? BrandName, int? ProductId, string Reason, int? CountryId = null);
 public sealed record BannedItemListFilter(string? TargetType, bool Active, string? Search, int Page, int PageSize);
 public sealed record BannedItemEvent(Guid EventId, string EventType, int BannedItemId, string TargetType,
-    string? BrandName, int? ProductId, string Reason, string Actor, DateTime OccurredAtUtc);
+    string? BrandName, int? ProductId, string Reason, string Actor, DateTime OccurredAtUtc, int? CountryId = null);
 
 public interface IBannedItemData
 {
     Task<Page<BannedItemDto>> List(BannedItemListFilter filter, CancellationToken ct);
     Task<BannedItemDto?> Get(int id, CancellationToken ct);
     Task<bool> ProductExists(int id, CancellationToken ct);
+    Task<bool> CountryExists(int id, CancellationToken ct);
     Task<BannedItemDto> Create(BannedItem item, CancellationToken ct);
     Task<bool> Revoke(int id, string actor, DateTime nowUtc, CancellationToken ct);
 }
@@ -47,11 +49,13 @@ public sealed class BannedItemService(IBannedItemData data, IAdminPermissionRead
         if (input is null) throw new ArgumentNullException(nameof(input));
         if (!TryParseTargetType(input.TargetType, out var targetType))
             throw new ArgumentException("targetType must be Brand or Product.", nameof(input));
+        if (input.CountryId is int countryId && (countryId <= 0 || !await data.CountryExists(countryId, ct)))
+            throw new ArgumentException("CountryId must reference an existing Country.", nameof(input));
 
         var item = targetType switch
         {
-            BannedTargetType.Brand when input.ProductId is null => BannedItem.ForBrand(input.BrandName ?? string.Empty, input.Reason, actor, clock.GetUtcNow().UtcDateTime),
-            BannedTargetType.Product when input.BrandName is null && input.ProductId is > 0 => BannedItem.ForProduct(input.ProductId.Value, input.Reason, actor, clock.GetUtcNow().UtcDateTime),
+            BannedTargetType.Brand when input.ProductId is null => BannedItem.ForBrand(input.BrandName ?? string.Empty, input.Reason, actor, clock.GetUtcNow().UtcDateTime, input.CountryId),
+            BannedTargetType.Product when input.BrandName is null && input.ProductId is > 0 => BannedItem.ForProduct(input.ProductId.Value, input.Reason, actor, clock.GetUtcNow().UtcDateTime, input.CountryId),
             BannedTargetType.Product when input.ProductId is > 0 && !string.IsNullOrWhiteSpace(input.BrandName) => throw new ArgumentException("Product bans cannot include brandName.", nameof(input)),
             BannedTargetType.Brand when input.ProductId is not null => throw new ArgumentException("Brand bans cannot include productId.", nameof(input)),
             BannedTargetType.Product when input.ProductId is null => throw new ArgumentException("productId is required for product bans.", nameof(input)),

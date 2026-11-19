@@ -45,7 +45,7 @@ public sealed class CategoryHierarchyIntegrationTests(SqlServerTestFixture sqlSe
             var originalProductCategoryIds = await db.Database.SqlQueryRaw<int>("SELECT [CategoryId] AS [Value] FROM [Products] ORDER BY [Slug]").ToArrayAsync();
             var qcFixtureId = originalCategoryIds["qc-mcp-live-mw0usaj6"];
 
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
 
             var electronics = await db.Categories.SingleAsync(category => category.Slug == "electronics");
             Assert.Equal(1, electronics.Level);

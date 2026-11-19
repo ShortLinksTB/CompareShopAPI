@@ -20,7 +20,7 @@ public sealed class IngestionPriceHistoryTests(SqlServerTestFixture sqlServer)
             await using var db = new CompareShopDbContext(options);
             await db.Database.EnsureCreatedAsync();
             var category = await CategoryTestData.AddLeafAsync(db, "history-test", "History");
-            var shop = new PartnerShop { Slug = "history-shop", Name = "History Shop" };
+            var shop = new PartnerShop { Slug = "history-shop", Name = "History Shop", CountryId = CountryTestCompatibility.VnCountryId };
             var product = new Product { Slug = "history-product", Name = "History Product", Category = category };
             db.AddRange(shop, product,
                 new ProductOffer { Product = product, PartnerShop = shop, PriceVnd = 12000, UpdatedAtUtc = now },

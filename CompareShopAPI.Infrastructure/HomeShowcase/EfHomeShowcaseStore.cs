@@ -15,7 +15,8 @@ public sealed class EfHomeShowcaseStore(CompareShopDbContext db, ICatalogQueries
     public async Task<IReadOnlyDictionary<int, HomeShowcaseProductData>> Products(IReadOnlyCollection<int> ids, CancellationToken ct)
     {
         if (ids.Count == 0) return new Dictionary<int, HomeShowcaseProductData>();
-        var visibleIds = (await BannedItemVisibility.ExcludeBannedProducts(db, db.Products.AsNoTracking().Where(product => ids.Contains(product.Id)))
+        var visibleIds = (await BannedItemVisibility.ExcludeBannedProducts(db, db.Products.AsNoTracking().Where(product => ids.Contains(product.Id)
+                && product.Category.Country.Code == "VN" && VisibleCatalogOffers.Query(db, clock).Any(offer => offer.ProductId == product.Id)))
             .Select(product => product.Id).ToListAsync(ct)).ToHashSet();
         var rows = await db.Products.AsNoTracking().Where(product => ids.Contains(product.Id))
             .Select(product => new
@@ -31,12 +32,12 @@ public sealed class EfHomeShowcaseStore(CompareShopDbContext db, ICatalogQueries
             row.Category, new OfferSummaryDto(row.Minimum, row.Maximum, row.Count), row.IsActive && row.IsCategoryActive && visibleIds.Contains(row.Id)));
     }
 
-    public Task<bool> IsComputersCategoryAvailable(CancellationToken ct) => db.Categories.AsNoTracking().AnyAsync(category => category.Slug == "computers" && category.IsActive, ct);
+    public Task<bool> IsComputersCategoryAvailable(CancellationToken ct) => db.Categories.AsNoTracking().AnyAsync(category => category.Slug == "computers" && category.Country.Code == "VN" && category.IsActive, ct);
 
     public async Task<bool> AreComputers(IReadOnlyCollection<int> productIds, CancellationToken ct)
     {
         if (productIds.Count == 0) return true;
-        var categoryIds = db.Categories.Where(category => category.Slug == "computers" && category.IsActive).Select(category => category.Id);
+        var categoryIds = db.Categories.Where(category => category.Slug == "computers" && category.Country.Code == "VN" && category.IsActive).Select(category => category.Id);
         return await db.Products.AsNoTracking().CountAsync(product => productIds.Contains(product.Id) && categoryIds.Contains(product.CategoryId), ct) == productIds.Count;
     }
 
@@ -60,7 +61,8 @@ public sealed class EfHomeShowcaseStore(CompareShopDbContext db, ICatalogQueries
             .OrderBy(slot => slot.SlotIndex).Select(slot => slot.ProductId!.Value).ToListAsync(ct);
         if (ids.Count == 0) return [];
         var map = await Products(ids.Distinct().ToArray(), ct);
-        var visible = BannedItemVisibility.ExcludeBannedProducts(db, db.Products.AsNoTracking().Where(product => ids.Contains(product.Id) && product.IsActive && product.Category.IsActive))
+        var visible = BannedItemVisibility.ExcludeBannedProducts(db, db.Products.AsNoTracking().Where(product => ids.Contains(product.Id) && product.IsActive && product.Category.IsActive
+                && product.Category.Country.Code == "VN" && VisibleCatalogOffers.Query(db, clock).Any(offer => offer.ProductId == product.Id)))
             .Select(product => product.Id);
         var visibleIds = await visible.ToListAsync(ct);
         return ids.Where(visibleIds.Contains).Where(map.ContainsKey).Distinct().Select(id => ToPublic(map[id])).Take(15).ToArray();
@@ -71,10 +73,11 @@ public sealed class EfHomeShowcaseStore(CompareShopDbContext db, ICatalogQueries
         int? categoryId = null;
         if (section == HomeShowcaseSection.InterestedComputers)
         {
-            categoryId = await db.Categories.AsNoTracking().Where(category => category.Slug == "computers" && category.IsActive).Select(category => (int?)category.Id).FirstOrDefaultAsync(ct);
+            categoryId = await db.Categories.AsNoTracking().Where(category => category.Slug == "computers" && category.Country.Code == "VN" && category.IsActive).Select(category => (int?)category.Id).FirstOrDefaultAsync(ct);
             if (categoryId is null) return [];
         }
-        var page = await catalog.Products(new ProductFilter(1, 15, categoryId), ct);
+        var countryId = await db.Countries.AsNoTracking().Where(country => country.Code == "VN" && country.IsActive).Select(country => country.Id).SingleOrDefaultAsync(ct);
+        var page = await catalog.Products(new ProductFilter(1, 15, categoryId, CountryId: countryId), ct);
         return page.Items.Select(product => new HomeShowcaseProduct(product.Id, product.Slug, product.Name, product.ImageUrl, product.Brand, product.Category, product.OfferSummary)).ToArray();
     }
 

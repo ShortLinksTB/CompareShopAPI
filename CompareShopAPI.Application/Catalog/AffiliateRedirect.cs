@@ -4,7 +4,7 @@ namespace CompareShopAPI.Application.Catalog;
 
 public interface IAffiliateRedirectRepository
 {
-    Task<AffiliateLink?> FindRedirectableLink(int offerId, CancellationToken ct);
+    Task<AffiliateLink?> FindRedirectableLink(int countryId, int offerId, CancellationToken ct);
     Task<bool> RecordClick(int affiliateLinkId, DateTime clickedAtUtc, string? clientIpDigest, CancellationToken ct);
 }
 
@@ -45,14 +45,22 @@ public sealed record AffiliateRedirectResult(bool Found, bool TrackingFailed, Ur
 
 public sealed class AffiliateRedirectService(IAffiliateRedirectRepository repository, IClientIpHasher ipHasher, TimeProvider clock)
 {
-    public async Task<AffiliateRedirectResult> Redirect(int offerId, string? clientIp, CancellationToken ct)
+    public async Task<AffiliateRedirectResult> Redirect(int countryId, int offerId, string? clientIp, CancellationToken ct)
     {
         if (offerId <= 0) return AffiliateRedirectResult.NotFound;
-        var link = await repository.FindRedirectableLink(offerId, ct);
+        var link = await repository.FindRedirectableLink(countryId, offerId, ct);
         if (link is null || !link.TryGetRedirectDestination(out var destination)) return AffiliateRedirectResult.NotFound;
 
         var digest = ipHasher.Hash(clientIp);
-        if (!await repository.RecordClick(link.Id, clock.GetUtcNow().UtcDateTime, digest, ct)) return AffiliateRedirectResult.PersistenceFailure;
+        try
+        {
+            if (!await repository.RecordClick(link.Id, clock.GetUtcNow().UtcDateTime, digest, ct))
+                return new AffiliateRedirectResult(true, true, destination);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new AffiliateRedirectResult(true, true, destination);
+        }
         return new AffiliateRedirectResult(true, false, destination);
     }
 }

@@ -8,11 +8,13 @@ public static class CatalogSeed
 {
     public static async Task SeedAsync(CompareShopDbContext db, CancellationToken cancellationToken = default)
     {
+        var vietnamId = await db.Countries.Where(x => x.Code == "VN" && x.IsActive).Select(x => (int?)x.Id).SingleOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("The active VN Country must be seeded before catalog fixtures.");
         var categoryNames = new[] { "Phones", "Computers", "Audio" };
-        var parent = await db.Categories.SingleOrDefaultAsync(x => x.Slug == "electronics", cancellationToken);
+        var parent = await db.Categories.SingleOrDefaultAsync(x => x.Slug == "electronics" && x.CountryId == vietnamId, cancellationToken);
         if (parent is null)
         {
-            parent = new Category { Slug = "electronics", Name = "Electronics", IsActive = true, Level = 1, SortOrder = 0 };
+            parent = new Category { Slug = "electronics", Name = "Electronics", CountryId = vietnamId, IsActive = true, Level = 1, SortOrder = 0 };
             db.Categories.Add(parent);
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -20,10 +22,10 @@ public static class CatalogSeed
         {
             var name = categoryNames[index];
             var slug = name.ToLowerInvariant();
-            var category = await db.Categories.SingleOrDefaultAsync(x => x.Slug == slug, cancellationToken);
+            var category = await db.Categories.SingleOrDefaultAsync(x => x.Slug == slug && x.CountryId == vietnamId, cancellationToken);
             if (category is null)
             {
-                category = new Category { Slug = slug, Name = name, IsActive = true };
+                category = new Category { Slug = slug, Name = name, CountryId = vietnamId, IsActive = true };
                 db.Categories.Add(category);
             }
             category.ParentCategoryId = parent.Id;
@@ -36,10 +38,10 @@ public static class CatalogSeed
         {
             var slug = name.ToLowerInvariant().Replace(' ', '-');
             if (!await db.PartnerShops.AnyAsync(x => x.Slug == slug, cancellationToken))
-                db.PartnerShops.Add(new PartnerShop { Slug = slug, Name = name, WebsiteUrl = $"https://{slug}.example.test", IsActive = true });
+                db.PartnerShops.Add(new PartnerShop { Slug = slug, Name = name, WebsiteUrl = $"https://{slug}.example.test", CountryId = vietnamId, IsActive = true });
         }
         if (!await db.PartnerShops.AnyAsync(x => x.Slug == "inactive-shop", cancellationToken))
-            db.PartnerShops.Add(new PartnerShop { Slug = "inactive-shop", Name = "Inactive Shop", IsActive = false });
+            db.PartnerShops.Add(new PartnerShop { Slug = "inactive-shop", Name = "Inactive Shop", CountryId = vietnamId, IsActive = false });
         await db.SaveChangesAsync(cancellationToken);
         var categoryIds = await db.Categories.AsNoTracking().ToDictionaryAsync(x => x.Slug, x => x.Id, cancellationToken);
         var shops = await db.PartnerShops

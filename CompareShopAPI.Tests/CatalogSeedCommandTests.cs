@@ -1,4 +1,5 @@
 using CompareShopAPI.Api.Catalog;
+using CompareShopAPI.Domain.Catalog;
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -70,6 +71,12 @@ public sealed class CatalogSeedCommandTests
             .AddDbContext<CompareShopDbContext>(options => options.UseInMemoryDatabase(databaseName))
             .BuildServiceProvider();
         var configuration = Configuration(true, Connection("CompareShop"));
+        await using (var scope = services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<CompareShopDbContext>();
+            db.Countries.Add(new Country("VN", "Vietnam"));
+            await db.SaveChangesAsync();
+        }
 
         Assert.True(await CatalogSeedCommand.TryRunAsync(["seed-catalog"], Environment("Development"), configuration, services, NullLogger.Instance));
         var initialCounts = await ReadCountsAsync(services);

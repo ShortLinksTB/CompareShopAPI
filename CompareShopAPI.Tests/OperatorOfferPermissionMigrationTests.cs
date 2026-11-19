@@ -21,8 +21,8 @@ public sealed class OperatorOfferPermissionMigrationTests(SqlServerTestFixture s
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
 
                 var permissionId = await db.AdminPermissions
                     .Where(permission => permission.Key == "offers.create")

@@ -1,6 +1,7 @@
 using CompareShopAPI.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using CompareShopAPI.Api.Catalog;
 namespace CompareShopAPI.Api.Health;
 public sealed class MigrationState { public bool Failed { get; set; } }
 public sealed class DatabaseHealth(IServiceProvider services, MigrationState migration, IConfiguration config) : IHealthCheck
@@ -21,13 +22,27 @@ public sealed class DatabaseHealth(IServiceProvider services, MigrationState mig
 }
 public static class DatabaseStartup
 {
+    private const string CountrySchemaStage = "20261118170350_AddCountryAndNullableCatalogCountryIds";
+    private const string LegacyCountrySeedStage = "20261118170355_AssignLegacyCatalogSeedRowsToVN";
+
     public static async Task ApplyMigrationsAsync(this WebApplication app)
     {
         if (!app.Configuration.GetValue<bool>("Database:ApplyMigrations")) return;
         try
         {
             using var scope = app.Services.CreateScope();
-            await scope.ServiceProvider.GetRequiredService<CompareShopDbContext>().Database.MigrateAsync();
+            var db = scope.ServiceProvider.GetRequiredService<CompareShopDbContext>();
+            var applied = await db.Database.GetAppliedMigrationsAsync();
+            if (!applied.Contains(CountrySchemaStage, StringComparer.Ordinal))
+            {
+                var pending = await db.Database.GetPendingMigrationsAsync();
+                if (!pending.Contains(CountrySchemaStage, StringComparer.Ordinal))
+                    throw new InvalidOperationException($"Required staged migration '{CountrySchemaStage}' is not available.");
+                await db.Database.MigrateAsync(CountrySchemaStage);
+            }
+            await CountrySeed.SeedInitialAsync(db, typeof(CatalogSeedCommand).Assembly);
+            await db.Database.MigrateAsync(LegacyCountrySeedStage);
+            await db.Database.MigrateAsync();
         }
         catch (Exception ex)
         {

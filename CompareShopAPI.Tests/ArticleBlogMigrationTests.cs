@@ -39,7 +39,7 @@ public sealed class ArticleBlogMigrationTests(SqlServerTestFixture sqlServer)
                     SET IDENTITY_INSERT [Articles] OFF;
                     """);
 
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
 
                 var fixtures = await db.Articles.Where(article => article.Id >= 91001 && article.Id <= 91008)
                     .OrderBy(article => article.Id).ToListAsync();

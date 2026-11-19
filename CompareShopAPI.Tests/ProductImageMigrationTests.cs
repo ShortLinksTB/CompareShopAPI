@@ -21,17 +21,13 @@ public sealed class ProductImageMigrationTests(SqlServerTestFixture fixture)
             await using (var db = new CompareShopDbContext(options))
             {
                 await db.Database.MigrateAsync("20261115070000_AddHomepagePartnerVisibility");
-                var parent = new Category { Slug = "legacy-parent", Name = "Legacy parent", Level = 1 };
-                db.Categories.Add(parent);
-                await db.SaveChangesAsync();
-                var category = new Category { Slug = "legacy-category", Name = "Legacy category", ParentCategoryId = parent.Id, Level = 2 };
-                db.Categories.Add(category);
-                await db.SaveChangesAsync();
-                var fileProduct = new Product { Slug = "legacy-files", Name = "Legacy Files", CategoryId = category.Id, ImageUrl = $"/files/{fileId:D}" };
-                var externalProduct = new Product { Slug = "legacy-external", Name = "Legacy external", CategoryId = category.Id, ImageUrl = externalUrl };
+                await db.Database.ExecuteSqlRawAsync("INSERT INTO [Categories] ([Slug],[Name],[IsActive],[Level],[SortOrder]) VALUES (N'legacy-parent',N'Legacy parent',1,1,0); INSERT INTO [Categories] ([Slug],[Name],[IsActive],[Level],[SortOrder],[ParentCategoryId]) VALUES (N'legacy-category',N'Legacy category',1,2,0,SCOPE_IDENTITY());");
+                var categoryId = await db.Database.SqlQueryRaw<int>("SELECT [Id] AS [Value] FROM [Categories] WHERE [Slug] = N'legacy-category'").SingleAsync();
+                var fileProduct = new Product { Slug = "legacy-files", Name = "Legacy Files", CategoryId = categoryId, ImageUrl = $"/files/{fileId:D}" };
+                var externalProduct = new Product { Slug = "legacy-external", Name = "Legacy external", CategoryId = categoryId, ImageUrl = externalUrl };
                 db.Products.AddRange(fileProduct, externalProduct);
                 await db.SaveChangesAsync();
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
 
                 var fileImage = await db.ProductImages.SingleAsync(x => x.ProductId == fileProduct.Id);
                 var externalImage = await db.ProductImages.SingleAsync(x => x.ProductId == externalProduct.Id);

@@ -19,7 +19,7 @@ public sealed class AdminIdentityProvisioningIntegrationTests(SqlServerTestFixtu
         var baseOptions = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
         try
         {
-            await using (var setup = new CompareShopDbContext(baseOptions)) await setup.Database.MigrateAsync();
+            await using (var setup = new CompareShopDbContext(baseOptions)) await MigrationTestHelpers.MigrateToLatestAsync(setup);
             var barrier = new FirstLookupBarrier();
             var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).AddInterceptors(barrier).Options;
             var subject = $"race-{Guid.NewGuid():N}";
@@ -61,7 +61,7 @@ public sealed class AdminIdentityProvisioningIntegrationTests(SqlServerTestFixtu
         {
             await using (var setup = new CompareShopDbContext(options))
             {
-                await setup.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(setup);
                 await setup.Database.ExecuteSqlRawAsync("CREATE TRIGGER TR_AdminAuditLogs_FailInsert ON dbo.AdminAuditLogs AFTER INSERT AS BEGIN RAISERROR ('Forced audit failure', 16, 1); END");
             }
 

@@ -26,7 +26,7 @@ public sealed class ArticleIntegrationTests(SqlServerTestFixture sqlServer)
         try
         {
             await using var db = new CompareShopDbContext(options);
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var repository = new EfArticleRepository(db);
             var now = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc);
             var coverFileId = Guid.Parse("f74dc3d5-df58-4b99-b118-3307277dfa56");
@@ -88,7 +88,7 @@ public sealed class ArticleIntegrationTests(SqlServerTestFixture sqlServer)
         try
         {
             await using var db = new CompareShopDbContext(options);
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var category = await CategoryTestData.AddLeafAsync(db, "article-test-category", "Article Test");
             var product = new Product { Slug = "article-test-product", Name = "Article Product", CategoryId = category.Id, IsActive = true };
             db.Products.Add(product); await db.SaveChangesAsync();

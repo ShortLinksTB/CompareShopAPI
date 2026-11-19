@@ -22,40 +22,6 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
-            modelBuilder.Entity("CompareShopAPI.Domain.HomeShowcase.HomeShowcasePreviewToken", b =>
-                {
-                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-                    b.Property<string>("ActorSubject").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)");
-                    b.Property<DateTime?>("ConsumedAtUtc").HasColumnType("datetime2");
-                    b.Property<DateTime>("CreatedAtUtc").HasColumnType("datetime2");
-                    b.Property<DateTime>("ExpiresAtUtc").HasColumnType("datetime2");
-                    b.Property<string>("TokenHash").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
-                    b.HasKey("Id");
-                    b.HasIndex("TokenHash").IsUnique();
-                    b.HasIndex("ActorSubject", "CreatedAtUtc");
-                    b.ToTable("HomeShowcasePreviewTokens");
-                });
-
-            modelBuilder.Entity("CompareShopAPI.Domain.HomeShowcase.HomeShowcaseSlot", b =>
-                {
-                    b.Property<int>("Id").ValueGeneratedOnAdd().HasColumnType("int");
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-                    b.Property<int?>("ProductId").HasColumnType("int");
-                    b.Property<int>("Section").HasColumnType("int");
-                    b.Property<int>("SlotIndex").HasColumnType("int");
-                    b.Property<int>("Snapshot").HasColumnType("int");
-                    b.HasKey("Id");
-                    b.HasIndex("Snapshot", "Section", "ProductId").IsUnique().HasFilter("[ProductId] IS NOT NULL");
-                    b.HasIndex("Snapshot", "Section", "SlotIndex").IsUnique();
-                    b.ToTable("HomeShowcaseSlots", t =>
-                        {
-                            t.HasCheckConstraint("CK_HomeShowcaseSlots_Section", "[Section] IN (0, 1)");
-                            t.HasCheckConstraint("CK_HomeShowcaseSlots_SlotIndex", "[SlotIndex] BETWEEN 1 AND 15");
-                            t.HasCheckConstraint("CK_HomeShowcaseSlots_Snapshot", "[Snapshot] IN (0, 1)");
-                        });
-                });
-
             modelBuilder.Entity("CompareShopAPI.Domain.Admin.AdminAuditLog", b =>
                 {
                     b.Property<long>("Id")
@@ -252,6 +218,9 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<int?>("CountryId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -289,11 +258,13 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("NormalizedBrandName")
+                    b.HasIndex("CountryId");
+
+                    b.HasIndex("NormalizedBrandName", "CountryId")
                         .IsUnique()
                         .HasFilter("[IsActive] = 1 AND [TargetType] = N'Brand' AND [NormalizedBrandName] IS NOT NULL");
 
-                    b.HasIndex("ProductId")
+                    b.HasIndex("ProductId", "CountryId")
                         .IsUnique()
                         .HasFilter("[IsActive] = 1 AND [TargetType] = N'Product' AND [ProductId] IS NOT NULL");
 
@@ -649,6 +620,9 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("CountryId")
+                        .HasColumnType("int");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -681,13 +655,42 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ParentCategoryId");
 
-                    b.HasIndex("Slug")
+                    b.HasIndex("CountryId", "Slug")
                         .IsUnique();
 
                     b.ToTable("Categories", t =>
                         {
                             t.HasCheckConstraint("CK_Categories_Level_ParentCategoryId", "([Level] = 1 AND [ParentCategoryId] IS NULL) OR ([Level] = 2 AND [ParentCategoryId] IS NOT NULL)");
                         });
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.Country", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(2)
+                        .HasColumnType("nvarchar(2)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("Countries");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.PartnerShop", b =>
@@ -697,6 +700,9 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CountryId")
+                        .HasColumnType("int");
 
                     b.Property<int?>("HomeDisplayOrder")
                         .HasColumnType("int");
@@ -723,6 +729,8 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CountryId");
 
                     b.HasIndex("IsActive");
 
@@ -826,12 +834,12 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
-                    b.Property<Guid?>("Card600FileId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("Card600Error")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("Card600FileId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Card600Status")
                         .IsRequired()
@@ -841,12 +849,12 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<Guid?>("Detail1000FileId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<string>("Detail1000Error")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid?>("Detail1000FileId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Detail1000Status")
                         .IsRequired()
@@ -1064,13 +1072,13 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<int?>("Height")
+                        .HasColumnType("int");
+
                     b.Property<int>("LifecycleState")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(0);
-
-                    b.Property<int?>("Height")
-                        .HasColumnType("int");
 
                     b.Property<string>("ObjectKey")
                         .IsRequired()
@@ -1103,6 +1111,82 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
                     b.HasIndex("UploadedAtUtc");
 
                     b.ToTable("Files");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.HomeShowcase.HomeShowcasePreviewToken", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("ConsumedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("ActorSubject", "CreatedAtUtc");
+
+                    b.ToTable("HomeShowcasePreviewTokens");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.HomeShowcase.HomeShowcaseSlot", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Section")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SlotIndex")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Snapshot")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Snapshot", "Section", "ProductId")
+                        .IsUnique()
+                        .HasFilter("[ProductId] IS NOT NULL");
+
+                    b.HasIndex("Snapshot", "Section", "SlotIndex")
+                        .IsUnique();
+
+                    b.ToTable("HomeShowcaseSlots", t =>
+                        {
+                            t.HasCheckConstraint("CK_HomeShowcaseSlots_Section", "[Section] IN (0, 1)");
+
+                            t.HasCheckConstraint("CK_HomeShowcaseSlots_SlotIndex", "[SlotIndex] BETWEEN 1 AND 15");
+
+                            t.HasCheckConstraint("CK_HomeShowcaseSlots_Snapshot", "[Snapshot] IN (0, 1)");
+                        });
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Ingestion.DataSource", b =>
@@ -1459,10 +1543,17 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CompareShopAPI.Domain.Admin.BannedItem", b =>
                 {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.Country", "Country")
+                        .WithMany()
+                        .HasForeignKey("CountryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("CompareShopAPI.Domain.Catalog.Product", "Product")
                         .WithMany()
                         .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Country");
 
                     b.Navigation("Product");
                 });
@@ -1571,12 +1662,31 @@ namespace CompareShopAPI.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.Category", b =>
                 {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.Country", "Country")
+                        .WithMany()
+                        .HasForeignKey("CountryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("CompareShopAPI.Domain.Catalog.Category", "ParentCategory")
                         .WithMany("Children")
                         .HasForeignKey("ParentCategoryId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.Navigation("Country");
+
                     b.Navigation("ParentCategory");
+                });
+
+            modelBuilder.Entity("CompareShopAPI.Domain.Catalog.PartnerShop", b =>
+                {
+                    b.HasOne("CompareShopAPI.Domain.Catalog.Country", "Country")
+                        .WithMany()
+                        .HasForeignKey("CountryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Country");
                 });
 
             modelBuilder.Entity("CompareShopAPI.Domain.Catalog.PriceHistoryPoint", b =>

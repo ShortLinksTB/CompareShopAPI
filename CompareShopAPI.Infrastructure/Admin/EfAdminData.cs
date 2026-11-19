@@ -20,6 +20,7 @@ namespace CompareShopAPI.Infrastructure.Admin;
 
 public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : IAdminData, IAdminPermissionReader, IProductImageFileCatalog
 {
+    public Task<bool> ActiveCountry(int id, CancellationToken ct) => db.Countries.AnyAsync(x => x.Id == id && x.IsActive, ct);
     public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) => db.AdminUserRoles.AsNoTracking()
         .Join(db.Users.AsNoTracking(), ur => ur.UserId, user => user.Id, (ur, user) => new { ur.RoleId, user.KeycloakSubject })
         .Where(ur => ur.KeycloakSubject == subject)
@@ -73,12 +74,15 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         return true;
     }
 
-    public Task<Page<AdminCategory>> Categories(int page, int size, CancellationToken ct) => PageOf(db.Categories.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId)), page, size, ct);
-    public Task<AdminCategory?> Category(int id, CancellationToken ct) => db.Categories.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId)).SingleOrDefaultAsync(ct);
+    public Task<Page<AdminCategory>> Categories(int countryId, int page, int size, CancellationToken ct) => PageOf(db.Categories.AsNoTracking().Where(x => x.CountryId == countryId).OrderBy(x => x.Id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId, x.CountryId, x.Country.Code, x.Country.Name)), page, size, ct);
+    public Task<AdminCategory?> Category(int id, CancellationToken ct) => db.Categories.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminCategory(x.Id, x.Slug, x.Name, x.IsActive, x.ParentCategoryId, x.CountryId, x.Country.Code, x.Country.Name)).SingleOrDefaultAsync(ct);
     public async Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct)
     {
         var item = id.HasValue ? await db.Categories.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
+        if (!await db.Countries.AnyAsync(x => x.Id == input.CountryId && x.IsActive, ct)) throw new ArgumentException("Country must exist and be active.", nameof(input.CountryId));
+        if (item is not null && item.CountryId != input.CountryId && await db.Categories.AnyAsync(x => x.ParentCategoryId == item.Id, ct))
+            throw new ArgumentException("A category with children cannot move to another Country.");
         var parentCategoryId = input.ClearParentCategory ? null : input.ParentCategoryId ?? item?.ParentCategoryId;
         if (input.ClearParentCategory && item?.ParentCategoryId is not null &&
             await db.Products.AnyAsync(x => x.CategoryId == item.Id, ct))
@@ -89,15 +93,17 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
             var parent = await db.Categories.AsNoTracking().SingleOrDefaultAsync(x => x.Id == parentId, ct);
             if (parent is null) throw new ArgumentException("Parent category does not exist.");
             if (parent.Level != 1) throw new ArgumentException("Parent category must be Level 1.");
+            if (parent.CountryId != input.CountryId) throw new ArgumentException("Parent category must belong to the same Country.");
             if (item is not null && item.Level == 1 && await db.Categories.AnyAsync(x => x.ParentCategoryId == item.Id, ct))
                 throw new ArgumentException("A category with children cannot become a child category.");
         }
-        item ??= new Category { Slug = input.Slug, Name = input.Name };
+        item ??= new Category { Slug = input.Slug, Name = input.Name, CountryId = input.CountryId };
         item.Slug = input.Slug; item.Name = input.Name; item.IsActive = input.IsActive;
+        item.CountryId = input.CountryId;
         item.ParentCategoryId = parentCategoryId;
         item.Level = parentCategoryId.HasValue ? (byte)2 : (byte)1;
         if (!id.HasValue) db.Categories.Add(item);
-        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.IsActive, item.ParentCategoryId);
+        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.IsActive, item.ParentCategoryId, item.CountryId, (await db.Countries.Where(x => x.Id == item.CountryId).Select(x => x.Code).SingleAsync(ct)), (await db.Countries.Where(x => x.Id == item.CountryId).Select(x => x.Name).SingleAsync(ct)));
     }
     public async Task<bool> DeleteCategory(int id, CancellationToken ct) { var rows = await db.Categories.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 
@@ -186,18 +192,20 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         await db.SaveChangesAsync(ct);
     }
 
-    public Task<Page<AdminShop>> Shops(int page, int size, CancellationToken ct) => PageOf(db.PartnerShops.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder)), page, size, ct);
-    public Task<AdminShop?> Shop(int id, CancellationToken ct) => db.PartnerShops.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder)).SingleOrDefaultAsync(ct);
+    public Task<Page<AdminShop>> Shops(int page, int size, CancellationToken ct) => PageOf(db.PartnerShops.AsNoTracking().OrderBy(x => x.Id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder, x.CountryId, x.Country.Code, x.Country.Name)), page, size, ct);
+    public Task<AdminShop?> Shop(int id, CancellationToken ct) => db.PartnerShops.AsNoTracking().Where(x => x.Id == id).Select(x => new AdminShop(x.Id, x.Slug, x.Name, x.WebsiteUrl, x.IsActive, x.ShowOnHome, x.HomeDisplayOrder, x.CountryId, x.Country.Code, x.Country.Name)).SingleOrDefaultAsync(ct);
     public async Task<AdminShop> SaveShop(int? id, ShopInput input, CancellationToken ct)
     {
         var item = id.HasValue ? await db.PartnerShops.SingleOrDefaultAsync(x => x.Id == id, ct) : null;
         if (id.HasValue && item is null) throw new KeyNotFoundException();
-        item ??= new PartnerShop { Slug = input.Slug, Name = input.Name };
+        if (!await db.Countries.AnyAsync(x => x.Id == input.CountryId && x.IsActive, ct)) throw new ArgumentException("Country must exist and be active.", nameof(input.CountryId));
+        item ??= new PartnerShop { Slug = input.Slug, Name = input.Name, CountryId = input.CountryId };
         item.Slug = input.Slug; item.Name = input.Name; item.WebsiteUrl = input.WebsiteUrl; item.IsActive = input.IsActive;
+        item.CountryId = input.CountryId;
         if (input.ShowOnHome.HasValue) item.ShowOnHome = input.ShowOnHome.Value;
         if (input.HomeDisplayOrder.IsSpecified) item.HomeDisplayOrder = input.HomeDisplayOrder.Value;
         if (!id.HasValue) db.PartnerShops.Add(item);
-        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.WebsiteUrl, item.IsActive, item.ShowOnHome, item.HomeDisplayOrder);
+        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.WebsiteUrl, item.IsActive, item.ShowOnHome, item.HomeDisplayOrder, item.CountryId, (await db.Countries.Where(x => x.Id == item.CountryId).Select(x => x.Code).SingleAsync(ct)), (await db.Countries.Where(x => x.Id == item.CountryId).Select(x => x.Name).SingleAsync(ct)));
     }
     public async Task<bool> DeleteShop(int id, CancellationToken ct) { var rows = await db.PartnerShops.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 

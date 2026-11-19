@@ -34,7 +34,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 var category = await CategoryTestData.AddLeafAsync(db, "attached-matchings", "Attached matchings");
                 var product = new Product { Slug = "attached-product", Name = "Attached product", CategoryId = category.Id };
                 var otherProduct = new Product { Slug = "other-attached-product", Name = "Other attached product", CategoryId = category.Id };
@@ -141,7 +141,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
         await using var db = new CompareShopDbContext(options);
         try
         {
-            await db.Database.MigrateAsync();
+            await MigrationTestHelpers.MigrateToLatestAsync(db);
             var reader = new User("matching-reader", DateTime.UtcNow);
             var denied = new User("matching-denied", DateTime.UtcNow);
             db.Users.AddRange(reader, denied);
@@ -174,7 +174,7 @@ public sealed class AdminMatchingCandidateTests(SqlServerTestFixture fixture)
             var inactive = new Product { Slug = "inactive", Name = "Mac Air", Brand = "Apple", CategoryId = category.Id, IsActive = false };
             db.Products.AddRange(best, fallback, inactive);
             await db.SaveChangesAsync();
-            var shop = new PartnerShop { Slug = "matching-shop", Name = "Matching Shop", WebsiteUrl = "https://shop.example" };
+            var shop = new PartnerShop { Slug = "matching-shop", Name = "Matching Shop", WebsiteUrl = "https://shop.example", CountryId = CountryTestCompatibility.VnCountryId };
             db.PartnerShops.Add(shop);
             await db.SaveChangesAsync();
             source.AttachPartnerShop(shop.Id);

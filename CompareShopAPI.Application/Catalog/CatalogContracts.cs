@@ -16,17 +16,17 @@ public sealed record ShopDto(int Id, string Slug, string Name, string? WebsiteUr
 public sealed record HomePartnerDto(string Name, string Slug, string? WebsiteUrl);
 public sealed record ProductSuggestionDto(int Id, string Slug, string Name);
 public sealed record PriceHistoryDto(DateTime Date, int MinPrice, int? ShopId);
-public sealed record ProductFilter(int Page = 1, int PageSize = 20, int? CategoryId = null, int? MinPrice = null, int? MaxPrice = null, int? ShopId = null, string? Search = null);
+public sealed record ProductFilter(int Page = 1, int PageSize = 20, int? CategoryId = null, int? MinPrice = null, int? MaxPrice = null, int? ShopId = null, string? Search = null, int CountryId = 0);
 
 public interface ICatalogQueries
 {
-    Task<IReadOnlyList<CategoryDto>> Categories(int? parentId, CancellationToken ct);
+    Task<IReadOnlyList<CategoryDto>> Categories(int countryId, int? parentId, CancellationToken ct);
     Task<PageDto<ProductListDto>> Products(ProductFilter filter, CancellationToken ct);
-    Task<ProductDetailDto?> Product(string slug, CancellationToken ct);
-    Task<IReadOnlyList<OfferDto>?> Offers(int productId, CancellationToken ct);
-    Task<ShopDto?> Shop(string slug, CancellationToken ct);
-    Task<IReadOnlyList<HomePartnerDto>> HomePartners(CancellationToken ct);
-    Task<IReadOnlyList<ProductSuggestionDto>> Suggestions(string query, int limit, CancellationToken ct);
+    Task<ProductDetailDto?> Product(int countryId, string slug, CancellationToken ct);
+    Task<IReadOnlyList<OfferDto>?> Offers(int countryId, int productId, CancellationToken ct);
+    Task<ShopDto?> Shop(int countryId, string slug, CancellationToken ct);
+    Task<IReadOnlyList<HomePartnerDto>> HomePartners(int countryId, CancellationToken ct);
+    Task<IReadOnlyList<ProductSuggestionDto>> Suggestions(int countryId, string query, int limit, CancellationToken ct);
 }
 
 public interface IPriceHistoryStore
@@ -37,30 +37,30 @@ public interface IPriceHistoryStore
     Task Append(int productId, DateTime dateUtc, PublicPriceMinimum minimum, CancellationToken ct);
 }
 
-public sealed class CatalogService(ICatalogQueries queries)
+public sealed class CatalogService(ICatalogQueries queries, CountrySelectionService countries)
 {
-    public Task<IReadOnlyList<CategoryDto>> Categories(int? parentId, CancellationToken ct) => queries.Categories(parentId, ct);
-    public Task<PageDto<ProductListDto>> Products(ProductFilter filter, CancellationToken ct)
+    public async Task<IReadOnlyList<CategoryDto>> Categories(string? country, int? parentId, CancellationToken ct) => await queries.Categories(await countries.Resolve(country, ct), parentId, ct);
+    public async Task<PageDto<ProductListDto>> Products(ProductFilter filter, string? country, CancellationToken ct)
     {
         if (filter.Page < 1 || filter.PageSize < 1 || filter.PageSize > 100 || filter.MinPrice < 0 || filter.MaxPrice < 0 || filter.MinPrice > filter.MaxPrice)
             throw new ArgumentOutOfRangeException(nameof(filter), "Invalid page or price range.");
         var search = filter.Search?.Trim();
         if (!string.IsNullOrEmpty(search) && search.Length is < 2 or > 80)
             throw new ArgumentOutOfRangeException(nameof(filter), "Search must contain between 2 and 80 characters.");
-        return queries.Products(filter with { Search = string.IsNullOrEmpty(search) ? null : search }, ct);
+        return await queries.Products(filter with { Search = string.IsNullOrEmpty(search) ? null : search, CountryId = await countries.Resolve(country, ct) }, ct);
     }
-    public Task<ProductDetailDto?> Product(string slug, CancellationToken ct) => queries.Product(slug, ct);
-    public Task<IReadOnlyList<OfferDto>?> Offers(int productId, CancellationToken ct) => queries.Offers(productId, ct);
-    public Task<ShopDto?> Shop(string slug, CancellationToken ct) => queries.Shop(slug, ct);
-    public Task<IReadOnlyList<HomePartnerDto>> HomePartners(CancellationToken ct) => queries.HomePartners(ct);
+    public async Task<ProductDetailDto?> Product(string? country, string slug, CancellationToken ct) => await queries.Product(await countries.Resolve(country, ct), slug, ct);
+    public async Task<IReadOnlyList<OfferDto>?> Offers(string? country, int productId, CancellationToken ct) => await queries.Offers(await countries.Resolve(country, ct), productId, ct);
+    public async Task<ShopDto?> Shop(string? country, string slug, CancellationToken ct) => await queries.Shop(await countries.Resolve(country, ct), slug, ct);
+    public async Task<IReadOnlyList<HomePartnerDto>> HomePartners(string? country, CancellationToken ct) => await queries.HomePartners(await countries.Resolve(country, ct), ct);
 
-    public async Task<IReadOnlyList<ProductSuggestionDto>> Suggestions(string? query, int limit, CancellationToken ct)
+    public async Task<IReadOnlyList<ProductSuggestionDto>> Suggestions(string? country, string? query, int limit, CancellationToken ct)
     {
         var normalized = query?.Trim();
         if (string.IsNullOrEmpty(normalized) || normalized.Length is < 2 or > 80)
             throw new ArgumentException("Query must contain between 2 and 80 characters.", nameof(query));
         if (limit is < 1 or > 10) throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be between 1 and 10.");
-        return await queries.Suggestions(normalized, limit, ct);
+        return await queries.Suggestions(await countries.Resolve(country, ct), normalized, limit, ct);
     }
 }
 

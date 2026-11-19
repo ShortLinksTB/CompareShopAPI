@@ -23,7 +23,7 @@ public sealed class AuthSubjectMigrationTests(SqlServerTestFixture sqlServer)
         {
             await using (var db = new CompareShopDbContext(options))
             {
-                await db.Database.MigrateAsync();
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
                 db.Users.Add(User.ForAuthSubject(authSubject, DateTime.UtcNow));
                 await db.SaveChangesAsync();
 

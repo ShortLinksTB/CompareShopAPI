@@ -42,6 +42,22 @@ public sealed class LegacyCountrySeedMigrationTests(SqlServerTestFixture sqlServ
         await db.Database.MigrateAsync(RequiredCountryStage);
     }
 
+    [Fact]
+    public async Task Required_country_stage_fails_closed_for_other_unmapped_catalog_rows()
+    {
+        await using var db = await CreateDatabaseAsync();
+        await PrepareCountryStageAsync(db);
+        await db.Database.ExecuteSqlRawAsync("INSERT INTO [PartnerShops] ([Slug], [Name], [IsActive], [CountryId]) VALUES (N'unmapped-shop', N'Unmapped shop', 1, NULL)");
+        await db.Database.MigrateAsync(LegacyCountrySeedStage);
+
+        var exception = await Assert.ThrowsAsync<SqlException>(() => db.Database.MigrateAsync(RequiredCountryStage));
+
+        Assert.Contains("Country assignment is required", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, await db.Database.SqlQueryRaw<int>("SELECT COUNT(*) AS [Value] FROM [PartnerShops] WHERE [Slug]=N'unmapped-shop' AND [CountryId] IS NULL").SingleAsync());
+        var isNullable = await db.Database.SqlQueryRaw<bool>("SELECT is_nullable AS [Value] FROM sys.columns WHERE object_id=OBJECT_ID(N'dbo.PartnerShops') AND name=N'CountryId'").SingleAsync();
+        Assert.True(isNullable);
+    }
+
     [Theory]
     [InlineData("shop")]
     [InlineData("category")]

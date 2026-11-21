@@ -21,6 +21,7 @@ namespace CompareShopAPI.Infrastructure.Admin;
 public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : IAdminData, IAdminPermissionReader, IProductImageFileCatalog
 {
     public Task<bool> ActiveCountry(int id, CancellationToken ct) => db.Countries.AnyAsync(x => x.Id == id && x.IsActive, ct);
+    public Task<bool> CountryExists(int id, CancellationToken ct) => db.Countries.AnyAsync(x => x.Id == id, ct);
     public Task<bool> HasPermission(string subject, string permission, CancellationToken ct) => db.AdminUserRoles.AsNoTracking()
         .Join(db.Users.AsNoTracking(), ur => ur.UserId, user => user.Id, (ur, user) => new { ur.RoleId, user.KeycloakSubject })
         .Where(ur => ur.KeycloakSubject == subject)

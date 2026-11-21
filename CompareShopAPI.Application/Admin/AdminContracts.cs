@@ -221,7 +221,13 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     public async Task<Page<AdminCategory>> Categories(string? subject, int countryId, int page, int size, CancellationToken ct) { await Authorize(subject, AdminPermissions.CategoriesRead, ct); ValidatePage(page, size); await RequireActiveCountry(countryId, ct); return await data.Categories(countryId, page, size, ct); }
     public async Task<AdminCategory?> Category(string? subject, int id, CancellationToken ct) { await Authorize(subject, AdminPermissions.CategoriesRead, ct); return await data.Category(id, ct); }
     public Task<AdminCategory> CreateCategory(string? s, CategoryInput i, CancellationToken ct) => Write<AdminCategory>(s, AdminPermissions.CategoriesCreate, "create", "category", null, async t => { await RequireActiveCountry(i.CountryId, t); return (await data.SaveCategory(null, Validate(i), t), null, i); }, ct);
-    public Task<AdminCategory> UpdateCategory(string? s, int id, CategoryInput i, CancellationToken ct) => Write(s, AdminPermissions.CategoriesUpdate, "update", "category", id.ToString(), async t => { await RequireActiveCountry(i.CountryId, t); var before = await data.Category(id, t); return before is null ? (null, null, null) : (await data.SaveCategory(id, Validate(i), t), before, i); }, ct);
+    public Task<AdminCategory> UpdateCategory(string? s, int id, CategoryInput i, CancellationToken ct) => Write(s, AdminPermissions.CategoriesUpdate, "update", "category", id.ToString(), async t =>
+    {
+        var before = await data.Category(id, t);
+        if (before is null) return (null, null, null);
+        if (before.CountryId != i.CountryId) await RequireActiveCountry(i.CountryId, t);
+        return (await data.SaveCategory(id, Validate(i), t), before, i);
+    }, ct);
     public async Task DeleteCategory(string? s, int id, CancellationToken ct) { var actor = await Authorize(s, AdminPermissions.CategoriesDelete, ct); await data.ExecuteAudited<bool>(actor, "delete", "category", id.ToString(), async t => { var old = await data.Category(id, t); if (old is null || !await data.DeleteCategory(id, t)) throw new KeyNotFoundException(); return (true, old, null); }, ct); }
 
     public async Task<Page<AdminShop>> Shops(string? subject, int page, int size, CancellationToken ct) { await Authorize(subject, AdminPermissions.ShopsRead, ct); ValidatePage(page, size); return await data.Shops(page, size, ct); }

@@ -100,6 +100,7 @@ public sealed record AdminSetting(string Key, string Value);
 public sealed record PermissionsResponse(IReadOnlyList<string> Permissions);
 public sealed record Page<T>(IReadOnlyList<T> Items, int PageNumber, int PageSize, int TotalItems);
 public sealed record CategoryInput(string Slug, string Name, bool IsActive = true, int? ParentCategoryId = null, bool ClearParentCategory = false, int CountryId = 0);
+public sealed class CategorySlugConflictException(string slug) : Exception($"Category slug '{slug}' is already in use for this Country.") { public string Slug { get; } = slug; }
 public sealed record ShopInput(string Slug, string Name, string? WebsiteUrl, bool IsActive = true, bool? ShowOnHome = null, int CountryId = 0)
 {
     public OptionalNullableInt HomeDisplayOrder { get; init; }

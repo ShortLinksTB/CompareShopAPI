@@ -333,6 +333,56 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
     }
 
     [Fact]
+    public async Task CategorySlugConflictIsCorsReadableAndSlugCanBeReusedAcrossCountries()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"CategorySlugConflict_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var subject = $"category-conflict-{Guid.NewGuid():N}";
+        var slug = $"duplicate-category-{Guid.NewGuid():N}";
+        int vnCountryId;
+        int idCountryId;
+        try
+        {
+            await using (var db = new CompareShopDbContext(options))
+            {
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
+                vnCountryId = await db.Countries.Where(x => x.Code == "VN").Select(x => x.Id).SingleAsync();
+                idCountryId = await db.Countries.Where(x => x.Code == "ID").Select(x => x.Id).SingleAsync();
+                await AddUser(db, subject, 1);
+            }
+
+            const string allowedOrigin = "https://admin-compareshop-dev.giamha.online";
+            await using var app = new ApiFactory(settings: new()
+            {
+                ["ConnectionStrings:CompareShopDb"] = connection,
+                ["Cors:AllowedOrigins:0"] = allowedOrigin
+            }, signing: true);
+            using var client = app.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: subject));
+            client.DefaultRequestHeaders.Add("Origin", allowedOrigin);
+
+            var input = new { slug, name = "Duplicate category", countryId = vnCountryId };
+            Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/admin/categories", input)).StatusCode);
+            using var duplicate = await client.PostAsJsonAsync("/admin/categories", input);
+            Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+            Assert.Equal(allowedOrigin, duplicate.Headers.GetValues("Access-Control-Allow-Origin").Single());
+            using (var body = System.Text.Json.JsonDocument.Parse(await duplicate.Content.ReadAsStringAsync()))
+            {
+                Assert.Equal("category_slug_conflict", body.RootElement.GetProperty("code").GetString());
+                Assert.Equal(slug, body.RootElement.GetProperty("slug").GetString());
+            }
+
+            using var otherCountry = await client.PostAsJsonAsync("/admin/categories", new { slug, name = "Same slug in Indonesia", countryId = idCountryId });
+            Assert.Equal(HttpStatusCode.Created, otherCountry.StatusCode);
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task SuperAdminCatalogAndManagementOperationsPersistAndAudit()
     {
         var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"CompareShopAdminOps_{Guid.NewGuid():N}" }.ConnectionString;

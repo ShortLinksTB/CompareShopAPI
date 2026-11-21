@@ -61,6 +61,28 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
                 new CategoryInput("category-after-deactivation", "Must not persist", CountryId: otherInactiveCountryId));
             Assert.Equal(HttpStatusCode.BadRequest, changed.StatusCode);
 
+            using var missingCountry = await client.PutAsJsonAsync($"/admin/categories/{categoryId}",
+                new CategoryInput("category-after-deactivation", "Must not persist", CountryId: 0));
+            Assert.Equal(HttpStatusCode.BadRequest, missingCountry.StatusCode);
+
+            using var unknownCountry = await client.PutAsJsonAsync($"/admin/categories/{categoryId}",
+                new CategoryInput("category-after-deactivation", "Must not persist", CountryId: int.MaxValue));
+            Assert.Equal(HttpStatusCode.BadRequest, unknownCountry.StatusCode);
+
+            using var newlyAssignedInactive = await client.PostAsJsonAsync("/admin/categories",
+                new CategoryInput("new-inactive-country-category", "Must not be created", CountryId: otherInactiveCountryId));
+            Assert.Equal(HttpStatusCode.BadRequest, newlyAssignedInactive.StatusCode);
+
+            using var countryCategories = await client.GetAsync($"/admin/categories?page=1&pageSize=20&countryId={retainedCountryId}");
+            Assert.Equal(HttpStatusCode.OK, countryCategories.StatusCode);
+            var categoriesPage = await countryCategories.Content.ReadFromJsonAsync<Page<AdminCategory>>();
+            Assert.Contains(categoriesPage!.Items, item => item.Id == categoryId && item.CountryId == retainedCountryId);
+
+            using var unknownCountryCategories = await client.GetAsync("/admin/categories?page=1&pageSize=20&countryId=2147483647");
+            Assert.Equal(HttpStatusCode.BadRequest, unknownCountryCategories.StatusCode);
+            using var missingCountryCategories = await client.GetAsync("/admin/categories?page=1&pageSize=20&countryId=0");
+            Assert.Equal(HttpStatusCode.BadRequest, missingCountryCategories.StatusCode);
+
             await using var verify = new CompareShopDbContext(options);
             var persisted = await verify.Categories.SingleAsync(x => x.Id == categoryId);
             Assert.Equal(retainedCountryId, persisted.CountryId);

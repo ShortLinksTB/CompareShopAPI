@@ -121,6 +121,7 @@ public interface IAdminData
     Task<IReadOnlyList<string>> PermissionsForSubject(string subject, CancellationToken ct);
     Task<bool> BootstrapFirstAdmin(string subject, CancellationToken ct);
     Task<bool> ActiveCountry(int id, CancellationToken ct);
+    Task<bool> CountryExists(int id, CancellationToken ct);
     Task<Page<AdminCategory>> Categories(int countryId, int page, int pageSize, CancellationToken ct);
     Task<AdminCategory?> Category(int id, CancellationToken ct);
     Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct);
@@ -219,7 +220,7 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
         return await data.ExecuteAudited(actor, action, resource, id, work, ct);
     }
 
-    public async Task<Page<AdminCategory>> Categories(string? subject, int countryId, int page, int size, CancellationToken ct) { await Authorize(subject, AdminPermissions.CategoriesRead, ct); ValidatePage(page, size); await RequireActiveCountry(countryId, ct); return await data.Categories(countryId, page, size, ct); }
+    public async Task<Page<AdminCategory>> Categories(string? subject, int countryId, int page, int size, CancellationToken ct) { await Authorize(subject, AdminPermissions.CategoriesRead, ct); ValidatePage(page, size); await RequireExistingCountry(countryId, ct); return await data.Categories(countryId, page, size, ct); }
     public async Task<AdminCategory?> Category(string? subject, int id, CancellationToken ct) { await Authorize(subject, AdminPermissions.CategoriesRead, ct); return await data.Category(id, ct); }
     public Task<AdminCategory> CreateCategory(string? s, CategoryInput i, CancellationToken ct) => Write<AdminCategory>(s, AdminPermissions.CategoriesCreate, "create", "category", null, async t => { await RequireActiveCountry(i.CountryId, t); return (await data.SaveCategory(null, Validate(i), t), null, i); }, ct);
     public Task<AdminCategory> UpdateCategory(string? s, int id, CategoryInput i, CancellationToken ct) => Write(s, AdminPermissions.CategoriesUpdate, "update", "category", id.ToString(), async t =>
@@ -239,6 +240,10 @@ public sealed class AdminService(IAdminData data, IReadOnlySet<string>? bootstra
     private async Task RequireActiveCountry(int countryId, CancellationToken ct)
     {
         if (countryId <= 0 || !await data.ActiveCountry(countryId, ct)) throw new ArgumentException("An active CountryId is required.", "countryId");
+    }
+    private async Task RequireExistingCountry(int countryId, CancellationToken ct)
+    {
+        if (countryId <= 0 || !await data.CountryExists(countryId, ct)) throw new ArgumentException("CountryId must reference an existing Country.", "countryId");
     }
     public async Task DeleteShop(string? s, int id, CancellationToken ct) { var actor = await Authorize(s, AdminPermissions.ShopsDelete, ct); await data.ExecuteAudited<bool>(actor, "delete", "shop", id.ToString(), async t => { var old = await data.Shop(id, t); if (old is null || !await data.DeleteShop(id, t)) throw new KeyNotFoundException(); return (true, old, null); }, ct); }
 

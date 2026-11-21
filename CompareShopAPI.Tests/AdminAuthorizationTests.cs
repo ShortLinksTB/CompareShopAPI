@@ -57,9 +57,17 @@ public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
             Assert.Equal(retainedCountryId, updated!.CountryId);
             Assert.Equal("Updated while inactive", updated.Name);
 
+            using var inactiveCountryCategories = await client.GetAsync($"/admin/categories?page=1&pageSize=20&countryId={retainedCountryId}");
+            Assert.Equal(HttpStatusCode.OK, inactiveCountryCategories.StatusCode);
+            var categoryPage = await inactiveCountryCategories.Content.ReadFromJsonAsync<Page<AdminCategory>>();
+            Assert.Contains(categoryPage!.Items, item => item.Id == categoryId && item.CountryId == retainedCountryId);
+
             using var changed = await client.PutAsJsonAsync($"/admin/categories/{categoryId}",
                 new CategoryInput("category-after-deactivation", "Must not persist", CountryId: otherInactiveCountryId));
             Assert.Equal(HttpStatusCode.BadRequest, changed.StatusCode);
+
+            using var unknownCountryCategories = await client.GetAsync("/admin/categories?page=1&pageSize=20&countryId=999999");
+            Assert.Equal(HttpStatusCode.BadRequest, unknownCountryCategories.StatusCode);
 
             await using var verify = new CompareShopDbContext(options);
             var persisted = await verify.Categories.SingleAsync(x => x.Id == categoryId);

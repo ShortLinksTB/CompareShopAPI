@@ -18,6 +18,62 @@ namespace CompareShopAPI.Tests;
 public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
 {
     [Fact]
+    public async Task CategoryUpdateRetainsUnchangedInactiveCountryButRejectsChangedInactiveCountry()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"InactiveCategoryCountry_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var subject = $"inactive-category-{Guid.NewGuid():N}";
+        int categoryId;
+        int retainedCountryId;
+        int otherInactiveCountryId;
+        try
+        {
+            await using (var db = new CompareShopDbContext(options))
+            {
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
+                var retainedCountry = new Country("US", "United States");
+                var otherCountry = new Country("CA", "Canada");
+                db.Countries.AddRange(retainedCountry, otherCountry);
+                await db.SaveChangesAsync();
+                retainedCountryId = retainedCountry.Id;
+                otherInactiveCountryId = otherCountry.Id;
+                await AddUser(db, subject, 1);
+                var category = await new AdminService(new EfAdminData(db, TimeProvider.System))
+                    .CreateCategory(subject, new($"inactive-country-{Guid.NewGuid():N}", "Original", CountryId: retainedCountryId), default);
+                categoryId = category.Id;
+                retainedCountry.Update("US", "United States", false);
+                otherCountry.Update("CA", "Canada", false);
+                await db.SaveChangesAsync();
+            }
+
+            await using var app = new ApiFactory(settings: new() { ["ConnectionStrings:CompareShopDb"] = connection }, signing: true);
+            using var client = app.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: subject));
+
+            using var unchanged = await client.PutAsJsonAsync($"/admin/categories/{categoryId}",
+                new CategoryInput("category-after-deactivation", "Updated while inactive", CountryId: retainedCountryId));
+            Assert.Equal(HttpStatusCode.OK, unchanged.StatusCode);
+            var updated = await unchanged.Content.ReadFromJsonAsync<AdminCategory>();
+            Assert.Equal(retainedCountryId, updated!.CountryId);
+            Assert.Equal("Updated while inactive", updated.Name);
+
+            using var changed = await client.PutAsJsonAsync($"/admin/categories/{categoryId}",
+                new CategoryInput("category-after-deactivation", "Must not persist", CountryId: otherInactiveCountryId));
+            Assert.Equal(HttpStatusCode.BadRequest, changed.StatusCode);
+
+            await using var verify = new CompareShopDbContext(options);
+            var persisted = await verify.Categories.SingleAsync(x => x.Id == categoryId);
+            Assert.Equal(retainedCountryId, persisted.CountryId);
+            Assert.Equal("Updated while inactive", persisted.Name);
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task ProductSlugAvailabilityUsesCreatePermissionsCanonicalSlugAndPostSlug()
     {
         var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"SlugAvailability_{Guid.NewGuid():N}" }.ConnectionString;

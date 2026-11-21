@@ -85,7 +85,6 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         .SingleOrDefaultAsync(ct);
     public async Task<AdminCategory> SaveCategory(int? id, CategoryInput input, CancellationToken ct)
     {
-        if (!await db.Countries.AnyAsync(x => x.Id == input.CountryId && x.IsActive, ct)) throw new ArgumentException("Country must exist and be active.", nameof(input.CountryId));
         var legacyCategory = id.HasValue
             ? await (from category in db.Categories.AsNoTracking()
                      where category.Id == id.Value
@@ -94,6 +93,9 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
                      select new { CountryId = (int?)country.Id, category.ParentCategoryId }).SingleOrDefaultAsync(ct)
             : null;
         if (id.HasValue && legacyCategory is null) throw new KeyNotFoundException();
+        var retainingExistingCountry = legacyCategory?.CountryId == input.CountryId;
+        if (!await db.Countries.AnyAsync(x => x.Id == input.CountryId && (x.IsActive || retainingExistingCountry), ct))
+            throw new ArgumentException("Country must be active unless retaining the category's existing Country.", nameof(input.CountryId));
         if (legacyCategory is { CountryId: null })
         {
             var categoryId = id.GetValueOrDefault();

@@ -226,6 +226,7 @@ public static class AdminEndpoints
         catch (ProductImageFilesUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable); }
         catch (ProductImageValidationException ex) { return Results.ValidationProblem(new Dictionary<string, string[]> { ["images"] = [ex.Message] }, statusCode: StatusCodes.Status422UnprocessableEntity); }
         catch (AdminBootstrapCompletedException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+        catch (CategorySlugConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "category_slug_conflict" }); }
         catch (MatchingLaptopCategoryUnavailableException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "category_unavailable" }); }
         catch (MatchingProductSlugConflictException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict, extensions: new Dictionary<string, object?> { ["code"] = "slug_conflict", ["slug"] = ex.Slug }); }
         catch (KeyNotFoundException ex) { return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound); }

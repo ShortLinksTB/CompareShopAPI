@@ -145,8 +145,21 @@ public sealed class EfAdminData(CompareShopDbContext db, TimeProvider clock) : I
         item.ParentCategoryId = parentCategoryId;
         item.Level = parentCategoryId.HasValue ? (byte)2 : (byte)1;
         if (!id.HasValue) db.Categories.Add(item);
-        await db.SaveChangesAsync(ct); return new(item.Id, item.Slug, item.Name, item.IsActive, item.ParentCategoryId, item.CountryId, (await db.Countries.Where(x => x.Id == item.CountryId).Select(x => x.Code).SingleAsync(ct)), (await db.Countries.Where(x => x.Id == item.CountryId).Select(x => x.Name).SingleAsync(ct)));
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsCategorySlugConflict(ex))
+        {
+            throw new CategorySlugConflictException();
+        }
+
+        return new(item.Id, item.Slug, item.Name, item.IsActive, item.ParentCategoryId, item.CountryId, (await db.Countries.Where(x => x.Id == item.CountryId).Select(x => x.Code).SingleAsync(ct)), (await db.Countries.Where(x => x.Id == item.CountryId).Select(x => x.Name).SingleAsync(ct)));
     }
+
+    private static bool IsCategorySlugConflict(DbUpdateException exception) =>
+        exception.InnerException is SqlException { Number: 2601 or 2627 } sqlException &&
+        sqlException.Message.Contains("IX_Categories_CountryId_Slug", StringComparison.OrdinalIgnoreCase);
     public async Task<bool> DeleteCategory(int id, CancellationToken ct) { var rows = await db.Categories.Where(x => x.Id == id).ExecuteDeleteAsync(ct); return rows > 0; }
 
     public async Task<IReadOnlyList<CategoryImportStoredCategory>> CategoryImportSnapshot(CancellationToken ct)

@@ -7,6 +7,8 @@ using DomainRoleAssignment = CompareShopAPI.Domain.Admin.AdminRoleAssignment;
 
 namespace CompareShopAPI.Application.Admin;
 
+public sealed class CategorySlugConflictException() : Exception("A Category with this slug already exists in this Country.");
+
 public static class AdminPermissions
 {
     public const string ProductsRead = "products.read", ProductsCreate = "products.create", ProductsUpdate = "products.update", ProductsDelete = "products.delete";

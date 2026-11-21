@@ -18,6 +18,54 @@ namespace CompareShopAPI.Tests;
 public sealed class AdminAuthorizationTests(SqlServerTestFixture fixture)
 {
     [Fact]
+    public async Task DuplicateCategorySlugReturnsCorsReadableConflictAndCanBeReusedAcrossCountries()
+    {
+        var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"CategorySlugConflict_{Guid.NewGuid():N}" }.ConnectionString;
+        var options = new DbContextOptionsBuilder<CompareShopDbContext>().UseSqlServer(connection).Options;
+        var subject = $"category-slug-{Guid.NewGuid():N}";
+        const string slug = "country-scoped-duplicate";
+        int idCountryId;
+        try
+        {
+            await using (var db = new CompareShopDbContext(options))
+            {
+                await MigrationTestHelpers.MigrateToLatestAsync(db);
+                await AddUser(db, subject, 1);
+                idCountryId = await db.Countries.Where(country => country.Code == "ID").Select(country => country.Id).SingleAsync();
+            }
+
+            const string origin = "https://admin-compareshop-dev.giamha.online";
+            var settings = new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:CompareShopDb"] = connection,
+                ["Cors:AllowedOrigins:0"] = origin
+            };
+            await using var app = new ApiFactory(settings: settings, signing: true);
+            using var client = app.CreateClient();
+            client.DefaultRequestHeaders.Authorization = new("Bearer", ApiFactory.Token("{\"compareshop-admin-ui\":{\"roles\":[\"admin\"]}}", subject: subject));
+            client.DefaultRequestHeaders.Add("Origin", origin);
+
+            using var created = await client.PostAsJsonAsync("/admin/categories", new { slug, name = "Scoped category", isActive = true, countryId = CountryTestCompatibility.VnCountryId });
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+            using var duplicate = await client.PostAsJsonAsync("/admin/categories", new { slug, name = "Duplicate category", isActive = true, countryId = CountryTestCompatibility.VnCountryId });
+            Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+            Assert.Equal(origin, Assert.Single(duplicate.Headers.GetValues("Access-Control-Allow-Origin")));
+            using (var body = System.Text.Json.JsonDocument.Parse(await duplicate.Content.ReadAsStringAsync()))
+                Assert.Equal("category_slug_conflict", body.RootElement.GetProperty("code").GetString());
+
+            using var otherCountry = await client.PostAsJsonAsync("/admin/categories", new { slug, name = "Other market category", isActive = true, countryId = idCountryId });
+            Assert.Equal(HttpStatusCode.Created, otherCountry.StatusCode);
+            Assert.Equal(origin, Assert.Single(otherCountry.Headers.GetValues("Access-Control-Allow-Origin")));
+        }
+        finally
+        {
+            await using var cleanup = new CompareShopDbContext(options);
+            await cleanup.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task ProductSlugAvailabilityUsesCreatePermissionsCanonicalSlugAndPostSlug()
     {
         var connection = new SqlConnectionStringBuilder(fixture.ConnectionString) { InitialCatalog = $"SlugAvailability_{Guid.NewGuid():N}" }.ConnectionString;
